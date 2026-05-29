@@ -1,0 +1,30 @@
+# Build trees
+/build/
+build/
+
+# Generated C (throwaway artifacts — regenerate from the disc + recompiler)
+hotelmario/generated/*.c
+hotelmario/generated/*.h
+bios/generated/*.c
+bios/generated/*.h
+bios/generated/*.log
+
+# Disc images / ROMs (large, not ours to redistribute)
+*.bin
+*.cue
+*.iso
+*.rom
+
+# CeDImu oracle is a clone for now; convert to a submodule (MC-CDI-017).
+# Don't commit its working tree wholesale until then.
+/external/CeDImu/
+
+# Editor / OS noise
+*.obj
+*.o
+*.exe
+*.pdb
+.vs/
+.vscode/
+*.user
+Thumbs.db
