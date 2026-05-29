@@ -299,6 +299,17 @@ bool m68k_decode(const GenesisRom *rom, uint32_t addr, M68KInstr *out) {
             out->size     = M68K_SIZE_NONE;
             break;
         }
+        /* MOVEC Rc,Rn (0x4E7A) / MOVEC Rn,Rc (0x4E7B). Caught here so the
+         * NEG/NOT decode below (0x4Exx & 0xF700 == 0x4600) doesn't grab it
+         * as NOT.W (d16,PC). Consumes one extension word; the direction bit
+         * (words[0]&1), the A/D + Rn fields and the 12-bit control code all
+         * live in words[0]/words[1] for codegen — no EA decode needed. */
+        if (w0 == 0x4E7A || w0 == 0x4E7B) {
+            out->mnemonic = MN_MOVEC;
+            out->size     = M68K_SIZE_L;   /* MOVEC is always a long transfer */
+            out->words[out->word_count++] = fetch16(rom, &pc);
+            break;
+        }
         if (w0 == 0x4AFC) {
             /* Canonical 68K ILLEGAL — vector 4. Caught here so the rest
              * of group 4 doesn't try to match it as TAS or some other

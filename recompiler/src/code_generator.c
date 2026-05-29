@@ -1587,6 +1587,7 @@ static int estimate_cycles_prm(const M68KInstr *instr)
     case MN_MOVE_USP:  return 4;
     case MN_MOVE_SR:   return dst_is_reg ? 6 : (8 + ea_dst);
     case MN_MOVE_CCR:  return 12 + ea_src;
+    case MN_MOVEC:     return 12;          /* 68010 MOVEC: ~10-12 cycles */
     case MN_MOVEP:     return is_long ? 24 : 16;
 
     case MN_OTHER:
@@ -3104,6 +3105,32 @@ static void emit_instr(FILE *f, const GenesisRom *rom,
             fprintf(f, "  g_cpu.A[%d] = g_cpu.USP; /* MOVE USP,An */\n", areg);
         else
             fprintf(f, "  g_cpu.USP = g_cpu.A[%d]; /* MOVE An,USP */\n", areg);
+        break;
+    }
+
+    /* ------------------------------------------------------------------ */
+    case MN_MOVEC: {
+        /* MOVEC Rc,Rn / MOVEC Rn,Rc — privileged control-register move.
+         *   words[0]&1 : direction (0 = Rc->Rn read, 1 = Rn->Rc write)
+         *   ext bit15  : A/D (0 = Dn, 1 = An) for the general register
+         *   ext 14-12  : general register number Rn
+         *   ext 11-0   : 12-bit control-register code Cc
+         * The SCC68070 control-register set isn't modelled in the runtime
+         * yet (and CeDImu treats MOVEC as illegal), so the access routes to
+         * a runtime hook that owns the control-register state and fails loud
+         * with the exact code until that model lands. These sites are dead
+         * code on the SCC68070 (gated behind a CPU-type dispatch), so the
+         * hook is never expected to fire in practice. */
+        uint16_t ext = instr->words[1];
+        int dir   = instr->words[0] & 1;
+        int is_an = (ext >> 15) & 1;
+        int rn    = (ext >> 12) & 7;
+        unsigned cc = ext & 0x0FFFu;
+        const char *bank = is_an ? "A" : "D";
+        if (dir == 0)
+            fprintf(f, "  g_cpu.%s[%d] = m68k_movec_read(0x%03Xu);\n", bank, rn, cc);
+        else
+            fprintf(f, "  m68k_movec_write(0x%03Xu, g_cpu.%s[%d]);\n", cc, bank, rn);
         break;
     }
 
