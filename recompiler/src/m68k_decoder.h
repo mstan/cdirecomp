@@ -87,6 +87,12 @@ typedef enum {
     MN_MOVE_USP,
     MN_MOVE_SR,
     MN_MOVE_CCR,
+    /* MOVEC Rc,Rn / MOVEC Rn,Rc — 68010/SCC68070 privileged control-register
+     * move. Opcode word 0x4E7A (Rc->Rn) or 0x4E7B (Rn->Rc), followed by one
+     * extension word: A/D(15) | Rn(14-12) | Cc(11-0). Always a long transfer.
+     * The control-register *model* is runtime-owned (m68k_movec_read/write);
+     * the decoder only recovers the operands. */
+    MN_MOVEC,
     MN_EXG,
     MN_ADDX,
     MN_SUBX,

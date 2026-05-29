@@ -81,6 +81,22 @@ void m68k_illegal_trap(uint32_t pc, uint16_t opcode) {
     abort();
 }
 
+/* MOVEC control-register access. The SCC68070 control-register model is not
+ * built yet (TODO MC-CDI-006). Fail loud with the exact control code rather
+ * than fabricate a value — the ROM's MOVEC sites are CPU-type-gated cache
+ * control (CACR, code 0x002) that never executes on the SCC68070, so reaching
+ * here is a genuine surprise worth stopping on. */
+uint32_t m68k_movec_read(uint16_t cc) {
+    fprintf(stderr, "[movec] read of unmodelled control register 0x%03X at PC=$%08X (TODO MC-CDI-006)\n",
+            cc, g_cpu.PC);
+    abort();
+}
+void m68k_movec_write(uint16_t cc, uint32_t val) {
+    fprintf(stderr, "[movec] write 0x%08X to unmodelled control register 0x%03X at PC=$%08X (TODO MC-CDI-006)\n",
+            val, cc, g_cpu.PC);
+    abort();
+}
+
 /* ---- Interpreter fallbacks (not modelled yet) ---- */
 void hybrid_jmp_interpret(uint32_t target_pc) {
     fprintf(stderr, "[hybrid] JMP interpret @$%08X not implemented (TODO MC-CDI-011)\n", target_pc);

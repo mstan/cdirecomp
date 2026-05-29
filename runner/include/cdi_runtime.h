@@ -104,6 +104,14 @@ void genesis_stop_until_interrupt(uint16_t sr_imm); /* STOP #imm */
  * dispatcher routes vector 0x20 here; D0/D1 select F$/I$ service. */
 void cdrtos_syscall(void);
 
+/* MOVEC control-register access (68010/SCC68070). The runtime owns the
+ * SCC68070 control-register model; generated code passes the 12-bit control
+ * code (Cc) and the long value. Not modelled yet — these FAIL LOUD with the
+ * exact code/PC (the ROM's MOVEC sites are dead code on the SCC68070, gated
+ * behind a CPU-type dispatch, so they aren't expected to fire). */
+uint32_t m68k_movec_read (uint16_t cc);
+void     m68k_movec_write(uint16_t cc, uint32_t val);
+
 /* ====================================================================== */
 /*  Fiber yields / frame pacing                                           */
 /* ====================================================================== */
