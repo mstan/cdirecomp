@@ -1,0 +1,9 @@
+﻿Source: F:\Projects\segagenesisrecomp\SonicTheHedgehogRecomp\segagenesisrecomp
+Branch: dev
+Commit: 5aa0c4f (sonic3: add Sonic 3 (USA) standalone mode)
+Copied: recompiler/src/* (68000 frontend) + clownmdemu-core/libraries/{clown68000,clowncommon}
+Date:   2026-05-28
+Note:   Frontend copied VERBATIM to preserve provenance for the future shared-m68k-module
+        extraction. main_genesis.c kept as unmodified upstream reference; main_cdi.c is the
+        CD-i adaptation actually compiled. GenesisRom type retained as-is (rename deferred to
+        the shared-module extraction).

@@ -1,0 +1,3 @@
+[submodule "clowncommon"]
+	path = libraries/clowncommon
+	url = https://github.com/Clownacy/clowncommon
