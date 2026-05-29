@@ -22,6 +22,11 @@ static int s_rte_pending = 0;
 int *g_rte_pending_ptr = &s_rte_pending;
 int  g_early_return    = 0;
 
+/* Initial supervisor stack pointer, captured at boot (main.c). recomp_push_return
+ * clamps A7 back to this when the flat-call model lets the guest stack drift
+ * above its base (mirrors segagenesisrecomp's g_game_layout.initial_ssp). */
+uint32_t g_recomp_initial_ssp = 0;
+
 /* ---- Dispatch-miss monitor ---- */
 uint32_t g_miss_count_any = 0;
 uint32_t g_miss_last_addr = 0;
@@ -44,6 +49,17 @@ void genesis_log_dispatch_miss(uint32_t addr) {
 /* Default dispatch override: no hand-written handler. A specific OS/game module
  * may override this. Generated dispatch falls back to the miss logger. */
 int game_dispatch_override(uint32_t addr) { (void)addr; return 0; }
+
+/* JSR/BSR return-address push onto the guest supervisor stack. The flat-call
+ * model returns control via the C stack (RTS = C `return`), so this exists to
+ * keep the guest A7 frame consistent for code that inspects or pops the return
+ * address. Mirrors segagenesisrecomp glue.c. */
+void recomp_push_return(uint32_t ret_addr) {
+    if (g_recomp_initial_ssp && g_cpu.A[7] > g_recomp_initial_ssp)
+        g_cpu.A[7] = g_recomp_initial_ssp;
+    g_cpu.A[7] -= 4;
+    m68k_write32(g_cpu.A[7], ret_addr & 0xFFFFFFu);
+}
 
 /* ---- Runtime init ---- */
 void runtime_init(void) {

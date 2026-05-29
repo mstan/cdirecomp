@@ -85,6 +85,10 @@ void recomp_call_addr(uint32_t addr);
 void recomp_call_func(RecompFuncPtr fn);
 void recomp_push_return(uint32_t ret_addr);
 
+/* Initial supervisor stack pointer captured at boot; recomp_push_return clamps
+ * the guest A7 to this to bound flat-call-model drift. */
+extern uint32_t g_recomp_initial_ssp;
+
 /* Runtime-provided: logged when call_by_address finds no generated function. */
 void genesis_log_dispatch_miss(uint32_t addr);
 

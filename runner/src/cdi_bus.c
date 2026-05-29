@@ -21,6 +21,14 @@ uint8_t g_ram0[CDI_RAM0_SIZE];
 uint8_t g_ram1[CDI_RAM1_SIZE];
 uint8_t g_rom [CDI_ROM_SIZE];
 
+/* Load the CD-RTOS system ROM image into the ROM window ($400000..). The
+ * recompiled code reads PC-relative constants/tables straight out of ROM via
+ * m68k_read*, so the bytes must be present before execution starts. */
+void cdi_bus_load_rom(const uint8_t *src, uint32_t n) {
+    if (n > CDI_ROM_SIZE) n = CDI_ROM_SIZE;
+    memcpy(g_rom, src, n);
+}
+
 static void bus_fault(const char *op, uint32_t addr, int bits) {
     fprintf(stderr, "[bus] UNMAPPED %s%d @ $%08X (PC=$%08X) — region not modelled "
                     "(see TODO.md MC-CDI-004)\n", op, bits, addr, g_cpu.PC);
