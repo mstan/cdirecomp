@@ -136,9 +136,23 @@ void     mcd212_render_frame(uint32_t *framebuf);   /* 384x280 (PAL) ARGB8888 */
 void     cdic_write(uint32_t addr, uint32_t val, int size);
 uint32_t cdic_read (uint32_t addr, int size);
 
-/* SLAVE — i8051 MCU: pointer/controller input + front-panel. */
+/* IKAT — input/serial-gate MCU (Mono-2/3/4): pointer/controller input,
+ * front-panel, and the boot-time command/response gate (IKAT version, boot
+ * mode, video standard, disc status). "slave" naming is Mono-1/2 legacy. */
 void     slave_write(uint32_t addr, uint32_t val, int size);
 uint32_t slave_read (uint32_t addr, int size);
+void     slave_increment_frame(void);   /* fire 2-frame-delayed responses (pacing loop) */
+
+/* A CD-i device asserted a CPU interrupt at `level` (1-7). The interrupt
+ * DELIVERY model (vectoring into the recompiled CPU) is a later milestone;
+ * for now this records the pending request so polling boots proceed. */
+void     cdi_irq_raise(uint8_t level);
+extern uint32_t g_irq_pending;           /* bitmask of pending IRQ levels */
+
+/* SCC68070 on-chip peripherals ($80001001..$80008080): I2C, UART, timers,
+ * 2 DMA channels, MMU, peripheral interrupt-control registers. */
+void     periph_write(uint32_t addr, uint32_t val, int size);
+uint32_t periph_read (uint32_t addr, int size);
 
 /* ====================================================================== */
 /*  ABI globals the generator references (mirrors genesis_runtime.h)      */

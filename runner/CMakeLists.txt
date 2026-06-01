@@ -18,6 +18,7 @@ add_executable(CdiRuntime
     src/mcd212.c
     src/cdic.c
     src/slave.c
+    src/periph.c
     src/cdrtos.c
     src/debug_server.c
     ${BIOS_GEN_SRCS}

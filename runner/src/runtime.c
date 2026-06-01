@@ -27,6 +27,13 @@ int  g_early_return    = 0;
  * above its base (mirrors segagenesisrecomp's g_game_layout.initial_ssp). */
 uint32_t g_recomp_initial_ssp = 0;
 
+/* ---- Interrupt request state ----
+ * Devices assert IRQ lines here. Actual delivery (vectoring into the recompiled
+ * CPU between instructions) is a later milestone (MC-CDI-007/010); recording the
+ * pending request lets polling boots proceed without it. */
+uint32_t g_irq_pending = 0;
+void cdi_irq_raise(uint8_t level) { g_irq_pending |= (1u << level); }
+
 /* ---- Dispatch-miss monitor ---- */
 uint32_t g_miss_count_any = 0;
 uint32_t g_miss_last_addr = 0;
