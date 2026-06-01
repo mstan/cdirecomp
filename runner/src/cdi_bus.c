@@ -32,6 +32,13 @@ void cdi_bus_load_rom(const uint8_t *src, uint32_t n) {
 static void bus_fault(const char *op, uint32_t addr, int bits) {
     fprintf(stderr, "[bus] UNMAPPED %s%d @ $%08X (PC=$%08X) — region not modelled "
                     "(see TODO.md MC-CDI-004)\n", op, bits, addr, g_cpu.PC);
+    /* Fail loud WITH exact CPU state: which register holds the bad address tells
+     * a memory-sizing probe (computed/boundary address) apart from a divergence
+     * (a null/garbage pointer dereferenced), per DEBUG.md first-divergence. */
+    for (int i = 0; i < 8; i++)
+        fprintf(stderr, "      D%d=$%08X  A%d=$%08X\n", i, g_cpu.D[i], i, g_cpu.A[i]);
+    fprintf(stderr, "      SR=$%04X  USP=$%08X  irq_pending=$%08X\n",
+            g_cpu.SR, g_cpu.USP, g_irq_pending);
     abort();
 }
 
