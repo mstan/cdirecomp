@@ -404,6 +404,30 @@ void function_finder_run(const GenesisRom *rom, FunctionList *list, const GameCo
                 break;  /* JMP terminates the path either way */
             }
 
+            /* LEA/PEA (d16,PC) loading the address of a BRA/JMP trampoline.
+             * Boot code sets a handler pointer this way (`LEA (d,PC),An`) and
+             * later dispatches through it register-indirect (`JMP/JSR (An)`),
+             * which the static walk can't link across the intervening flow —
+             * it surfaces at runtime as a dispatch miss. Seed the trampoline so
+             * call_by_address resolves it (and the walk follows its BRA/JMP to
+             * the real handler). Strict guard: the target must itself decode as
+             * an unconditional control transfer with a static in-ROM
+             * destination, so data pointers (strings/tables) are not seeded. */
+            if ((instr.mnemonic == MN_LEA || instr.mnemonic == MN_PEA) &&
+                ((instr.src_ea >> 3) & 7) == 7 && (instr.src_ea & 7) == 2 &&
+                instr.word_count >= 2) {
+                int16_t d16  = (int16_t)instr.words[1];
+                uint32_t tgt = instr.addr + 2 + (int32_t)d16;
+                M68KInstr t;
+                if (tgt < rom->rom_size && m68k_decode(rom, tgt, &t) &&
+                    m68k_validate(&t, &vopts) == M68K_LEGAL &&
+                    (t.mnemonic == MN_BRA || t.mnemonic == MN_JMP) &&
+                    t.has_target &&
+                    !game_config_is_blacklisted(cfg, tgt)) {
+                    add_function(list, tgt);
+                }
+            }
+
             /* Terminator */
             if (m68k_is_terminator(&instr)) break;
 
