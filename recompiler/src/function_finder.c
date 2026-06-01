@@ -220,6 +220,10 @@ jt_enumerate_bra_ladder(const GenesisRom *rom, const GameConfig *cfg,
 }
 
 static void push_addr(uint32_t addr) {
+    /* No valid 68000 instruction starts at an odd address — a control-transfer
+     * target that is odd is an address error on hardware, not code. Never seed
+     * it (prevents decoding misaligned garbage from a JMP/branch to odd). */
+    if (addr & 1) return;
     if (addr >= FF_ADDR_SPACE || addr_seen[addr]) return;
     if (s_work_top >= WORK_STACK_SIZE) {
         fprintf(stderr, "function_finder: work stack overflow at $%06X\n", addr);
@@ -236,6 +240,7 @@ static const GameConfig *s_ff_cfg = NULL;
 
 static void add_function(FunctionList *list, uint32_t addr) {
     if (addr >= FF_ADDR_SPACE) return;
+    if (addr & 1) return;   /* odd address can't be a function/instruction start */
     /* Data-gate: when a code-address oracle is loaded, never register a target
      * the disasm assembles as DATA (or a mid-instruction address). Explicit
      * seeds — vectors and game.toml extras/discovery labels — are instruction
