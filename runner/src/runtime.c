@@ -91,13 +91,41 @@ void genesis_stop_until_interrupt(uint16_t sr_imm) {
     /* TODO MC-CDI-007: halt until an IRQ above the I-mask; yield to pacing. */
 }
 void m68k_trap_vector(uint8_t vec) {
-    if (vec == 0x20) {            /* TRAP #0 = OS-9 / CD-RTOS system-call gateway */
+    if (vec == 0x20) {            /* TRAP #0 = OS-9 gateway. TODO: route through the
+                                   * vector table to the recompiled kernel like every
+                                   * other vector and drop this HLE vestige. */
         cdrtos_syscall();
         return;
     }
-    fprintf(stderr, "[trap] unhandled vector 0x%02X at PC=$%08X (see TODO MC-CDI-010)\n",
-            vec, g_cpu.PC);
-    abort();
+
+    /* SCC68070 exception processing (faithful port of CeDImu ProcessException):
+     * enter supervisor, push the exception stack frame, then vector through the
+     * (RAM-resident) exception vector table the kernel built at boot. */
+    uint16_t sr = g_cpu.SR;
+    g_cpu.SR |= SR_S;
+
+    if (vec == 2 || vec == 3) {   /* bus error / address error → long (format $F) frame */
+        g_cpu.A[7] -= 2; m68k_write16(g_cpu.A[7], 0);            /* internal information */
+        g_cpu.A[7] -= 2; m68k_write16(g_cpu.A[7], 0);            /* IRC */
+        g_cpu.A[7] -= 2; m68k_write16(g_cpu.A[7], 0);            /* IR  */
+        g_cpu.A[7] -= 4; m68k_write32(g_cpu.A[7], 0);            /* DBIN */
+        g_cpu.A[7] -= 4; m68k_write32(g_cpu.A[7], g_cpu.PC);     /* TPF = faulting address */
+        g_cpu.A[7] -= 4; m68k_write32(g_cpu.A[7], 0);            /* TPD */
+        g_cpu.A[7] -= 2; m68k_write16(g_cpu.A[7], 0);            /* internal */
+        g_cpu.A[7] -= 2; m68k_write16(g_cpu.A[7], 0);            /* internal */
+        g_cpu.A[7] -= 2; m68k_write16(g_cpu.A[7], 0);            /* Current Move Multiple Mask */
+        g_cpu.A[7] -= 2; m68k_write16(g_cpu.A[7], 0);            /* Special Status Word */
+        g_cpu.A[7] -= 2; m68k_write16(g_cpu.A[7], (uint16_t)(0xF000u | ((uint16_t)vec << 2)));
+    } else {                      /* short (format 0) frame */
+        g_cpu.A[7] -= 2; m68k_write16(g_cpu.A[7], (uint16_t)((uint16_t)vec << 2));
+    }
+    g_cpu.A[7] -= 4; m68k_write32(g_cpu.A[7], g_cpu.PC);         /* push PC */
+    g_cpu.A[7] -= 2; m68k_write16(g_cpu.A[7], sr);              /* push SR */
+
+    uint32_t handler = m68k_read32((uint32_t)vec << 2);
+    g_cpu.PC = handler;
+    call_by_address(handler);     /* recompiled handler, or dispatch-miss → RAM-built stub
+                                   * needs the hybrid interpreter (MC-CDI-011) */
 }
 void m68k_illegal_trap(uint32_t pc, uint16_t opcode) {
     fprintf(stderr, "[trap] ILLEGAL/A-line/F-line opcode 0x%04X at PC=$%08X\n", opcode, pc);
