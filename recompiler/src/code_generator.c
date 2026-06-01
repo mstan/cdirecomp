@@ -3968,6 +3968,12 @@ bool codegen_emit(const GenesisRom *rom, const FunctionList *funcs,
             }
 
             fprintf(f_full, "  /* $%06X */\n", pc);
+            /* Keep the guest PC live at every instruction. The flat-call model
+             * doesn't need it for control flow, but fail-loud paths (bus faults,
+             * dispatch misses, traps) and first-divergence analysis are useless
+             * without an accurate PC — this one store per instruction is the
+             * foundation of the runtime's observability (DEBUG.md). */
+            fprintf(f_full, "  g_cpu.PC = 0x%06Xu;\n", pc);
             if (s_reverse_debug)
                 fprintf(f_full, "  rdb_on_insn(0x%06Xu);\n", pc);
             emit_instr(f_full, rom, &instr, &instrs, &skip_until_label, &has_sp_adjust,
