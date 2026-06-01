@@ -68,6 +68,7 @@ uint8_t m68k_read8(uint32_t addr) {
         case RGN_MCD212: return (uint8_t)mcd212_read(addr, 1);
         case RGN_CDIC:   return (uint8_t)cdic_read(addr, 1);
         case RGN_SLAVE:  return (uint8_t)slave_read(addr, 1);
+        case RGN_PERIPH: return (uint8_t)periph_read(addr, 1);
         default:         bus_fault("R", addr, 8); return 0;
     }
 }
@@ -80,6 +81,7 @@ uint16_t m68k_read16(uint32_t addr) {
         case RGN_MCD212: return (uint16_t)mcd212_read(addr, 2);
         case RGN_CDIC:   return (uint16_t)cdic_read(addr, 2);
         case RGN_SLAVE:  return (uint16_t)slave_read(addr, 2);
+        case RGN_PERIPH: return (uint16_t)periph_read(addr, 2);
         default:         bus_fault("R", addr, 16); return 0;
     }
 }
@@ -96,6 +98,7 @@ void m68k_write8(uint32_t addr, uint8_t val) {
         case RGN_MCD212: mcd212_write(addr, val, 1); return;
         case RGN_CDIC:   cdic_write(addr, val, 1);   return;
         case RGN_SLAVE:  slave_write(addr, val, 1);  return;
+        case RGN_PERIPH: periph_write(addr, val, 1); return;
         default:         bus_fault("W", addr, 8);    return;
     }
 }
@@ -107,6 +110,7 @@ void m68k_write16(uint32_t addr, uint16_t val) {
         case RGN_MCD212: mcd212_write(addr, val, 2); return;
         case RGN_CDIC:   cdic_write(addr, val, 2);   return;
         case RGN_SLAVE:  slave_write(addr, val, 2);  return;
+        case RGN_PERIPH: periph_write(addr, val, 2); return;
         default:         bus_fault("W", addr, 16);   return;
     }
 }
