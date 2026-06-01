@@ -1891,6 +1891,16 @@ static void emit_instr(FILE *f, const GenesisRom *rom,
         int ea   = instr->src_ea;
         int mode = (ea >> 3) & 7;
         int reg  = ea & 7;
+        if (instr->has_target && (instr->target_addr & 1)) {
+            /* Jump to an odd address is an address error (vector 3) on the
+             * 68000 — not code. CD-RTOS boot does this deliberately right after
+             * installing the exception vector table (func_400650 builds the
+             * vectors, then JMP (d16,PC) -> odd). Emit the faithful trap instead
+             * of decoding/executing the misaligned target. */
+            emit_cycle_accounting(f, "  ", estimate_cycles(instr));
+            fprintf(f, "  m68k_trap_vector(3u); return; /* JMP to odd addr -> address error */\n");
+            break;
+        }
         if (instr->has_target) {
             audit_record(instr->addr, func_addr, instr->target_addr,
                          JMPAUDIT_STATIC_TARGET, 0);
