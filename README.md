@@ -50,9 +50,16 @@ What already works and is verified on the real disc:
   per-level/scene `L0_s01_sub.o … L8_s15_sub.o` modules the game streams off
   the disc.
 - **Runtime substrate** (`runner/`): SCC68070 memory map (grounded in CeDImu's
-  Mono2 bus), MMIO routing, OS-9 `TRAP #0` gateway, dispatch-miss accounting,
-  always-on frame ring buffer. Builds clean as `CdiRuntime`. Everything not yet
-  modelled **fails loud** (no silent stubs).
+  Mono2 bus), MMIO routing, OS-9 `TRAP #0` gateway, SCC68070 exception model,
+  dispatch-miss accounting. Builds clean as `CdiRuntime`. Everything not yet
+  modelled **fails loud** (no silent stubs). Booting `cdi490a.rom` runs ~43k
+  recompiled instructions before reaching a RAM-resident stub (dispatch miss at
+  `$050A`, the hybrid-interpreter milestone MC-CDI-011).
+- **Observability** (`runner/src/debug_server.c`, `tools/`): always-on block-
+  trace ring (262144 blocks: PC + full register file) + frame ring, a fault
+  trail dumped on every abort, and a threaded TCP debug server (127.0.0.1:4380)
+  answering `ping/status/get_registers/read_mem/trace/dispatch_miss_info`.
+  Clients: `tools/cdi_debug.py`, `tools/check_dispatch_misses.py` (RULE 0a).
 - **Oracle**: CeDImu (open-source C++ CD-i emulator) cloned into
   `external/CeDImu` — has its own `SCC68070`, `MCD212`, `OS9`, and `HLE`
   implementations we use as the reference + future in-process oracle.

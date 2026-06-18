@@ -10,14 +10,15 @@
  */
 #define _CRT_SECURE_NO_WARNINGS
 #include "cdi_runtime.h"
+#include "debug_server.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-/* runtime-internal debug surface (debug_server.c) */
-void debug_server_init(int port);
-void debug_server_poll(void);
-void debug_ring_capture_frame(void);
+#ifdef _WIN32
+  #include <windows.h>
+#else
+  #include <time.h>
+#endif
 
 /* bus ROM loader (cdi_bus.c) */
 void cdi_bus_load_rom(const uint8_t *src, uint32_t n);
@@ -30,16 +31,20 @@ static uint32_t be32(const uint8_t *p) {
 int main(int argc, char *argv[]) {
     const char *rom_path = NULL;
     int port = 4380;   /* native; oracle (CeDImu) on +1 — see TCP.md */
+    int hold = 0;      /* keep the rings queryable after the run ends */
 
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--port") && i + 1 < argc) port = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--hold")) hold = 1;
         else if (argv[i][0] != '-') rom_path = argv[i];
     }
 
     printf("CdiRuntime — Philips CD-i (SCC68070) static-recomp runtime\n");
     if (!rom_path) {
-        fprintf(stderr, "usage: CdiRuntime <cdrtos.rom> [--port N]\n"
-                        "  boots the recompiled CD-RTOS system ROM.\n");
+        fprintf(stderr, "usage: CdiRuntime <cdrtos.rom> [--port N] [--hold]\n"
+                        "  boots the recompiled CD-RTOS system ROM.\n"
+                        "  --hold: keep the process (and the debug rings) alive after\n"
+                        "          the run for post-mortem TCP inspection.\n");
         return 1;
     }
 
@@ -90,5 +95,20 @@ int main(int argc, char *argv[]) {
     printf("[cdi] reset entry returned after %llu instructions "
            "(no abort) — unexpected; investigate.\n",
            (unsigned long long)g_native_insn_count);
+    if (g_miss_count_any)
+        printf("[cdi] %u dispatch miss(es); last at $%08X — RULE 0a: resolve "
+               "before other debugging.\n", g_miss_count_any, g_miss_last_addr);
+
+    if (hold) {
+        printf("[cdi] --hold: rings live on :%d for inspection. Ctrl-C to exit.\n", port);
+        fflush(stdout);
+        for (;;) {
+#ifdef _WIN32
+            Sleep(1000);
+#else
+            struct timespec ts = { 1, 0 }; nanosleep(&ts, NULL);
+#endif
+        }
+    }
     return 0;
 }

@@ -1,51 +1,324 @@
 /*
- * debug_server.c — always-on ring buffer + TCP debug surface (skeleton).
+ * debug_server.c — always-on ring buffers + threaded TCP debug surface.
  *
- * The recompiler discipline mandates an always-on ring buffer that captures
- * every relevant event continuously, queried after the fact — never an
- * arm-trace-then-run probe. This file owns that ring and the TCP command
- * server that exposes it. Native build listens on 4380, oracle (CeDImu) on
- * 4381 (native even? — we follow the +1 convention; see TCP.md).
+ * The recompiler discipline (and the project's global rules) mandate ALWAYS-ON
+ * ring buffers that record every relevant event continuously, queried after the
+ * fact — never an arm-trace-then-run probe. This file owns:
  *
- * Skeleton: the frame ring buffer storage + API exist; the socket server and
- * the bulk of commands are TODO MC-CDI-015. State that clearly rather than
- * pretending coverage we don't have.
+ *   - the block-trace ring : every executed block's {PC, full register file},
+ *     captured from the per-block hook (glue_check_vblank). This is the trail
+ *     that turns "it aborted at $FFFFFFFC" into "here are the 256 blocks that
+ *     led there." Dumped on any fault (debug_dump_fault_trail).
+ *   - the frame ring       : a per-frame snapshot (grows as the runtime grows).
+ *   - a threaded TCP server : answers queries from the rings + live CPU state
+ *     while the main thread runs. Native build listens on 4380, oracle on 4381
+ *     (+1 convention; see TCP.md).
+ *
+ * Wire protocol: one command per line, '\n'-terminated. JSON object preferred
+ * ({"cmd":"read_mem","addr":1024,"len":64}); a bare token (ping) is accepted for
+ * the simplest commands. One single-line JSON response per request.
  */
 #include "cdi_runtime.h"
+#include "debug_server.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
-#define CDI_FRAME_RING_LEN 36000   /* ~10 min @ 60 Hz, matching the NES/Genesis surface */
+#ifdef _WIN32
+  #include <winsock2.h>
+  #include <ws2tcpip.h>
+  #include <windows.h>
+  typedef SOCKET sock_t;
+  #define BAD_SOCK INVALID_SOCKET
+  #define close_sock closesocket
+#else
+  #include <sys/socket.h>
+  #include <netinet/in.h>
+  #include <arpa/inet.h>
+  #include <unistd.h>
+  #include <pthread.h>
+  typedef int sock_t;
+  #define BAD_SOCK (-1)
+  #define close_sock close
+#endif
+
+/* ====================================================================== */
+/*  Frame ring (per-frame snapshot)                                       */
+/* ====================================================================== */
+#define CDI_FRAME_RING_LEN 36000   /* ~10 min @ 60 Hz, matching NES/Genesis */
 
 typedef struct {
-    uint64_t frame;
+    uint64_t  frame;
     M68KState cpu;
-    /* TODO MC-CDI-015: MCD212 plane/region regs, CDIC state, SLAVE input,
+    /* TODO MC-CDI-015: MCD212 plane/region regs, CDIC state, IKAT input,
      * a WRAM snapshot, last recomp function name. */
 } CdiFrameRecord;
 
-static CdiFrameRecord s_ring[CDI_FRAME_RING_LEN];
-static uint32_t s_write_idx = 0;
-static int s_started = 0;
+static CdiFrameRecord s_frame_ring[CDI_FRAME_RING_LEN];
+static uint32_t s_frame_widx = 0;
 
-/* Record one frame snapshot into the ring (called once per frame by main loop). */
 void debug_ring_capture_frame(void) {
-    CdiFrameRecord *r = &s_ring[s_write_idx % CDI_FRAME_RING_LEN];
+    CdiFrameRecord *r = &s_frame_ring[s_frame_widx % CDI_FRAME_RING_LEN];
     r->frame = g_frame_count;
     r->cpu   = g_cpu;
-    s_write_idx++;
+    s_frame_widx++;
 }
 
-/* Start the TCP command server on `port`. */
+/* ====================================================================== */
+/*  Block-trace ring (every executed block: PC + full register file)      */
+/* ====================================================================== */
+#define CDI_TRACE_RING_LEN (1u << 18)   /* 262144 blocks (~20 MB) */
+#define CDI_TRACE_MASK     (CDI_TRACE_RING_LEN - 1u)
+
+typedef struct {
+    uint64_t  seq;     /* monotonic block index since boot */
+    M68KState cpu;     /* full register file AT block entry (PC live) */
+} CdiTraceRecord;
+
+static CdiTraceRecord s_trace_ring[CDI_TRACE_RING_LEN];
+static uint64_t       s_trace_seq = 0;   /* number of blocks captured */
+
+/* Hot path: one per executed block. Kept to a single struct copy. */
+void debug_trace_block(void) {
+    CdiTraceRecord *r = &s_trace_ring[s_trace_seq & CDI_TRACE_MASK];
+    r->seq = s_trace_seq;
+    r->cpu = g_cpu;
+    s_trace_seq++;
+}
+
+/* Snapshot the most recent `count` trace records (oldest-first) into `out`.
+ * Returns the number filled. Reads are racy vs the running main thread but a
+ * snapshot is all a debugger needs. */
+static int trace_tail(CdiTraceRecord *out, int count) {
+    uint64_t total = s_trace_seq;
+    if (count > CDI_TRACE_RING_LEN) count = CDI_TRACE_RING_LEN;
+    if ((uint64_t)count > total) count = (int)total;
+    uint64_t start = total - (uint64_t)count;
+    for (int i = 0; i < count; i++)
+        out[i] = s_trace_ring[(start + (uint64_t)i) & CDI_TRACE_MASK];
+    return count;
+}
+
+/* ---- fault trail: dump the executed path into an abort ---- */
+void debug_dump_fault_trail(const char *reason) {
+    enum { N = 24 };
+    static CdiTraceRecord tail[N];     /* static: avoid stack use during a fault */
+    int n = trace_tail(tail, N);
+    fprintf(stderr, "\n[fault-trail] %s — last %d executed blocks "
+                    "(of %llu total):\n", reason ? reason : "fault", n,
+            (unsigned long long)s_trace_seq);
+    for (int i = 0; i < n; i++) {
+        const M68KState *c = &tail[i].cpu;
+        fprintf(stderr, "  #%llu  PC=$%08X  SR=$%04X  D0=$%08X A0=$%08X A6=$%08X A7=$%08X\n",
+                (unsigned long long)tail[i].seq, c->PC, c->SR,
+                c->D[0], c->A[0], c->A[6], c->A[7]);
+    }
+    fflush(stderr);
+}
+
+/* ====================================================================== */
+/*  Side-effect-free memory peek (defined in cdi_bus.c)                    */
+/* ====================================================================== */
+int debug_peek8(uint32_t addr, uint8_t *out);   /* 1 = readable, 0 = MMIO/unmapped */
+
+/* ====================================================================== */
+/*  Tiny JSON-ish request parsing                                         */
+/* ====================================================================== */
+/* Extract the string value of "key":"value" into buf. Returns 1 on success. */
+static int json_str(const char *s, const char *key, char *buf, int buflen) {
+    char pat[32];
+    snprintf(pat, sizeof pat, "\"%s\"", key);
+    const char *p = strstr(s, pat);
+    if (!p) return 0;
+    p = strchr(p + strlen(pat), ':');
+    if (!p) return 0;
+    p++;
+    while (*p == ' ' || *p == '\t') p++;
+    if (*p != '"') return 0;
+    p++;
+    int i = 0;
+    while (*p && *p != '"' && i < buflen - 1) buf[i++] = *p++;
+    buf[i] = 0;
+    return 1;
+}
+/* Extract the integer value of "key":N (decimal or 0x hex). Returns 1 on hit. */
+static int json_int(const char *s, const char *key, uint64_t *out) {
+    char pat[32];
+    snprintf(pat, sizeof pat, "\"%s\"", key);
+    const char *p = strstr(s, pat);
+    if (!p) return 0;
+    p = strchr(p + strlen(pat), ':');
+    if (!p) return 0;
+    p++;
+    while (*p == ' ' || *p == '\t') p++;
+    *out = (uint64_t)strtoull(p, NULL, 0);
+    return 1;
+}
+/* Resolve the command token: JSON "cmd":"x", else the first bare word. */
+static void parse_cmd(const char *line, char *cmd, int cmdlen) {
+    if (json_str(line, "cmd", cmd, cmdlen)) return;
+    int i = 0;
+    const char *p = line;
+    while (*p == ' ' || *p == '\t') p++;
+    while (*p && *p != ' ' && *p != '\t' && *p != '\r' && *p != '\n' && i < cmdlen - 1)
+        cmd[i++] = *p++;
+    cmd[i] = 0;
+}
+
+/* ====================================================================== */
+/*  Command handlers — write a single-line JSON response into `out`        */
+/* ====================================================================== */
+static void resp_registers(char *out, int outlen) {
+    int n = snprintf(out, outlen, "{\"ok\":true,\"pc\":%u,\"sr\":%u,\"usp\":%u",
+                     g_cpu.PC, g_cpu.SR, g_cpu.USP);
+    for (int i = 0; i < 8 && n < outlen; i++)
+        n += snprintf(out + n, outlen - n, ",\"d%d\":%u", i, g_cpu.D[i]);
+    for (int i = 0; i < 8 && n < outlen; i++)
+        n += snprintf(out + n, outlen - n, ",\"a%d\":%u", i, g_cpu.A[i]);
+    snprintf(out + n, outlen - n, "}");
+}
+
+static void resp_status(char *out, int outlen) {
+    snprintf(out, outlen,
+        "{\"ok\":true,\"insns\":%llu,\"blocks\":%llu,\"frame\":%llu,\"pc\":%u,"
+        "\"miss_count\":%u,\"miss_last\":%u,\"irq_pending\":%u}",
+        (unsigned long long)g_native_insn_count, (unsigned long long)s_trace_seq,
+        (unsigned long long)g_frame_count, g_cpu.PC,
+        g_miss_count_any, g_miss_last_addr, g_irq_pending);
+}
+
+static void resp_miss(char *out, int outlen) {
+    int n = snprintf(out, outlen,
+        "{\"ok\":true,\"count\":%u,\"last_addr\":%u,\"last_frame\":%llu,\"unique\":[",
+        g_miss_count_any, g_miss_last_addr, (unsigned long long)g_miss_last_frame);
+    for (int i = 0; i < g_miss_unique_count && n < outlen; i++)
+        n += snprintf(out + n, outlen - n, "%s%u", i ? "," : "", g_miss_unique_addrs[i]);
+    snprintf(out + n, outlen - n, "]}");
+}
+
+static void resp_read_mem(const char *line, char *out, int outlen) {
+    uint64_t addr = 0, len = 16;
+    if (!json_int(line, "addr", &addr)) { snprintf(out, outlen, "{\"ok\":false,\"error\":\"addr required\"}"); return; }
+    json_int(line, "len", &len);
+    if (len > 4096) len = 4096;
+    int n = snprintf(out, outlen, "{\"ok\":true,\"addr\":%u,\"bytes\":\"", (uint32_t)addr);
+    for (uint64_t i = 0; i < len && n < outlen - 4; i++) {
+        uint8_t b;
+        if (debug_peek8((uint32_t)(addr + i), &b)) n += snprintf(out + n, outlen - n, "%02X", b);
+        else                                       n += snprintf(out + n, outlen - n, "--");
+    }
+    snprintf(out + n, outlen - n, "\"}");
+}
+
+static void resp_trace(const char *line, char *out, int outlen) {
+    uint64_t count = 16;
+    json_int(line, "count", &count);
+    if (count > 256) count = 256;
+    static CdiTraceRecord tail[256];
+    int got = trace_tail(tail, (int)count);
+    int n = snprintf(out, outlen, "{\"ok\":true,\"total\":%llu,\"records\":[",
+                     (unsigned long long)s_trace_seq);
+    for (int i = 0; i < got && n < outlen - 64; i++) {
+        const M68KState *c = &tail[i].cpu;
+        n += snprintf(out + n, outlen - n,
+            "%s{\"seq\":%llu,\"pc\":%u,\"sr\":%u,\"a7\":%u}",
+            i ? "," : "", (unsigned long long)tail[i].seq, c->PC, c->SR, c->A[7]);
+    }
+    snprintf(out + n, outlen - n, "]}");
+}
+
+/* Returns 1 to keep the connection open, 0 to close it (quit). */
+static int handle_line(const char *line, char *out, int outlen) {
+    char cmd[32];
+    parse_cmd(line, cmd, sizeof cmd);
+
+    if (!strcmp(cmd, "ping"))               snprintf(out, outlen, "{\"ok\":true,\"pong\":true}");
+    else if (!strcmp(cmd, "status"))        resp_status(out, outlen);
+    else if (!strcmp(cmd, "get_registers")) resp_registers(out, outlen);
+    else if (!strcmp(cmd, "read_mem"))      resp_read_mem(line, out, outlen);
+    else if (!strcmp(cmd, "trace"))         resp_trace(line, out, outlen);
+    else if (!strcmp(cmd, "dispatch_miss_info")) resp_miss(out, outlen);
+    else if (!strcmp(cmd, "quit"))        { snprintf(out, outlen, "{\"ok\":true,\"bye\":true}"); return 0; }
+    else snprintf(out, outlen, "{\"ok\":false,\"error\":\"unknown cmd '%s'\"}", cmd);
+    return 1;
+}
+
+/* ====================================================================== */
+/*  Threaded TCP server                                                   */
+/* ====================================================================== */
+static int s_port = 0;
+
+static void serve_client(sock_t cs) {
+    char in[2048];
+    char out[8192];
+    int inlen = 0;
+    for (;;) {
+        char ch;
+        int r = (int)recv(cs, &ch, 1, 0);
+        if (r <= 0) break;
+        if (ch == '\n') {
+            in[inlen] = 0;
+            int keep = handle_line(in, out, (int)sizeof out);
+            int olen = (int)strlen(out);
+            out[olen++] = '\n';
+            send(cs, out, olen, 0);
+            inlen = 0;
+            if (!keep) break;
+        } else if (ch != '\r' && inlen < (int)sizeof in - 1) {
+            in[inlen++] = ch;
+        }
+    }
+    close_sock(cs);
+}
+
+static void server_loop(void) {
+    sock_t ls = socket(AF_INET, SOCK_STREAM, 0);
+    if (ls == BAD_SOCK) { fprintf(stderr, "[dbg] socket() failed\n"); return; }
+    int yes = 1;
+    setsockopt(ls, SOL_SOCKET, SO_REUSEADDR, (const char *)&yes, sizeof yes);
+    struct sockaddr_in a;
+    memset(&a, 0, sizeof a);
+    a.sin_family = AF_INET;
+    a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    a.sin_port = htons((unsigned short)s_port);
+    if (bind(ls, (struct sockaddr *)&a, sizeof a) != 0) {
+        fprintf(stderr, "[dbg] bind(:%d) failed — debug server off\n", s_port);
+        close_sock(ls); return;
+    }
+    listen(ls, 1);
+    fprintf(stderr, "[dbg] TCP debug server live on 127.0.0.1:%d "
+                    "(ping/status/get_registers/read_mem/trace/dispatch_miss_info)\n", s_port);
+    for (;;) {
+        sock_t cs = accept(ls, NULL, NULL);
+        if (cs == BAD_SOCK) break;
+        serve_client(cs);   /* one client at a time, per TCP.md */
+    }
+    close_sock(ls);
+}
+
+#ifdef _WIN32
+static DWORD WINAPI server_thread(LPVOID arg) { (void)arg; server_loop(); return 0; }
+#else
+static void *server_thread(void *arg) { (void)arg; server_loop(); return NULL; }
+#endif
+
 void debug_server_init(int port) {
-    s_started = 1;
-    fprintf(stderr, "[dbg] ring buffer armed (%d frames). TCP server on :%d is "
-                    "TODO MC-CDI-015 (command surface specified in TCP.md).\n",
-            CDI_FRAME_RING_LEN, port);
+    s_port = port;
+#ifdef _WIN32
+    WSADATA wsa;
+    if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
+        fprintf(stderr, "[dbg] WSAStartup failed — debug server off\n");
+        return;
+    }
+    HANDLE h = CreateThread(NULL, 0, server_thread, NULL, 0, NULL);
+    if (h) CloseHandle(h);
+#else
+    pthread_t t;
+    pthread_create(&t, NULL, server_thread, NULL);
+    pthread_detach(t);
+#endif
+    fprintf(stderr, "[dbg] rings armed: trace=%u blocks, frame=%u frames\n",
+            CDI_TRACE_RING_LEN, CDI_FRAME_RING_LEN);
 }
 
-void debug_server_poll(void) {
-    if (!s_started) return;
-    /* TODO MC-CDI-015: accept one client, parse line/JSON commands, answer
-     * from the ring buffer. */
-}
+void debug_server_poll(void) { /* threaded now — nothing to poll */ }
