@@ -22,6 +22,14 @@ uint8_t g_ram0[CDI_RAM0_SIZE];
 uint8_t g_ram1[CDI_RAM1_SIZE];
 uint8_t g_rom [CDI_ROM_SIZE];
 
+/* Last operand effective address accessed (CeDImu SCC68070::lastAddress). The
+ * bus/address-error frame stacks this as TPF — for an ADDRESS error it is NOT
+ * the faulting (odd) target but the last DATA EA touched before it (CeDImu's
+ * GetWord/SetWord throw AddressError without updating lastAddress), which the
+ * static recompiler cannot know. Set on every operand access; long accesses
+ * collapse to the base EA to match CeDImu's once-per-operand GetEffectiveAddress. */
+uint32_t g_last_access_addr = 0;
+
 /* Load the CD-RTOS system ROM image into the ROM window ($400000..). The
  * recompiled code reads PC-relative constants/tables straight out of ROM via
  * m68k_read*, so the bytes must be present before execution starts. */
@@ -82,6 +90,7 @@ static BusRegion classify(uint32_t a) {
 
 /* ---- reads (big-endian) ---- */
 uint8_t m68k_read8(uint32_t addr) {
+    g_last_access_addr = addr;
     uint8_t *p = ram_ptr(addr);
     if (p) return *p;
     switch (classify(addr)) {
@@ -94,6 +103,7 @@ uint8_t m68k_read8(uint32_t addr) {
     }
 }
 uint16_t m68k_read16(uint32_t addr) {
+    g_last_access_addr = addr;
     uint8_t *p = ram_ptr(addr);
     if (p) return (uint16_t)((p[0] << 8) | p[1]);
     switch (classify(addr)) {
@@ -107,11 +117,14 @@ uint16_t m68k_read16(uint32_t addr) {
     }
 }
 uint32_t m68k_read32(uint32_t addr) {
-    return ((uint32_t)m68k_read16(addr) << 16) | m68k_read16(addr + 2);
+    uint32_t v = ((uint32_t)m68k_read16(addr) << 16) | m68k_read16(addr + 2);
+    g_last_access_addr = addr;   /* operand-base EA, not the +2 of the low word */
+    return v;
 }
 
 /* ---- writes (big-endian) ---- */
 void m68k_write8(uint32_t addr, uint8_t val) {
+    g_last_access_addr = addr;
     uint8_t *p = ram_ptr(addr);
     if (p) { *p = val; return; }
     switch (classify(addr)) {
@@ -124,6 +137,7 @@ void m68k_write8(uint32_t addr, uint8_t val) {
     }
 }
 void m68k_write16(uint32_t addr, uint16_t val) {
+    g_last_access_addr = addr;
     uint8_t *p = ram_ptr(addr);
     if (p) { p[0] = (uint8_t)(val >> 8); p[1] = (uint8_t)val; return; }
     switch (classify(addr)) {
@@ -138,6 +152,7 @@ void m68k_write16(uint32_t addr, uint16_t val) {
 void m68k_write32(uint32_t addr, uint32_t val) {
     m68k_write16(addr,     (uint16_t)(val >> 16));
     m68k_write16(addr + 2, (uint16_t)val);
+    g_last_access_addr = addr;   /* operand-base EA, not the +2 of the low word */
 }
 
 /* Side-effect-free read for the debug surface: RAM and ROM only. MMIO and

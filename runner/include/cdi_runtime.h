@@ -124,6 +124,12 @@ extern uint16_t g_fault_opcode;
  * error it is the odd target. Distinct from the stacked PC (which is the
  * instruction's post-fetch PC). */
 extern uint32_t g_fault_addr;
+/* Last operand effective address accessed (CeDImu SCC68070::lastAddress). The
+ * bus/address-error long frame stacks this as TPF. Set by every m68k_read/write
+ * in cdi_bus.c; captured at exception entry (build_exception_frame) before our
+ * own frame pushes overwrite it. For an ADDRESS error this is the last data EA
+ * before the faulting odd jump (e.g. $000510), NOT the odd target. */
+extern uint32_t g_last_access_addr;
 /* Bus-error hook (cdi_bus.c -> interpreter). When the interpreter is executing
  * an instruction and a memory access lands on an unmapped address, the access
  * routes here. If the interpreter has armed its mid-instruction unwind, this
