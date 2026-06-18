@@ -60,11 +60,25 @@ Reverse-debugger tiers (per-store / per-block / per-call attribution,
 breakpoints, watchpoints, RAM reconstruction) follow the nesrecomp/Genesis
 `rdb_*` design once the basic surface is up.
 
-## Oracle commands (CeDImu)
+## Oracle (CeDImu) — live
 
-The oracle exposes the same ring + query commands plus emulator-internal probes
-(`emu_cpu_regs`, `emu_mcd212_state`, `emu_screenshot`, `framebuf_diff`) so
-native-vs-oracle diffing is symmetric.
+`oracle/cdi_oracle.cpp` links the wxWidgets-free CeDImu core and serves the SAME
+surface on **:4381**: `ping status get_registers read_mem trace
+dispatch_miss_info quit` (status carries `"oracle":true`; `dispatch_miss_info` is
+always 0 — an interpreter never misses). Both sides capture one trace entry per
+executed instruction, so the PC streams are index-alignable and
+`tools/first_divergence.py` pages both from seq 0 to find the first mismatch.
+Emulator-internal probes (`emu_mcd212_state`, `emu_screenshot`, `framebuf_diff`)
+are added as the device models come up.
+
+Build (needs the mingw64 cmake — the devkitPro cmake on PATH mangles Windows
+paths; see docs/ARCHITECTURE.md):
+
+```
+C:/msys64/mingw64/bin/cmake.exe -S oracle -B build/oracle -G Ninja -DCMAKE_BUILD_TYPE=Release
+C:/msys64/mingw64/bin/cmake.exe --build build/oracle -j
+build/oracle/CdiOracle.exe bios/cdi490a.rom --steps 100000 --hold
+```
 
 ## Adding a command
 

@@ -99,6 +99,22 @@ static int trace_tail(CdiTraceRecord *out, int count) {
     return count;
 }
 
+/* Snapshot `count` records starting at sequence `from` (forward). Records older
+ * than the ring window have been evicted and are skipped. Returns the number
+ * filled; *first_seq receives the seq of out[0]. Used for first-divergence
+ * paging from the start of the run (vs the tail). */
+static int trace_range(CdiTraceRecord *out, uint64_t from, int count, uint64_t *first_seq) {
+    uint64_t total = s_trace_seq;
+    uint64_t oldest = total > CDI_TRACE_RING_LEN ? total - CDI_TRACE_RING_LEN : 0;
+    if (from < oldest) from = oldest;
+    if (count > CDI_TRACE_RING_LEN) count = CDI_TRACE_RING_LEN;
+    int n = 0;
+    for (uint64_t s = from; s < total && n < count; s++, n++)
+        out[n] = s_trace_ring[s & CDI_TRACE_MASK];
+    *first_seq = from;
+    return n;
+}
+
 /* ---- fault trail: dump the executed path into an abort ---- */
 void debug_dump_fault_trail(const char *reason) {
     enum { N = 24 };
@@ -211,18 +227,22 @@ static void resp_read_mem(const char *line, char *out, int outlen) {
 }
 
 static void resp_trace(const char *line, char *out, int outlen) {
-    uint64_t count = 16;
+    uint64_t count = 16, from = 0;
     json_int(line, "count", &count);
     if (count > 256) count = 256;
-    static CdiTraceRecord tail[256];
-    int got = trace_tail(tail, (int)count);
+    static CdiTraceRecord recs[256];
+    int got;
+    uint64_t first = 0;
+    int have_from = json_int(line, "from", &from);
+    if (have_from) got = trace_range(recs, from, (int)count, &first);   /* forward from seq */
+    else           got = trace_tail(recs, (int)count);                  /* most-recent tail */
     int n = snprintf(out, outlen, "{\"ok\":true,\"total\":%llu,\"records\":[",
                      (unsigned long long)s_trace_seq);
     for (int i = 0; i < got && n < outlen - 64; i++) {
-        const M68KState *c = &tail[i].cpu;
+        const M68KState *c = &recs[i].cpu;
         n += snprintf(out + n, outlen - n,
             "%s{\"seq\":%llu,\"pc\":%u,\"sr\":%u,\"a7\":%u}",
-            i ? "," : "", (unsigned long long)tail[i].seq, c->PC, c->SR, c->A[7]);
+            i ? "," : "", (unsigned long long)recs[i].seq, c->PC, c->SR, c->A[7]);
     }
     snprintf(out + n, outlen - n, "]}");
 }
