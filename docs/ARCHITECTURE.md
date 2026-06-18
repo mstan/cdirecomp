@@ -59,12 +59,23 @@ Always-on, queried after the fact; never arm-then-run.
   executes. `ping status get_registers read_mem trace dispatch_miss_info quit`.
   Client: `tools/cdi_debug.py`. RULE 0a gate: `tools/check_dispatch_misses.py`.
 
-## Oracle (`external/CeDImu`)
+## Oracle (`oracle/` + `external/CeDImu`)
 
-Independent C++ CD-i emulator — behavioral ground truth. Phase B gives it the
-same TCP query surface so native-vs-oracle first-divergence diffing is symmetric
-(`tools/first_divergence.py`). For literal instruction semantics the oracle is
-Ghidra over the OS-9 module (68000 mode).
+Independent C++ CD-i emulator — behavioral ground truth. `oracle/cdi_oracle.cpp`
+links CeDImu's wxWidgets-free core library (`external/CeDImu/src/CDI` builds a
+standalone `CeDImu` static lib; only the GUI needs wx), boots the same ROM
+(`CDI::NewCDI(Boards::AutoDetect, …)` → Mono-IV), single-steps the SCC68070
+(`m_cpu.Run(false)`) capturing per-instruction `{currentPC, registers}`, and
+serves the SAME TCP surface as the native runtime on :4381. So
+`tools/first_divergence.py` pages both rings from seq 0 and reports the first PC
+mismatch — DEBUG.md's first-divergence loop, automated. For literal instruction
+semantics the oracle is Ghidra over the OS-9 module (68000 mode).
+
+**Build quirk:** the oracle is C++23 and must be configured with the **mingw64
+cmake** (`C:/msys64/mingw64/bin/cmake.exe`), not the devkitPro cmake that may be
+first on PATH (it mangles absolute Windows compiler paths). In the sandbox, also
+set `TMP`/`TEMP` to a writable dir (e.g. `build/tmp`) — gcc's default temp is
+`C:\Windows`. Both are one-time environment quirks, not project config.
 
 ## Build order (OS-first)
 

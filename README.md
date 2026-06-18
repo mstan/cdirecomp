@@ -60,6 +60,11 @@ What already works and is verified on the real disc:
   trail dumped on every abort, and a threaded TCP debug server (127.0.0.1:4380)
   answering `ping/status/get_registers/read_mem/trace/dispatch_miss_info`.
   Clients: `tools/cdi_debug.py`, `tools/check_dispatch_misses.py` (RULE 0a).
+- **Oracle parity** (`oracle/cdi_oracle.cpp`): a headless driver linking the
+  wxWidgets-free CeDImu core, serving the SAME trace surface on :4381.
+  `tools/first_divergence.py` pages both rings and reports the first PC mismatch
+  — currently **36,896 instructions match the CeDImu oracle exactly** before a
+  condition-code/branch divergence around `$400CB2` (the next debugging target).
 - **Oracle**: CeDImu (open-source C++ CD-i emulator) cloned into
   `external/CeDImu` — has its own `SCC68070`, `MCD212`, `OS9`, and `HLE`
   implementations we use as the reference + future in-process oracle.

@@ -100,13 +100,17 @@ Exit criterion: from a second terminal, query the registers and the block trail
 of a live/just-faulted boot; the fault dump shows the executed path into the
 bus error at `$FFFFFFFC`.
 
-### Phase B — Oracle parity (CeDImu, same surface) — *next*
+### Phase B — Oracle parity (CeDImu, same surface) — *DONE 2026-06-17*
 
-- Convert `external/CeDImu` to a submodule (MC-CDI-017).
-- Add a matching debug server to CeDImu (port 4381) exposing `emu_cpu_regs`,
-  `emu_read_mem`, `emu_trace`. Build it as the in-process/loopback oracle.
-- `tools/first_divergence.py`: free-run both, walk the rings back to the first
-  block where PC or registers diverge. This is THE boot-debugging tool.
+- ✅ Headless `oracle/cdi_oracle.cpp` links the wxWidgets-free CeDImu core,
+  boots the same ROM (auto-detects Mono-IV), single-steps the SCC68070, and
+  serves the SAME TCP trace surface on :4381.
+- ✅ `tools/first_divergence.py`: free-run both, page the rings from seq 0, report
+  the first PC mismatch. Proven: **36,896 instructions match the oracle exactly**,
+  then diverge around `$400CB2–$400CB8` (seq ~36895) — a condition-code/branch
+  bug, the next concrete debugging target.
+- ⏳ Remaining: convert `external/CeDImu` to a submodule (MC-CDI-017); add
+  emulator-internal probes (`emu_mcd212_state`, `framebuf_diff`) as devices land.
 
 ### Phase C — Boot to the player shell (the milestone)
 
