@@ -123,11 +123,14 @@ void runtime_init(void) {
 }
 
 /* ---- Frame pacing / interrupts (need a running CD-RTOS) ---- */
-/* Emitted at each instruction's END for cycle accounting. The execution trace
- * is now tapped at instruction ENTRY (the generator emits debug_trace_block()
- * there) so JSR/BSR are sampled in order; this stays a no-op until cycle-
- * accurate VSYNC lands (TODO MC-CDI-007). */
-void glue_check_vblank(void)            { /* TODO MC-CDI-007 */ }
+/* Emitted at each instruction's END for cycle accounting. We drain the
+ * accumulated cycles into the MCD212 display-timing model so its DA bit (which
+ * the boot polls) advances with execution. Trace sampling lives at instruction
+ * ENTRY (debug_trace_block), so this is purely the cycle/VSYNC checkpoint. */
+void glue_check_vblank(void) {
+    mcd212_tick(g_cycle_accumulator);
+    g_cycle_accumulator = 0;
+}
 void glue_yield_for_vblank(void)        { /* TODO MC-CDI-007: fiber yield for frame pacing */ }
 void glue_yield_for_interrupt_poll(void){ /* TODO MC-CDI-007 */ }
 void runtime_request_vblank(void)       { /* TODO MC-CDI-007 */ }

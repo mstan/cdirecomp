@@ -74,6 +74,7 @@ int main(int argc, char *argv[]) {
 
     /* ---- seed SCC68070 reset state ---- */
     runtime_init();                 /* zeroes g_cpu */
+    periph_reset();                 /* on-chip peripheral power-on state (UART TxRDY) */
     g_cpu.A[7] = reset_ssp;         /* supervisor stack pointer */
     g_cpu.PC   = reset_pc;
     g_cpu.SR   = 0x2700;            /* 68000 reset: S=1, IPL=7, T=0 */

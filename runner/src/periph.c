@@ -42,6 +42,15 @@ static uint8_t s_periph[PERIPH_SIZE];
 
 static inline uint32_t off_of(uint32_t addr) { return addr - PERIPH_BASE; }
 
+/* Reset the on-chip peripherals (mirror CeDImu SCC68070::Reset). The boot polls
+ * USR bit 2 (TxRDY, transmitter ready) before sending UART bytes; CeDImu sets it
+ * at reset and never clears it (our transmitter has no serial delay, so it is
+ * always ready), so initialise it the same way or the boot spins forever. */
+void periph_reset(void) {
+    memset(s_periph, 0, sizeof s_periph);
+    s_periph[off_of(R_USR)] = 0x04;   /* SET_TX_READY */
+}
+
 static uint8_t periph_get(uint32_t addr) {
     uint32_t off = off_of(addr);
     if (off >= PERIPH_SIZE) return 0;

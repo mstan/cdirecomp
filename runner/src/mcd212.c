@@ -26,6 +26,37 @@ static uint16_t s_reg[32];      /* internal registers, byte-offset indexed */
 static uint8_t  s_csr1r = 0;    /* CSR1R read-side status (display)         */
 static uint8_t  s_csr2r = 0;    /* CSR2R read-side status (IT1/IT2/BE)      */
 
+/* ---- Display timing (CSR1R.DA, bit 7) ----
+ * The boot polls `BTST #7,$4FFFF1 / BEQ` for DA (Display Active). CeDImu drives
+ * it from a vertical line counter (Display.cpp): DA is clear through the
+ * vertical-retrace lines, set during the active scan, and cleared again at
+ * frame end. We mirror that, advancing the line counter by elapsed CPU cycles.
+ * NTSC (FD=1) constants from CeDImu MCD212.hpp: 262 total lines, 22 retrace.
+ * Cycles/line ≈ SCC68070 15.5 MHz / (262 lines * 60 Hz) ≈ 986. Faithful enough
+ * for the poll cadence; exact per-instruction cycle timing is MC-CDI-005. */
+#define MCD_DA            0x80u
+#define MCD_TOTAL_LINES   262u
+#define MCD_RETRACE_LINES 22u
+#define MCD_CYCLES_LINE   986u
+
+static uint32_t s_line_cyc;     /* cycles accumulated toward the next line   */
+static uint32_t s_vlines;       /* vertical line within the current frame    */
+
+void mcd212_tick(uint32_t cycles) {
+    s_line_cyc += cycles;
+    while (s_line_cyc >= MCD_CYCLES_LINE) {
+        s_line_cyc -= MCD_CYCLES_LINE;
+        s_vlines++;
+        if (s_vlines == MCD_RETRACE_LINES + 1)      /* leaving retrace -> active */
+            s_csr1r |= MCD_DA;
+        if (s_vlines >= MCD_TOTAL_LINES) {          /* frame end -> retrace      */
+            s_csr1r &= (uint8_t)~MCD_DA;
+            s_vlines = 0;
+            g_frame_count++;
+        }
+    }
+}
+
 uint32_t mcd212_read(uint32_t addr, int size) {
     if (addr == 0x004FFFF0u || addr == 0x004FFFF1u)        /* CSR1R (word LSB / byte) */
         return s_csr1r;
