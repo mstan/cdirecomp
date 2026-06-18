@@ -83,6 +83,55 @@ as TPF before its own pushes clobber it. The address-error frame is now
 **byte-identical** to the oracle (verified). (The bus-error frame was already
 byte-identical.)
 
+## DONE this session — MC-CDI-012: honor the rewritten return address at JSR sites
+
+The flat-call JSR site pushed the return address, C-called the callee, then
+popped a FIXED `+4` and fell through to the STATIC continuation — ignoring
+`[A7]`. The OS-9 dispatcher rewrites the stacked return address to resume a
+process / saved PC (a context switch), which was silently discarded. Fixed in
+`code_generator.c` (MN_JSR/BSR emit): after the callee returns, read `[A7]`; if
+it is no longer the static `ret_addr`, the callee subtree redirected the return,
+so dispatch that address via the tail-call trampoline (`recomp_tail_call`, which
+handles a recompiled entry or hybrid-interprets an arbitrary PC) instead of
+continuing at the wrong place. Normal returns (`[A7] == ret_addr`) fall through
+unchanged. RESULT: boot advances 207124 → 207674 and **matches the oracle for
+the whole window** (`realign_divergence.py --start 1`: no true divergence, 771
+benign skips). No regression (0–207124 still bit-exact).
+
+## THE NEW FRONTIER — fill-loop iteration-count divergence + sustained dispatch
+
+Two remaining issues, newly exposed now that the boot reaches further:
+
+1. **`$40633E` memory-FILL loop runs a different number of iterations.** It is a
+   nested `MOVE.L D1,(A2)+ ; DBF D0,$40633E ; ADDQ/SUBQ D0 ; BCC $40633E` fill.
+   Native exits early; the oracle keeps filling — so they write DIFFERENT amounts
+   of memory. `realign_divergence.py` MASKS this: it treats the extra oracle
+   iterations as a benign one-sided skip (it assumes skipped records are
+   side-effect-free polls, but a fill loop WRITES). This is the same masking
+   class as before — the tool needs the mem[A7]/memory-write awareness noted
+   below to stop hiding writing-loop count differences. Find why the count (D0,
+   or the size feeding it) differs: likely an upstream memory-state divergence
+   the register-only realign can't see. **This, not the RTS model, is the
+   proximate cause of native's early exit and the subsequent `$406354` RTS to
+   main.**
+
+2. **Sustained context-switch dispatch (the rest of MC-CDI-012).** The redirect
+   uses `recomp_tail_call` on the LOCAL frame, so a context switch dispatches but
+   the C stack eventually unwinds to `main` ("returned after 49838 instructions").
+   The complete model needs the redirect to propagate to a TOP-LEVEL trampoline
+   (a `g_redirect_pending` flag checked at every JSR site, like `g_rte_pending`
+   but propagating all the way up, with `main` re-dispatching `g_cpu.PC`) so
+   context switching is sustained without C-stack growth. Design is in the commit
+   message / this file's history.
+
+### Tooling debt (now blocking)
+`realign_divergence.py` is register-only and masks writing-loop count
+differences (issue 1) and shared-callee caller divergences. Add **mem[A7] (stack
+top) per trace record on BOTH the native ring and the oracle driver**, include it
+in the alignment key, AND flag one-sided skips whose skipped records perform
+memory writes (a fill/copy loop) rather than treating them as benign. This is the
+prerequisite to finding issue 1's root.
+
 ## THE WALL — ROOT-CAUSED: flat-call `RTS` can't follow the OS-9 dispatcher
 
 **This is the fundamental blocker, and it's architectural.** Definitive evidence

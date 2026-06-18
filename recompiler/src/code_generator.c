@@ -2047,7 +2047,20 @@ static void emit_instr(FILE *f, const GenesisRom *rom,
         fprintf(f, "  if (g_rte_pending) { g_rte_pending = 0;\n");
         emit_cycle_accounting(f, "    ", estimate_cycles(instr));
         fprintf(f, "    return; } /* RTE/skip propagation (pre-pop) */\n");
-        fprintf(f, "  g_cpu.A[7] += 4; /* JSR pop */\n");
+        /* Faithful return-address honoring (MC-CDI-012). The flat-call model
+         * pops a fixed +4 and falls through to the STATIC continuation, ignoring
+         * what is actually on the guest stack. That breaks the OS-9 dispatcher,
+         * which REWRITES the stacked return address to resume a different process
+         * / saved PC (a context switch). Read [A7]: if it is no longer our static
+         * continuation, the callee subtree redirected the return — dispatch that
+         * address through the tail-call trampoline (a recompiled entry, or the
+         * hybrid interpreter for an arbitrary PC) instead of continuing at the
+         * wrong place. Normal returns ([A7] == ret_addr) fall through unchanged. */
+        fprintf(f, "  { uint32_t _ret = m68k_read32(g_cpu.A[7]); g_cpu.A[7] += 4; /* JSR pop */\n");
+        fprintf(f, "    if ((_ret & 0xFFFFFFu) != 0x%06Xu) {\n", ret_addr & 0xFFFFFFu);
+        emit_cycle_accounting(f, "      ", estimate_cycles(instr));
+        fprintf(f, "      recomp_tail_call(_ret & 0xFFFFFFu); return;\n");
+        fprintf(f, "    } }\n");
         break;
     }
 
