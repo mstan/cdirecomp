@@ -65,6 +65,9 @@ static int s_rte_pending = 0;
 int *g_rte_pending_ptr = &s_rte_pending;
 int  g_early_return    = 0;
 
+/* Faulting opcode for the bus/address-error frame's IRC/IR (see cdi_runtime.h). */
+uint16_t g_fault_opcode = 0;
+
 /* Initial supervisor stack pointer, captured at boot (main.c). recomp_push_return
  * clamps A7 back to this when the flat-call model lets the guest stack drift
  * above its base (mirrors segagenesisrecomp's g_game_layout.initial_ssp). */
@@ -159,8 +162,8 @@ void m68k_trap_vector(uint8_t vec) {
 
     if (vec == 2 || vec == 3) {   /* bus error / address error → long (format $F) frame */
         g_cpu.A[7] -= 2; m68k_write16(g_cpu.A[7], 0);            /* internal information */
-        g_cpu.A[7] -= 2; m68k_write16(g_cpu.A[7], 0);            /* IRC */
-        g_cpu.A[7] -= 2; m68k_write16(g_cpu.A[7], 0);            /* IR  */
+        g_cpu.A[7] -= 2; m68k_write16(g_cpu.A[7], g_fault_opcode); /* IRC = faulting opcode */
+        g_cpu.A[7] -= 2; m68k_write16(g_cpu.A[7], g_fault_opcode); /* IR  = faulting opcode */
         g_cpu.A[7] -= 4; m68k_write32(g_cpu.A[7], 0);            /* DBIN */
         g_cpu.A[7] -= 4; m68k_write32(g_cpu.A[7], g_cpu.PC);     /* TPF = faulting address */
         g_cpu.A[7] -= 4; m68k_write32(g_cpu.A[7], 0);            /* TPD */

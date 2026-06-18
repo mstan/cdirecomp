@@ -108,6 +108,10 @@ void hybrid_call_interpret(uint32_t target_pc);
 /*  Exceptions / privileged control (real 68000 semantics)                */
 /* ====================================================================== */
 void m68k_trap_vector(uint8_t vec);              /* TRAP #N, TRAPV, CHK, ILLEGAL, A/F-line */
+/* Opcode of the instruction that faulted, for the bus/address-error frame's
+ * IRC/IR fields (CeDImu stacks `currentOpcode` there; the OS-9 handler reads
+ * it). The generator sets this right before raising an address error. */
+extern uint16_t g_fault_opcode;
 void m68k_illegal_trap(uint32_t pc, uint16_t opcode);
 void genesis_reset_devices(void);                /* RESET instruction */
 void genesis_stop_until_interrupt(uint16_t sr_imm); /* STOP #imm */
