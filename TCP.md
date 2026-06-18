@@ -33,15 +33,27 @@ runtime grows, MC-CDI-015):
 - A system-RAM snapshot + last recompiled function name
 - OS-9 call counter / last service
 
-## Command surface (planned — MC-CDI-015)
+## Command surface
+
+**Live now** (threaded server in `debug_server.c`):
 
 ```
-ping              frame             get_registers      read_mem / write_mem
-history           get_frame         frame_range        frame_timeseries
-pause             continue          run_frames N       quit
-dispatch_miss_info                  os9_call_log       sector_log
-mcd212_state      cdic_state        slave_state        screenshot
-frame_diff        memory_diff       first_divergence   framebuf_diff
+ping                 -> {ok,pong}
+status               -> {ok,insns,blocks,frame,pc,miss_count,miss_last,irq_pending}
+get_registers        -> {ok,pc,sr,usp,d0..d7,a0..a7}
+read_mem  addr[,len] -> {ok,addr,bytes:"HEX.."}  side-effect-free (RAM/ROM; "--" for MMIO)
+trace     [count]    -> {ok,total,records:[{seq,pc,sr,a7}..]}  block-trace ring tail
+dispatch_miss_info   -> {ok,count,last_addr,last_frame,unique:[..]}
+quit                 -> {ok,bye}  closes the connection
+```
+
+**Planned** (MC-CDI-015, grow as the runtime grows):
+
+```
+write_mem         get_frame / frame_range / frame_timeseries     screenshot
+pause / continue / run_frames N      os9_call_log     sector_log
+mcd212_state      cdic_state         slave_state
+frame_diff        memory_diff        first_divergence  framebuf_diff
 ```
 
 Reverse-debugger tiers (per-store / per-block / per-call attribution,

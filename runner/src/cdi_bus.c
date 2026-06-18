@@ -12,6 +12,7 @@
  * is not modelled yet (TODO MC-CDI-006). These are the default physical decodes.
  */
 #include "cdi_runtime.h"
+#include "debug_server.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -39,6 +40,9 @@ static void bus_fault(const char *op, uint32_t addr, int bits) {
         fprintf(stderr, "      D%d=$%08X  A%d=$%08X\n", i, g_cpu.D[i], i, g_cpu.A[i]);
     fprintf(stderr, "      SR=$%04X  USP=$%08X  irq_pending=$%08X\n",
             g_cpu.SR, g_cpu.USP, g_irq_pending);
+    /* The executed path INTO the fault — turns a final-register dump into a
+     * trail (DEBUG.md first-divergence). Always-on ring; no arming needed. */
+    debug_dump_fault_trail("unmapped bus access");
     abort();
 }
 
@@ -124,4 +128,15 @@ void m68k_write16(uint32_t addr, uint16_t val) {
 void m68k_write32(uint32_t addr, uint32_t val) {
     m68k_write16(addr,     (uint16_t)(val >> 16));
     m68k_write16(addr + 2, (uint16_t)val);
+}
+
+/* Side-effect-free read for the debug surface: RAM and ROM only. MMIO and
+ * unmapped addresses return 0 with a 0 result (a real read could change device
+ * state, so the debugger must never route through the live accessors). */
+int debug_peek8(uint32_t addr, uint8_t *out) {
+    uint8_t *p = ram_ptr(addr);
+    if (p) { *out = *p; return 1; }
+    if (classify(addr) == RGN_ROM) { *out = g_rom[addr - CDI_ROM_BASE]; return 1; }
+    *out = 0;
+    return 0;
 }

@@ -6,6 +6,7 @@
  * running CD-RTOS (boot, pacing, interrupts) FAIL LOUD rather than pretending.
  */
 #include "cdi_runtime.h"
+#include "debug_server.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -77,7 +78,10 @@ void runtime_init(void) {
 }
 
 /* ---- Frame pacing / interrupts (need a running CD-RTOS) ---- */
-void glue_check_vblank(void)            { /* TODO MC-CDI-007: cycle-accurate VSYNC from MCD212 timing */ }
+/* The per-block hook the generator emits (~one per basic block, PC live). Used
+ * as the always-on execution-trace tap until cycle-accurate VSYNC lands here
+ * (TODO MC-CDI-007). Capturing every block is what makes a fault into a trail. */
+void glue_check_vblank(void)            { debug_trace_block(); }
 void glue_yield_for_vblank(void)        { /* TODO MC-CDI-007: fiber yield for frame pacing */ }
 void glue_yield_for_interrupt_poll(void){ /* TODO MC-CDI-007 */ }
 void runtime_request_vblank(void)       { /* TODO MC-CDI-007 */ }
@@ -129,6 +133,7 @@ void m68k_trap_vector(uint8_t vec) {
 }
 void m68k_illegal_trap(uint32_t pc, uint16_t opcode) {
     fprintf(stderr, "[trap] ILLEGAL/A-line/F-line opcode 0x%04X at PC=$%08X\n", opcode, pc);
+    debug_dump_fault_trail("illegal opcode");
     abort();
 }
 
@@ -140,11 +145,13 @@ void m68k_illegal_trap(uint32_t pc, uint16_t opcode) {
 uint32_t m68k_movec_read(uint16_t cc) {
     fprintf(stderr, "[movec] read of unmodelled control register 0x%03X at PC=$%08X (TODO MC-CDI-006)\n",
             cc, g_cpu.PC);
+    debug_dump_fault_trail("movec read");
     abort();
 }
 void m68k_movec_write(uint16_t cc, uint32_t val) {
     fprintf(stderr, "[movec] write 0x%08X to unmodelled control register 0x%03X at PC=$%08X (TODO MC-CDI-006)\n",
             val, cc, g_cpu.PC);
+    debug_dump_fault_trail("movec write");
     abort();
 }
 

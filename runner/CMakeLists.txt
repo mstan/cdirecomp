@@ -38,3 +38,11 @@ set_target_properties(CdiRuntime PROPERTIES
 if(MSVC)
     target_compile_options(CdiRuntime PRIVATE /W3 /WX-)
 endif()
+
+# Debug server (debug_server.c): winsock on Windows, pthreads elsewhere.
+if(WIN32)
+    target_link_libraries(CdiRuntime PRIVATE ws2_32)
+else()
+    find_package(Threads REQUIRED)
+    target_link_libraries(CdiRuntime PRIVATE Threads::Threads)
+endif()
