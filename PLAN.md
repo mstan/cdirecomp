@@ -112,9 +112,19 @@ bus error at `$FFFFFFFC`.
 - ⏳ Remaining: convert `external/CeDImu` to a submodule (MC-CDI-017); add
   emulator-internal probes (`emu_mcd212_state`, `framebuf_diff`) as devices land.
 
-### Phase C — Boot to the player shell (the milestone)
+### Phase C — Boot to the player shell (the milestone) — *in progress*
 
-Drive the MC-CDI device tickets, oracle-diffed, in first-divergence order:
+First result (2026-06-17): with the oracle harness, the recompiled CD-RTOS is
+**bit-exact to CeDImu for all 43,159 boot instructions** — zero codegen
+divergence. Getting there hardened the harness: the trace tap moved to
+instruction ENTRY (recompiler emits `debug_trace_block()` after each PC store)
+so every instruction is sampled in order, JSR/BSR included — a hook at
+instruction END misses the JSR sample and desyncs the streams. The only blocker
+is the `$050A` RAM-built stub (dispatch miss) → the MC-CDI-011 hybrid
+interpreter is the critical path, gated on the engine-licensing decision
+(clown68000 AGPL / CeDImu GPL — both attach copyleft to the shipped runtime).
+
+Then drive the MC-CDI device tickets, oracle-diffed, in first-divergence order:
 MMU/memory (MC-CDI-006) → MCD212 register file already present, add decoders
 (MC-CDI-012) → IKAT (MC-CDI-023) → Timekeeper (MC-CDI-022) → interrupt delivery
 + pacing (MC-CDI-007/010) → hybrid interpreter for RAM-built stubs (MC-CDI-011).

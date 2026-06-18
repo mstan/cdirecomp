@@ -78,10 +78,11 @@ void runtime_init(void) {
 }
 
 /* ---- Frame pacing / interrupts (need a running CD-RTOS) ---- */
-/* The per-block hook the generator emits (~one per basic block, PC live). Used
- * as the always-on execution-trace tap until cycle-accurate VSYNC lands here
- * (TODO MC-CDI-007). Capturing every block is what makes a fault into a trail. */
-void glue_check_vblank(void)            { debug_trace_block(); }
+/* Emitted at each instruction's END for cycle accounting. The execution trace
+ * is now tapped at instruction ENTRY (the generator emits debug_trace_block()
+ * there) so JSR/BSR are sampled in order; this stays a no-op until cycle-
+ * accurate VSYNC lands (TODO MC-CDI-007). */
+void glue_check_vblank(void)            { /* TODO MC-CDI-007 */ }
 void glue_yield_for_vblank(void)        { /* TODO MC-CDI-007: fiber yield for frame pacing */ }
 void glue_yield_for_interrupt_poll(void){ /* TODO MC-CDI-007 */ }
 void runtime_request_vblank(void)       { /* TODO MC-CDI-007 */ }

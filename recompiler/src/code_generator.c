@@ -3984,6 +3984,11 @@ bool codegen_emit(const GenesisRom *rom, const FunctionList *funcs,
              * without an accurate PC — this one store per instruction is the
              * foundation of the runtime's observability (DEBUG.md). */
             fprintf(f_full, "  g_cpu.PC = 0x%06Xu;\n", pc);
+            /* Always-on execution trace tap, at instruction ENTRY so every
+             * instruction is sampled once, in order — JSR/BSR included, before
+             * they transfer control (a hook at instruction END would miss them).
+             * This is the spine of native-vs-oracle first-divergence (DEBUG.md). */
+            fprintf(f_full, "  debug_trace_block();\n");
             if (s_reverse_debug)
                 fprintf(f_full, "  rdb_on_insn(0x%06Xu);\n", pc);
             emit_instr(f_full, rom, &instr, &instrs, &skip_until_label, &has_sp_adjust,

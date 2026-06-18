@@ -62,9 +62,12 @@ What already works and is verified on the real disc:
   Clients: `tools/cdi_debug.py`, `tools/check_dispatch_misses.py` (RULE 0a).
 - **Oracle parity** (`oracle/cdi_oracle.cpp`): a headless driver linking the
   wxWidgets-free CeDImu core, serving the SAME trace surface on :4381.
-  `tools/first_divergence.py` pages both rings and reports the first PC mismatch
-  — currently **36,896 instructions match the CeDImu oracle exactly** before a
-  condition-code/branch divergence around `$400CB2` (the next debugging target).
+  `tools/first_divergence.py` pages both rings and reports the first divergence.
+  Result: the recompiled CD-RTOS is **bit-exact to the CeDImu oracle across all
+  43,159 boot instructions** (full register file, every instruction sampled at
+  entry) — zero codegen divergence. Native stops only because it reaches the
+  `$050A` RAM-built stub (dispatch miss); the oracle's interpreter walks into it.
+  That RAM stub is the structural boot blocker (MC-CDI-011 hybrid interpreter).
 - **Oracle**: CeDImu (open-source C++ CD-i emulator) cloned into
   `external/CeDImu` — has its own `SCC68070`, `MCD212`, `OS9`, and `HLE`
   implementations we use as the reference + future in-process oracle.

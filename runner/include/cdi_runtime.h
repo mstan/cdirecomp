@@ -92,6 +92,14 @@ extern uint32_t g_recomp_initial_ssp;
 /* Runtime-provided: logged when call_by_address finds no generated function. */
 void genesis_log_dispatch_miss(uint32_t addr);
 
+/* Always-on execution trace tap. The generator emits a call to this at the
+ * ENTRY of every instruction (right after the guest PC store), so the trace ring
+ * captures one in-order sample per instruction — control-transfer instructions
+ * (JSR/BSR) included, BEFORE they transfer control. Implemented in
+ * debug_server.c. (Capturing at instruction END instead would miss the JSR
+ * sample, since the call dives into the callee before reaching the hook.) */
+void debug_trace_block(void);
+
 /* Interpreter fallbacks for unresolved dynamic control flow. */
 void hybrid_jmp_interpret(uint32_t target_pc);
 void hybrid_call_interpret(uint32_t target_pc);

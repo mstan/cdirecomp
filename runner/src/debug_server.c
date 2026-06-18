@@ -238,11 +238,14 @@ static void resp_trace(const char *line, char *out, int outlen) {
     else           got = trace_tail(recs, (int)count);                  /* most-recent tail */
     int n = snprintf(out, outlen, "{\"ok\":true,\"total\":%llu,\"records\":[",
                      (unsigned long long)s_trace_seq);
-    for (int i = 0; i < got && n < outlen - 64; i++) {
+    for (int i = 0; i < got && n < outlen - 320; i++) {
         const M68KState *c = &recs[i].cpu;
         n += snprintf(out + n, outlen - n,
-            "%s{\"seq\":%llu,\"pc\":%u,\"sr\":%u,\"a7\":%u}",
-            i ? "," : "", (unsigned long long)recs[i].seq, c->PC, c->SR, c->A[7]);
+            "%s{\"seq\":%llu,\"pc\":%u,\"sr\":%u", i ? "," : "",
+            (unsigned long long)recs[i].seq, c->PC, c->SR);
+        for (int r = 0; r < 8; r++) n += snprintf(out + n, outlen - n, ",\"d%d\":%u", r, c->D[r]);
+        for (int r = 0; r < 8; r++) n += snprintf(out + n, outlen - n, ",\"a%d\":%u", r, c->A[r]);
+        n += snprintf(out + n, outlen - n, "}");
     }
     snprintf(out + n, outlen - n, "]}");
 }
@@ -269,8 +272,8 @@ static int handle_line(const char *line, char *out, int outlen) {
 static int s_port = 0;
 
 static void serve_client(sock_t cs) {
-    char in[2048];
-    char out[8192];
+    static char in[2048];
+    static char out[65536];   /* static: full-register trace pages are large */
     int inlen = 0;
     for (;;) {
         char ch;

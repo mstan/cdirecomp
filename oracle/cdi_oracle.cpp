@@ -57,11 +57,13 @@ static std::vector<TraceRec> g_ring(RING);
 static uint64_t g_seq = 0;
 static CDI *g_cdi = nullptr;
 
-/* Record one executed instruction. `pc` is currentPC (the address that just
- * executed); `r` is the register snapshot taken BEFORE the step (entry state) so
- * it aligns with the native ring, which captures PC-about-to-execute + the
- * current register file. (Step 0's registers are the pre-reset defaults — a
- * one-instruction artifact of CeDImu bundling reset with the first step.) */
+/* Record one executed instruction: `pc` is currentPC (the address that just
+ * executed) and `r` is the register snapshot taken BEFORE the step (entry state
+ * of that instruction). This matches the native ring exactly: the generator taps
+ * the trace at instruction ENTRY (PC just set, registers = state before the
+ * instruction's effects). So both sides store {instruction PC, entry-state regs}
+ * in program order. (Seq 0's registers are the pre-reset defaults — a one-
+ * instruction seam from CeDImu bundling reset into the first step; --start 1.) */
 static void capture(uint32_t pc, const std::map<Reg, uint32_t> &r) {
     TraceRec &t = g_ring[g_seq & MASK];
     t.seq = g_seq;
@@ -112,9 +114,13 @@ static void trace_records(char *out, int outlen, uint64_t from, int count, bool 
         for (uint64_t i = 0; i < n; i++, got++) recs[got] = g_ring[(start + i) & MASK];
     }
     int n = snprintf(out, outlen, "{\"ok\":true,\"total\":%llu,\"records\":[", (unsigned long long)g_seq);
-    for (int i = 0; i < got && n < outlen - 64; i++)
-        n += snprintf(out + n, outlen - n, "%s{\"seq\":%llu,\"pc\":%u,\"sr\":%u,\"a7\":%u}",
-                      i ? "," : "", (unsigned long long)recs[i].seq, recs[i].pc, recs[i].sr, recs[i].a[7]);
+    for (int i = 0; i < got && n < outlen - 320; i++) {
+        n += snprintf(out + n, outlen - n, "%s{\"seq\":%llu,\"pc\":%u,\"sr\":%u",
+                      i ? "," : "", (unsigned long long)recs[i].seq, recs[i].pc, recs[i].sr);
+        for (int r = 0; r < 8; r++) n += snprintf(out + n, outlen - n, ",\"d%d\":%u", r, recs[i].d[r]);
+        for (int r = 0; r < 8; r++) n += snprintf(out + n, outlen - n, ",\"a%d\":%u", r, recs[i].a[r]);
+        n += snprintf(out + n, outlen - n, "}");
+    }
     snprintf(out + n, outlen - n, "]}");
 }
 
@@ -169,7 +175,7 @@ static void server_loop() {
     for (;;) {
         sock_t cs = accept(ls, nullptr, nullptr);
         if (cs == BAD_SOCK) break;
-        char in[2048]; char outb[8192]; int inlen = 0;
+        static char in[2048]; static char outb[65536]; int inlen = 0;
         for (;;) {
             char ch; int r = (int)recv(cs, &ch, 1, 0);
             if (r <= 0) break;

@@ -67,8 +67,23 @@ class Reader:
                 return None
 
 
+REGS = ["pc", "sr"] + [f"d{i}" for i in range(8)] + [f"a{i}" for i in range(8)]
+
+
 def fmt(r):
-    return f"seq {r['seq']:>7}  PC=${r['pc']:08X}  SR=${r['sr']:04X}  A7=${r['a7']:08X}" if r else "(end of trace)"
+    if not r:
+        return "(end of trace)"
+    ds = " ".join(f"D{i}={r.get('d'+str(i),0):08X}" for i in range(8))
+    as_ = " ".join(f"A{i}={r.get('a'+str(i),0):08X}" for i in range(8))
+    return f"seq {r['seq']:>7} PC=${r['pc']:08X} SR=${r['sr']:04X}\n        {ds}\n        {as_}"
+
+
+def first_diff_field(a, b):
+    """First register that differs between two records, or None."""
+    for k in REGS:
+        if a.get(k) != b.get(k):
+            return k
+    return None
 
 
 def main():
@@ -76,6 +91,11 @@ def main():
     ap.add_argument("--native", type=int, default=4380)
     ap.add_argument("--oracle", type=int, default=4381)
     ap.add_argument("--context", type=int, default=8, help="instructions of context each side of the divergence")
+    ap.add_argument("--start", type=int, default=1,
+                    help="first seq to compare. Default 1 skips seq 0, the reset seam: "
+                         "both rings capture instruction-entry state, but the oracle's seq-0 "
+                         "registers are pre-reset (CeDImu bundles reset into the first step), "
+                         "so they differ by representation, not by a bug. PCs align from seq 0.")
     args = ap.parse_args()
 
     try:
@@ -91,7 +111,7 @@ def main():
     nrd, ord_ = Reader(args.native), Reader(args.oracle)
     history = []   # recent (seq, native, oracle) for context
 
-    for seq in range(n):
+    for seq in range(args.start, n):
         nr, orr = nrd.get(seq), ord_.get(seq)
         if nr is None or orr is None:
             print(f"\ntrace truncated at seq {seq} (evicted from a ring); ran out of history.")
@@ -99,17 +119,21 @@ def main():
         history.append((seq, nr, orr))
         if len(history) > args.context + 1:
             history.pop(0)
-        if nr["pc"] != orr["pc"]:
-            print(f"\n*** FIRST DIVERGENCE at seq {seq} ***")
-            print(f"  native PC=${nr['pc']:08X}   oracle PC=${orr['pc']:08X}")
+        field = first_diff_field(nr, orr)
+        if field:
+            print(f"\n*** FIRST DIVERGENCE at seq {seq} — register {field.upper()} ***")
+            print(f"  native {field.upper()}=${nr[field]:08X}   oracle {field.upper()}=${orr[field]:08X}")
+            print(f"  both about to execute PC=${nr['pc']:08X}" if field != "pc"
+                  else f"  control flow split: native ${nr['pc']:08X} vs oracle ${orr['pc']:08X}")
             print(f"\n  --- native (:{args.native}) ---")
             for s, hn, _ in history:
                 print(("  > " if s == seq else "    ") + fmt(hn))
             print(f"\n  --- oracle (:{args.oracle}) ---")
             for s, _, ho in history:
                 print(("  > " if s == seq else "    ") + fmt(ho))
-            print("\nClassify per DEBUG.md: discovery/codegen, runtime/timing, memory/bus, "
-                  "OS-9 HLE, or device. Trace the writer of the wrong edge.")
+            print(f"\nThe instruction that ran at seq {seq-1} (PC of the PREVIOUS row) wrote the "
+                  f"wrong {field.upper()}. Classify per DEBUG.md: codegen (flag/result bug), "
+                  f"memory/bus, or device. Inspect the generated C for that PC.")
             return 1
 
     print(f"\nno PC divergence across {n} common instructions.")

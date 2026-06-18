@@ -49,9 +49,13 @@ The hand-written CD-i machine the generated C links against. Contract:
 
 Always-on, queried after the fact; never arm-then-run.
 
-- **Block-trace ring** (262144 entries): every executed block's PC + full
-  register file, captured from the per-block hook `glue_check_vblank`. This is
-  the trail that turns "aborted at $X" into "here are the blocks that led there."
+- **Execution-trace ring** (262144 entries): every instruction's PC + full
+  register file, captured from a hook the recompiler emits at instruction ENTRY
+  (`debug_trace_block()`, right after the guest-PC store). Entry sampling is
+  deliberate: one in-order sample per instruction, JSR/BSR included (a hook at
+  instruction END dives into the callee before sampling, desyncing the stream
+  from the oracle). This is the trail that turns "aborted at $X" into "here are
+  the instructions that led there" — and the basis of first-divergence diffing.
 - **Frame ring** (36000 entries): per-frame snapshot (grows with the runtime).
 - **Fault trail**: every abort site (`bus_fault`, illegal opcode, movec) dumps
   the ring tail to stderr before dying — the executed path into the crash.
