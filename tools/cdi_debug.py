@@ -40,6 +40,8 @@ def main():
     ap.add_argument("--addr", type=lambda x: int(x, 0), help="read_mem address")
     ap.add_argument("--len", type=lambda x: int(x, 0), help="read_mem length")
     ap.add_argument("--count", type=lambda x: int(x, 0), help="trace record count")
+    ap.add_argument("--from", dest="frm", type=lambda x: int(x, 0),
+                    help="trace start seq (forward paging); omit for the most-recent tail")
     args = ap.parse_args()
 
     req = {"cmd": args.cmd}
@@ -49,6 +51,8 @@ def main():
         req["len"] = args.len
     if args.count is not None:
         req["count"] = args.count
+    if args.frm is not None:
+        req["from"] = args.frm
 
     try:
         resp = send(args.host, args.port, req)
