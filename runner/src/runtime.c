@@ -153,6 +153,12 @@ void genesis_stop_until_interrupt(uint16_t sr_imm) {
  * (RAM-resident) handler the kernel installed in the vector table at boot.
  * Returns the handler address; does NOT dispatch it. */
 static uint32_t build_exception_frame(uint8_t vec) {
+    /* TPF = CeDImu's lastAddress, captured BEFORE our own frame pushes (which go
+     * through m68k_write and would clobber g_last_access_addr). For a bus error
+     * this is the unmapped address the faulting access set; for the boot's odd-
+     * JMP address error it is the last data EA before the jump (NOT the odd
+     * target — CeDImu's GetWord throws AddressError without updating lastAddress). */
+    uint32_t tpf = g_last_access_addr;
     uint16_t sr = g_cpu.SR;
     g_cpu.SR |= SR_S;
 
@@ -161,7 +167,7 @@ static uint32_t build_exception_frame(uint8_t vec) {
         g_cpu.A[7] -= 2; m68k_write16(g_cpu.A[7], g_fault_opcode); /* IRC = faulting opcode */
         g_cpu.A[7] -= 2; m68k_write16(g_cpu.A[7], g_fault_opcode); /* IR  = faulting opcode */
         g_cpu.A[7] -= 4; m68k_write32(g_cpu.A[7], 0);            /* DBIN */
-        g_cpu.A[7] -= 4; m68k_write32(g_cpu.A[7], g_fault_addr); /* TPF = faulting DATA address */
+        g_cpu.A[7] -= 4; m68k_write32(g_cpu.A[7], tpf);         /* TPF = lastAddress */
         g_cpu.A[7] -= 4; m68k_write32(g_cpu.A[7], 0);            /* TPD */
         g_cpu.A[7] -= 2; m68k_write16(g_cpu.A[7], 0);            /* internal */
         g_cpu.A[7] -= 2; m68k_write16(g_cpu.A[7], 0);            /* internal */

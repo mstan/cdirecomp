@@ -96,6 +96,14 @@ def main():
     ap.add_argument("--start", type=int, default=1)
     ap.add_argument("--window", type=int, default=4096)
     ap.add_argument("--context", type=int, default=6)
+    ap.add_argument("--loop-window", type=int, default=400,
+                    help="how far to look on the OTHER side for a skipped PC before "
+                         "deeming it a real control-flow split (vs a benign wait-loop iteration)")
+    ap.add_argument("--log-skips", type=int, default=0, metavar="D",
+                    help="print every one-sided re-sync of >= D records (0 = off)")
+    ap.add_argument("--no-split-detect", action="store_true",
+                    help="don't stop on a control-flow split; only stop on a same-position "
+                         "register mismatch (the old behaviour)")
     args = ap.parse_args()
 
     try:
@@ -131,8 +139,16 @@ def main():
         #     iterations of a wait loop.
         hit = None
         for d in range(1, W + 1):
+            # both-advance (substitution) is a benign capture SEAM only if every
+            # substituted record is the SAME instruction on both sides (same PC,
+            # differing only in a register snapshot — e.g. a trap frame push the
+            # native reflects one seq earlier than the oracle). If the PCs differ
+            # it is real divergent code (e.g. JSR to a shared callee from two
+            # different sites: the streams converge at the callee but the call
+            # sites — and the pushed return addresses — differ), so DON'T mask it.
             if d <= SUBST_MAX and i + d < len(N.states) and j + d < len(O.states) \
-                    and N.states[i + d] == O.states[j + d]:
+                    and N.states[i + d] == O.states[j + d] \
+                    and all(N.states[i + k][0] == O.states[j + k][0] for k in range(d)):
                 hit = ("both", d); break
             if j + d < len(O.states) and O.states[j + d] == N.states[i]:
                 hit = ("oracle", d); break
@@ -157,6 +173,52 @@ def main():
         side, d = hit
         resyncs += 1
         max_skew = max(max_skew, d)
+        # A one-sided skip means one machine executed `d` records the other did
+        # not. That is benign ONLY if it is extra iterations of a wait loop BOTH
+        # run — i.e. the skipped PCs also appear in the other side's stream
+        # nearby. If a skipped PC is NOT seen on the other side within a window,
+        # one machine ran code the other never does: a real CONTROL-FLOW split
+        # (a different branch / caller) that register-alignment would otherwise
+        # paper over (a shared callee re-normalizes the registers downstream).
+        if side in ("oracle", "native") and d >= 1:
+            if side == "oracle":
+                skipped = [O.states[k][0] for k in range(j, j + d)]
+                lo = max(0, i - args.loop_window)
+                seen = {N.states[k][0] for k in range(lo, min(len(N.states), i + args.loop_window))}
+                seqs_a, seqs_b = (O.seqs[j], "oracle"), (N.seqs[i], "native")
+            else:
+                skipped = [N.states[k][0] for k in range(i, i + d)]
+                lo = max(0, j - args.loop_window)
+                seen = {O.states[k][0] for k in range(lo, min(len(O.states), j + args.loop_window))}
+                seqs_a, seqs_b = (N.seqs[i], "native"), (O.seqs[j], "oracle")
+            foreign = [pc for pc in skipped if pc not in seen]
+            if args.log_skips and d >= args.log_skips:
+                pcs = sorted(set(skipped))
+                tag = f"  !! {len(foreign)} FOREIGN PCs" if foreign else ""
+                print(f"  skip {side} d={d} at {seqs_b[1]} seq {seqs_b[0]} "
+                      f"(${N.states[i][0] if side=='native' else O.states[j][0]:06X}); "
+                      f"skipped {len(pcs)} distinct: "
+                      f"{', '.join('$%06X'%p for p in pcs[:8])}{' …' if len(pcs)>8 else ''}{tag}")
+            if foreign and not args.no_split_detect:
+                k = next(idx for idx in (range(j, j + d) if side == "oracle" else range(i, i + d))
+                         if (O.states if side == "oracle" else N.states)[idx][0] == foreign[0])
+                print(f"\n*** CONTROL-FLOW SPLIT — {side} ran code the other side does not ***")
+                print(f"  at {seqs_a[1]} seq {seqs_a[0]} the {side} took a branch into "
+                      f"${foreign[0]:06X} that {seqs_b[1]} never executes near here.")
+                print(f"  (register-alignment masked this: a shared callee re-normalizes the "
+                      f"registers, so the streams look equal again downstream — this is the "
+                      f"earlier root split behind any later same-register/different-memory divergence.)")
+                print(f"  {resyncs} benign re-syncs skipped earlier; max spin skew {max_skew}.")
+                src = O if side == "oracle" else N
+                oth_i = i if side == "oracle" else j
+                oth = N if side == "oracle" else O
+                print(f"\n  --- {side} (ran the extra code) ---")
+                for kk in range(max(0, (j if side=='oracle' else i) - 2), k + 1):
+                    print(("  > " if kk == k else "    ") + src.fmt(kk))
+                print(f"\n  --- {seqs_b[1]} (stayed) ---")
+                for kk in range(max(0, oth_i - 2), min(len(oth.states), oth_i + 2)):
+                    print("    " + oth.fmt(kk))
+                return 1
         if side == "both":
             i += d; j += d   # capture seam: d substituted records, then re-aligned
         elif side == "oracle":

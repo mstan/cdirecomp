@@ -70,30 +70,59 @@ corrupting the stack. Root cause: `code_generator.c` MN_CLR passed `rmw=1` to
 postinc. The boot now matches the oracle bit-exact (modulo jitter) ~6000
 instructions further, to **seq 207124**.
 
-## THE NEXT TASK — call-path split at the `$40468E` RTS (then interrupt delivery)
+## DONE this session — address-error frame TPF (runtime lastAddress)
 
-After the CLR fix the next true divergence is at `$40468E` (`RTS`): native and
-oracle have **identical registers but different return addresses on the stack**
-(`mem[$1478]`: native `$406578` vs oracle `$40407C`). They reached a shared
-helper subroutine (`LINK A5 … MOVEM … UNLK A5 ; RTS`) from **different callers** —
-native is still circling the `$406xxx` dispatcher region while the oracle is in
-`$40407x`. So the real split is EARLIER and was masked by register-only
-alignment (the shared subroutine normalizes registers; only the stacked return
-address — memory — differs).
+The address-error frame's TPF was wrong: the recompiler statically emitted the
+odd JMP target (`$4006A3`), but CeDImu stacks `lastAddress` — the last DATA EA
+touched before the fault (`$000510`, the last vector-stub write) — because its
+`GetWord`/`SetWord` throw `AddressError` WITHOUT updating `lastAddress`. The
+static recompiler can't know `$510`, so I added runtime `lastAddress` tracking:
+`g_last_access_addr` (cdi_bus.c) is set by every `m68k_read/write` (long
+accesses collapse to the operand base), and `build_exception_frame` captures it
+as TPF before its own pushes clobber it. The address-error frame is now
+**byte-identical** to the oracle (verified). (The bus-error frame was already
+byte-identical.)
 
-To chase it you need a **memory/stack-aware diff** (the current realign tool
-compares registers only). Options: (a) snapshot a stack/RAM window on both sides
-at each step and diff; (b) improve `realign_divergence.py` to flag a one-sided
-"benign" skip whose skipped records introduce NEW PCs (a real path split, not a
-spin loop); (c) walk back from the two return addresses (`$406578` / `$40407C`)
-to find the JSR/BSR sites and diff the control flow that chose between them.
+## THE NEXT TASK — native lingers in the `$406xxx` dispatcher (flat-call desync)
 
-After that, expect **interrupt delivery (MC-CDI-007/010)**: `cdi_irq_raise` sets
-`g_irq_pending` but nothing consumes it; the shell's `STOP #$2000` needs a timer/
-display IRQ to wake. Wire delivery between instructions (pending IRQ above the SR
-I-mask → vector via `build_exception_frame` short autovector frame), mirroring
-CeDImu's `Interpreter()` exception drain, and make `genesis_stop_until_interrupt`
-actually idle until then.
+The TPF fix did NOT change the boot trajectory — native still returns to `main`
+at ~seq 207149 (the flat-call C stack unwinds). The real wall: at `$40468E`
+(`RTS` inside shared `func_403EC2`) native and oracle have **identical guest
+state** (A7=`$147C`, `mem[$1478]=$40407C` on BOTH) but native's PC is `$406578`
+while the oracle's is `$40407C`. Generated code shows native reached
+`func_403EC2` via `recomp_push_return(0x406578); recomp_call_func(func_403EC2)`
+at `$406574`, i.e. it CALLED the shared function from `$406574` while the oracle
+called it from `$404076`. So **native is still circling the `$406xxx` dispatcher
+while the oracle has moved into `$40407x`** — the CLR fix advanced the boot but
+did not fully fix the dispatcher lingering. `realign_divergence.py` masks this:
+the shared `func_403EC2` normalizes registers, so register-alignment matches
+native's invocation-from-`$406574` with the oracle's invocation-from-`$404076`,
+and only surfaces the symptom (the RTS returning to different callers).
+
+Why the dispatcher lingers is the open question. The `$406262` dispatcher walks
+a process/queue list (`[A7]→A0`, `[A0]→A3`, compares A3 against `[A4]`,`[A4+4]`,
+`[A4+28]`); some queue/flag it tests differs from the oracle. Given register/PC
+execution is otherwise lockstep, the differing datum is in **memory**, written
+outside what register-alignment sees. To find it you need either:
+- a **memory-write trace** (record (PC, addr, value) per store on both sides and
+  diff — the definitive tool; the current realign is register-only), or
+- **call-stack-aware alignment** (align by the guest call stack / A7-frame chain,
+  not just registers, so a shared callee can't mask a caller divergence), or
+- walk back from `$406574` (native) vs `$404076` (oracle) through their callers
+  to the first function only one side enters.
+
+Strongly suspect this ties to the **flat-call model**: exceptions
+(`m68k_trap_vector` → `call_by_address`) and hybrid-interpreter handoffs push/pop
+the GUEST stack via `recomp_push_return` + A7 clamping, which can desync the C
+call structure from the real guest stack — so a recompiled `RTS` (C return) lands
+somewhere the guest-stack `RTS` would not. The `_sp_popped`/`g_split_sp_popped`
+counters at each `RTS` emit are the flat-call's bookkeeping for this; study them.
+
+After that, **interrupt delivery (MC-CDI-007/010)**: `cdi_irq_raise` sets
+`g_irq_pending` but nothing consumes it; the shell's `STOP #$2000` @ `$40A3E2`
+needs a timer/display IRQ to wake. Vector a pending IRQ above the SR I-mask via
+`build_exception_frame` (short autovector frame) between instructions; make
+`genesis_stop_until_interrupt` idle until then.
 
 ## Validation workflow (READ — non-obvious environment gotchas)
 
