@@ -37,6 +37,7 @@ int main(int argc, char *argv[]) {
         if (!strcmp(argv[i], "--port") && i + 1 < argc) port = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--hold")) hold = 1;
         else if (!strcmp(argv[i], "--fault-hold")) g_hold_on_fault = 1;
+        else if (!strcmp(argv[i], "--stop-seq") && i + 1 < argc) g_stop_seq = strtoull(argv[++i], NULL, 0);
         else if (argv[i][0] != '-') rom_path = argv[i];
     }
 

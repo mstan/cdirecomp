@@ -108,10 +108,30 @@ void hybrid_call_interpret(uint32_t target_pc);
 /*  Exceptions / privileged control (real 68000 semantics)                */
 /* ====================================================================== */
 void m68k_trap_vector(uint8_t vec);              /* TRAP #N, TRAPV, CHK, ILLEGAL, A/F-line */
+/* Build the exception stack frame for `vec` and point PC at the handler, but do
+ * NOT dispatch it (no recursive call_by_address). Used by the interpreter, which
+ * raises a bus/address error mid-instruction and then continues its own loop
+ * into the (RAM-resident) handler — mirroring CeDImu, which sets PC and falls
+ * through to its main loop rather than recursing. */
+void m68k_raise_exception_frame(uint8_t vec);
 /* Opcode of the instruction that faulted, for the bus/address-error frame's
  * IRC/IR fields (CeDImu stacks `currentOpcode` there; the OS-9 handler reads
  * it). The generator sets this right before raising an address error. */
 extern uint16_t g_fault_opcode;
+/* Faulting DATA address for the bus/address-error frame's TPF field (CeDImu
+ * stacks `lastAddress` there). For a bus error this is the unmapped address the
+ * instruction tried to touch; for the boot's deliberate JMP-to-odd address
+ * error it is the odd target. Distinct from the stacked PC (which is the
+ * instruction's post-fetch PC). */
+extern uint32_t g_fault_addr;
+/* Bus-error hook (cdi_bus.c -> interpreter). When the interpreter is executing
+ * an instruction and a memory access lands on an unmapped address, the access
+ * routes here. If the interpreter has armed its mid-instruction unwind, this
+ * records the faulting address and longjmps out to raise a faithful SCC68070
+ * bus error (vector 2); it never returns in that case. Returns 0 when no
+ * interpreter unwind is armed, so the caller falls through to fail-loud (a
+ * genuinely unmodelled region reached from recompiled code). */
+int m68k_interp_bus_error(uint32_t addr);
 void m68k_illegal_trap(uint32_t pc, uint16_t opcode);
 void genesis_reset_devices(void);                /* RESET instruction */
 void genesis_stop_until_interrupt(uint16_t sr_imm); /* STOP #imm */

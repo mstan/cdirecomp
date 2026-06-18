@@ -31,6 +31,15 @@ void cdi_bus_load_rom(const uint8_t *src, uint32_t n) {
 }
 
 static void bus_fault(const char *op, uint32_t addr, int bits) {
+    /* A real SCC68070 bus error. When the interpreter is mid-instruction it has
+     * armed an unwind: raise the faithful vector-2 exception (CeDImu does the
+     * same — see Mono3::GetWord throwing BusError out to ProcessException). This
+     * call does not return when armed; control longjmps back into the step,
+     * stacks the long frame, and vectors to the OS-9 handler. Only a fault from
+     * un-unwindable (recompiled) code reaches the fail-loud path below — that is
+     * a genuinely unmodelled region, not an architectural bus error. */
+    if (m68k_interp_bus_error(addr)) return;   /* unreachable: longjmp on success */
+
     fprintf(stderr, "[bus] UNMAPPED %s%d @ $%08X (PC=$%08X) — region not modelled "
                     "(see TODO.md MC-CDI-004)\n", op, bits, addr, g_cpu.PC);
     /* Fail loud WITH exact CPU state: which register holds the bad address tells

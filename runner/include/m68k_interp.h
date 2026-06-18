@@ -28,6 +28,7 @@
 #pragma once
 #include <stdint.h>
 #include "cdi_runtime.h"       /* M68KState, g_cpu, m68k_read/write, SR_* (CD-i ABI) */
+#include "m68k_decoder.h"      /* M68KInstr (recompiler/src — on the runner include path) */
 
 typedef enum {
     M68KI_OK = 0,          /* reached stop_pc cleanly */
@@ -67,6 +68,15 @@ M68kiStatus m68k_interp_run_until_known(uint32_t entry_pc, uint32_t stop_pc);
  * after every instruction against clown68000). Returns M68KI_OK or a HALT_*.
  */
 M68kiStatus m68k_interp_step(void);
+
+/*
+ * Clean-room SCC68070 per-instruction cycle cost (MC-CDI-005). Mirrors the
+ * CeDImu oracle's `calcTime` exactly so interpreted code advances device timing
+ * (MCD212 DA, timers) in phase with the oracle. Evaluate in the instruction's
+ * ENTRY state: a few costs read entry register/flag/stack state. Also usable
+ * standalone for frame pacing.
+ */
+int m68k_cycles(const M68KInstr *ins);
 
 /* Per-run diagnostics (the manifest/floor layers read these). */
 extern uint32_t g_m68ki_bad_pc;      /* PC of the offending instruction (UNIMPL) */

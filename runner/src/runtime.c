@@ -67,6 +67,8 @@ int  g_early_return    = 0;
 
 /* Faulting opcode for the bus/address-error frame's IRC/IR (see cdi_runtime.h). */
 uint16_t g_fault_opcode = 0;
+/* Faulting DATA address for the bus/address-error frame's TPF (see cdi_runtime.h). */
+uint32_t g_fault_addr = 0;
 
 /* Initial supervisor stack pointer, captured at boot (main.c). recomp_push_return
  * clamps A7 back to this when the flat-call model lets the guest stack drift
@@ -146,17 +148,11 @@ void genesis_stop_until_interrupt(uint16_t sr_imm) {
     g_cpu.SR = sr_imm;
     /* TODO MC-CDI-007: halt until an IRQ above the I-mask; yield to pacing. */
 }
-void m68k_trap_vector(uint8_t vec) {
-    if (vec == 0x20) {            /* TRAP #0 = OS-9 gateway. TODO: route through the
-                                   * vector table to the recompiled kernel like every
-                                   * other vector and drop this HLE vestige. */
-        cdrtos_syscall();
-        return;
-    }
-
-    /* SCC68070 exception processing (faithful port of CeDImu ProcessException):
-     * enter supervisor, push the exception stack frame, then vector through the
-     * (RAM-resident) exception vector table the kernel built at boot. */
+/* SCC68070 exception processing (faithful port of CeDImu ProcessException):
+ * enter supervisor, push the exception stack frame, then point PC at the
+ * (RAM-resident) handler the kernel installed in the vector table at boot.
+ * Returns the handler address; does NOT dispatch it. */
+static uint32_t build_exception_frame(uint8_t vec) {
     uint16_t sr = g_cpu.SR;
     g_cpu.SR |= SR_S;
 
@@ -165,7 +161,7 @@ void m68k_trap_vector(uint8_t vec) {
         g_cpu.A[7] -= 2; m68k_write16(g_cpu.A[7], g_fault_opcode); /* IRC = faulting opcode */
         g_cpu.A[7] -= 2; m68k_write16(g_cpu.A[7], g_fault_opcode); /* IR  = faulting opcode */
         g_cpu.A[7] -= 4; m68k_write32(g_cpu.A[7], 0);            /* DBIN */
-        g_cpu.A[7] -= 4; m68k_write32(g_cpu.A[7], g_cpu.PC);     /* TPF = faulting address */
+        g_cpu.A[7] -= 4; m68k_write32(g_cpu.A[7], g_fault_addr); /* TPF = faulting DATA address */
         g_cpu.A[7] -= 4; m68k_write32(g_cpu.A[7], 0);            /* TPD */
         g_cpu.A[7] -= 2; m68k_write16(g_cpu.A[7], 0);            /* internal */
         g_cpu.A[7] -= 2; m68k_write16(g_cpu.A[7], 0);            /* internal */
@@ -175,11 +171,27 @@ void m68k_trap_vector(uint8_t vec) {
     } else {                      /* short (format 0) frame */
         g_cpu.A[7] -= 2; m68k_write16(g_cpu.A[7], (uint16_t)((uint16_t)vec << 2));
     }
-    g_cpu.A[7] -= 4; m68k_write32(g_cpu.A[7], g_cpu.PC);         /* push PC */
+    g_cpu.A[7] -= 4; m68k_write32(g_cpu.A[7], g_cpu.PC);         /* push PC (post-fetch) */
     g_cpu.A[7] -= 2; m68k_write16(g_cpu.A[7], sr);              /* push SR */
 
     uint32_t handler = m68k_read32((uint32_t)vec << 2);
     g_cpu.PC = handler;
+    return handler;
+}
+
+void m68k_raise_exception_frame(uint8_t vec) {
+    build_exception_frame(vec);   /* caller (the interpreter) resumes at the handler */
+}
+
+void m68k_trap_vector(uint8_t vec) {
+    if (vec == 0x20) {            /* TRAP #0 = OS-9 gateway. TODO: route through the
+                                   * vector table to the recompiled kernel like every
+                                   * other vector and drop this HLE vestige. */
+        cdrtos_syscall();
+        return;
+    }
+
+    uint32_t handler = build_exception_frame(vec);
     call_by_address(handler);     /* recompiled handler, or dispatch-miss → RAM-built stub
                                    * needs the hybrid interpreter (MC-CDI-011) */
 }

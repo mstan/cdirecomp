@@ -26,30 +26,52 @@ static uint16_t s_reg[32];      /* internal registers, byte-offset indexed */
 static uint8_t  s_csr1r = 0;    /* CSR1R read-side status (display)         */
 static uint8_t  s_csr2r = 0;    /* CSR2R read-side status (IT1/IT2/BE)      */
 
-/* ---- Display timing (CSR1R.DA, bit 7) ----
- * The boot polls `BTST #7,$4FFFF1 / BEQ` for DA (Display Active). CeDImu drives
- * it from a vertical line counter (Display.cpp): DA is clear through the
- * vertical-retrace lines, set during the active scan, and cleared again at
- * frame end. We mirror that, advancing the line counter by elapsed CPU cycles.
- * NTSC (FD=1) constants from CeDImu MCD212.hpp: 262 total lines, 22 retrace.
- * Cycles/line ≈ SCC68070 15.5 MHz / (262 lines * 60 Hz) ≈ 986. Faithful enough
- * for the poll cadence; exact per-instruction cycle timing is MC-CDI-005. */
-#define MCD_DA            0x80u
-#define MCD_TOTAL_LINES   262u
-#define MCD_RETRACE_LINES 22u
-#define MCD_CYCLES_LINE   986u
+/* Register byte-offsets within the $4FFFE0 window (CeDImu MCD212.hpp:
+ * m_internalRegisters[addr - 0x4FFFE0]). DA frame geometry is read live from
+ * these — the boot programs DCR1.FD/CF before the display polls matter, and
+ * the oracle uses the live values, so mirroring them keeps us in phase. */
+#define MCD_CSR1W 0x10u
+#define MCD_DCR1  0x12u
 
-static uint32_t s_line_cyc;     /* cycles accumulated toward the next line   */
+/* ---- Display timing (CSR1R.DA, bit 7) — faithful port of CeDImu ----
+ * The boot polls `BTST #7,$4FFFF1 / BNE` for DA (Display Active). CeDImu
+ * (MCD212::IncrementTime + Display.cpp::DrawVideoLine) drives it from a
+ * vertical line counter advanced by ELAPSED TIME, not raw cycles: each
+ * instruction adds `cycles * cycleDelay` ns, and one display line elapses every
+ * GetLineDisplayTime() ns. DA is clear through the vertical-retrace lines and
+ * set during the active scan. We mirror that exactly — accumulating ns at the
+ * SCC68070 cycle period and deriving the line time / frame geometry from the
+ * live register file — so our DA phase tracks the oracle's (MC-CDI-005). The
+ * cycle costs feeding this come from m68k_cycles (interpreter) and the
+ * recompiled tier's accumulator; matching the oracle's *time base* here closes
+ * the loop. NTSC board (the ROM under test); PAL would use 15.0 MHz / m_isPAL. */
+#define MCD_DA  0x80u
+
+/* SCC68070 NTSC clock: ns between cycles = 1e9 / 15,104,900 (SCC68070.hpp). */
+#define MCD_CYCLE_DELAY_NS (1.0e9 / 15104900.0)
+
+static double   s_time_ns;      /* ns accumulated toward the next line       */
 static uint32_t s_vlines;       /* vertical line within the current frame    */
 
+/* Live frame geometry (CeDImu MCD212.hpp GetFD/GetST/GetCF). FD selects NTSC
+ * (262 lines / 22 retrace) vs the larger PAL-rate raster; CF shortens the line
+ * display time. Read fresh each tick so we track register programming. */
+static unsigned mcd_total_lines(void)   { return (s_reg[MCD_DCR1] & (1u<<13)) ? 262u : 312u; }
+static unsigned mcd_retrace_lines(void) {
+    if (s_reg[MCD_DCR1] & (1u<<13)) return 22u;             /* FD (NTSC)        */
+    return (s_reg[MCD_CSR1W] & (1u<<1)) ? 72u : 32u;        /* !FD: ST selects  */
+}
+static double   mcd_line_time_ns(void)  { return (s_reg[MCD_DCR1] & (1u<<14)) ? 63560.0 : 64000.0; } /* CF */
+
 void mcd212_tick(uint32_t cycles) {
-    s_line_cyc += cycles;
-    while (s_line_cyc >= MCD_CYCLES_LINE) {
-        s_line_cyc -= MCD_CYCLES_LINE;
+    s_time_ns += (double)cycles * MCD_CYCLE_DELAY_NS;
+    double line_ns = mcd_line_time_ns();
+    while (s_time_ns >= line_ns) {
+        s_time_ns -= line_ns;
         s_vlines++;
-        if (s_vlines == MCD_RETRACE_LINES + 1)      /* leaving retrace -> active */
+        if (s_vlines == mcd_retrace_lines() + 1)    /* leaving retrace -> active */
             s_csr1r |= MCD_DA;
-        if (s_vlines >= MCD_TOTAL_LINES) {          /* frame end -> retrace      */
+        if (s_vlines >= mcd_total_lines()) {        /* frame end -> retrace      */
             s_csr1r &= (uint8_t)~MCD_DA;
             s_vlines = 0;
             g_frame_count++;
