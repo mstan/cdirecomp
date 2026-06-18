@@ -27,3 +27,9 @@ void debug_trace_block(void);
  * fault. Call from abort sites (unmapped bus access, illegal opcode, …) so the
  * crash report shows HOW we got there, not just the final registers. */
 void debug_dump_fault_trail(const char *reason);
+
+/* --fault-hold: freeze at a fatal fault instead of aborting, keeping the rings
+ * queryable for first-divergence. `g_hold_on_fault` gates it; cdi_fault_hold()
+ * parks the faulting thread (the server thread keeps serving). */
+extern int g_hold_on_fault;
+void cdi_fault_hold(void);

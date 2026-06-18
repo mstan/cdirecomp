@@ -43,6 +43,7 @@ static void bus_fault(const char *op, uint32_t addr, int bits) {
     /* The executed path INTO the fault — turns a final-register dump into a
      * trail (DEBUG.md first-divergence). Always-on ring; no arming needed. */
     debug_dump_fault_trail("unmapped bus access");
+    if (g_hold_on_fault) cdi_fault_hold();   /* keep rings queryable for diffing */
     abort();
 }
 

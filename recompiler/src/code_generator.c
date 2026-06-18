@@ -1898,6 +1898,22 @@ static void emit_instr(FILE *f, const GenesisRom *rom,
              * vectors, then JMP (d16,PC) -> odd). Emit the faithful trap instead
              * of decoding/executing the misaligned target. */
             emit_cycle_accounting(f, "  ", estimate_cycles(instr));
+            /* The address-error stack frame's PC and fault-address (TPF) fields
+             * are the ODD TARGET, not this JMP — the fault is the fetch from the
+             * odd address (mirrors CeDImu ProcessException: PC and lastAddress =
+             * the odd PC). The OS-9 handler reads them, so set PC to the target
+             * before the trap or the kernel resumes at the wrong place. */
+            fprintf(f, "  g_cpu.PC = 0x%06Xu; /* odd target = faulting address (frame PC/TPF) */\n",
+                    instr->target_addr);
+            /* Record the faulting fetch as its own trace sample so the trace
+             * aligns with the oracle (which steps onto the odd PC, then faults);
+             * otherwise the recompiled trap is off-by-one vs the interpreter
+             * oracle and masks every later divergence. */
+            fprintf(f, "  debug_trace_block(); /* the faulting fetch at the odd PC */\n");
+            /* IRC/IR in the frame = the faulting instruction's opcode (this JMP).
+             * CeDImu stacks currentOpcode, which the odd fetch left as this JMP;
+             * the OS-9 handler reads it. */
+            fprintf(f, "  g_fault_opcode = 0x%04Xu;\n", instr->words[0]);
             fprintf(f, "  m68k_trap_vector(3u); return; /* JMP to odd addr -> address error */\n");
             break;
         }

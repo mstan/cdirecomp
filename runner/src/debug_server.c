@@ -37,6 +37,7 @@
   #include <arpa/inet.h>
   #include <unistd.h>
   #include <pthread.h>
+  #include <time.h>
   typedef int sock_t;
   #define BAD_SOCK (-1)
   #define close_sock close
@@ -345,3 +346,22 @@ void debug_server_init(int port) {
 }
 
 void debug_server_poll(void) { /* threaded now — nothing to poll */ }
+
+/* When set (--fault-hold), a fatal fault freezes the process here instead of
+ * aborting, so the always-on rings stay queryable at the fault point (the whole
+ * boot trace is preserved for first-divergence). The server thread keeps
+ * answering while the main thread is parked. */
+int g_hold_on_fault = 0;
+
+void cdi_fault_hold(void) {
+    fprintf(stderr, "[fault-hold] frozen at fault; rings live on :%d for inspection. "
+                    "Ctrl-C to exit.\n", s_port);
+    fflush(stderr);
+    for (;;) {
+#ifdef _WIN32
+        Sleep(1000);
+#else
+        struct timespec ts = { 1, 0 }; nanosleep(&ts, NULL);
+#endif
+    }
+}
