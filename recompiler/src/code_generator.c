@@ -2647,7 +2647,15 @@ static void emit_instr(FILE *f, const GenesisRom *rom,
          * PSGSetFreq — corrupting downstream Bcc paths that read X
          * (squelched notes, drift). */
         ExtReader er2; er_init(&er2, instr);
-        emit_ea_store_ex(f, instr, instr->src_ea, sz, &er2, "0", 1);
+        /* rmw=0, NOT 1: CLR is store-only (no preceding load), so the store
+         * itself must apply the -(An) predecrement / (An)+ postincrement EA
+         * side-effect. The other RMW ops (NEG/NOT/NEGX/NBCD/TAS) pass rmw=1
+         * because their emit_ea_load_ex already advanced An; CLR has no load,
+         * so rmw=1 silently dropped the predecrement (e.g. CLR.L -(A7) wrote 0
+         * to (A7) without first doing A7-=4 — corrupting the stack). CeDImu's
+         * CLR (SetLong(eamode,eareg,...)) applies the EA side-effect and does
+         * not separately read, which rmw=0 matches. */
+        emit_ea_store_ex(f, instr, instr->src_ea, sz, &er2, "0", 0);
         fprintf(f, "  g_cpu.SR = (g_cpu.SR & ~0x0Fu) | (1u<<2);\n");
         break;
     }

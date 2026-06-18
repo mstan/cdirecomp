@@ -50,24 +50,50 @@ generated-code edits):
   N — the deterministic stop for diffing a window the (now non-faulting) boot
   runs past and evicts. (This is the `--max-insns` cap the old backlog wanted.)
 
-## THE NEXT TASK — confirm shell idle, then interrupt delivery
+## Confirmed: oracle boots to the shell idle `STOP #$2000` @ `$40A3E2`
 
-The boot sits in a loop around **`$405D6x`** with the frame counter advancing.
-Two open questions, in order:
+A 1,000,000-step oracle run rests with `currentPC=$40A3E2`, SR=`$2000`
+(supervisor, IPL=0, interrupts enabled) executing the same instruction forever —
+a **`STOP #$2000`**, the player-shell idle waiting for an interrupt. So `$40A3E2`
+is the goal. (Our runtime's `genesis_stop_until_interrupt` doesn't truly halt yet
+— TODO MC-CDI-007 — so when the native reaches STOP the flat-call just unwinds.)
 
-1. **Is `$405D6x` the player-shell idle loop?** The oracle's documented shell
-   idle is `$40A3E2`. The oracle only ran 250k steps (bus error at ~seq 130693),
-   so confirming requires a **longer oracle run** (raise `--steps`) and a diff
-   out past the probes. If `$405D6x` is an *intermediate* wait (e.g. polling a
-   device or a not-yet-delivered IRQ), that points straight at task 2.
-2. **Interrupt delivery (MC-CDI-007/010).** `cdi_irq_raise` sets `g_irq_pending`
-   but nothing consumes it. The OS will want timer/display IRQs to leave idle
-   loops. Wire delivery: between instructions, if a pending IRQ is above the
-   SR I-mask, vector into the CPU (reuse `build_exception_frame` for the short
-   autovector frame). Mirror CeDImu's `Interpreter()` exception drain.
+## DONE this session — CLR `-(An)` predecrement bug (recompiler)
 
-Likely subsequent walls: more device handshakes (CDIC/CIAP, IKAT, NVRAM) as the
-shell initializes.
+The re-aligning diff (`tools/realign_divergence.py`, new) skipped the benign DA
+jitter and pinned the true divergence at `$403EF2` = `CLR.L -(A7)`: the
+recompiler emitted `m68k_write32(A7,0)` with **no predecrement** (`A7 -= 4`),
+corrupting the stack. Root cause: `code_generator.c` MN_CLR passed `rmw=1` to
+`emit_ea_store_ex` like NEG/NOT — but CLR has no preceding load to apply the
+`-(An)`/`(An)+` side-effect, so it was silently dropped. Fixed to `rmw=0`
+(matches CeDImu's write-only `CLR`). Affects ANY code using CLR with predec/
+postinc. The boot now matches the oracle bit-exact (modulo jitter) ~6000
+instructions further, to **seq 207124**.
+
+## THE NEXT TASK — call-path split at the `$40468E` RTS (then interrupt delivery)
+
+After the CLR fix the next true divergence is at `$40468E` (`RTS`): native and
+oracle have **identical registers but different return addresses on the stack**
+(`mem[$1478]`: native `$406578` vs oracle `$40407C`). They reached a shared
+helper subroutine (`LINK A5 … MOVEM … UNLK A5 ; RTS`) from **different callers** —
+native is still circling the `$406xxx` dispatcher region while the oracle is in
+`$40407x`. So the real split is EARLIER and was masked by register-only
+alignment (the shared subroutine normalizes registers; only the stacked return
+address — memory — differs).
+
+To chase it you need a **memory/stack-aware diff** (the current realign tool
+compares registers only). Options: (a) snapshot a stack/RAM window on both sides
+at each step and diff; (b) improve `realign_divergence.py` to flag a one-sided
+"benign" skip whose skipped records introduce NEW PCs (a real path split, not a
+spin loop); (c) walk back from the two return addresses (`$406578` / `$40407C`)
+to find the JSR/BSR sites and diff the control flow that chose between them.
+
+After that, expect **interrupt delivery (MC-CDI-007/010)**: `cdi_irq_raise` sets
+`g_irq_pending` but nothing consumes it; the shell's `STOP #$2000` needs a timer/
+display IRQ to wake. Wire delivery between instructions (pending IRQ above the SR
+I-mask → vector via `build_exception_frame` short autovector frame), mirroring
+CeDImu's `Interpreter()` exception drain, and make `genesis_stop_until_interrupt`
+actually idle until then.
 
 ## Validation workflow (READ — non-obvious environment gotchas)
 
