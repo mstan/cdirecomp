@@ -124,7 +124,27 @@ is the `$050A` RAM-built stub (dispatch miss) → the MC-CDI-011 hybrid
 interpreter is the critical path, gated on the engine-licensing decision
 (clown68000 AGPL / CeDImu GPL — both attach copyleft to the shipped runtime).
 
-Then drive the MC-CDI device tickets, oracle-diffed, in first-divergence order:
+**MC-CDI-011 hybrid interpreter — DONE (2026-06-17), and AGPL-free.** Rather than
+link clown68000 (AGPL), we ported segagenesisrecomp's own **clean-room** 68000
+interpreter (`runner/src/m68k_interp.c`) — it reuses the shared decoder and
+mirrors `code_generator.c`, so no copyleft attaches. Adapted the instruction
+fetch to read from the CD-i bus (the missed code is RAM-resident, unlike the
+Genesis ROM-only case). On a dispatch miss the runtime interprets the
+un-recompiled gap until PC re-enters a recompiled function, then resumes native
+(`m68k_interp_run_until_known` + `dispatch_has_addr`). Result: the boot bridges
+the `$050A` exception stub and runs **2.3M+ instructions** of CD-RTOS init —
+validated by the oracle (native lands exactly where CeDImu is during boot). So
+the clean-room replacement the licensing plan deferred is already done; clown68000
+stays a dev-only cycle-probe in the recompiler.
+
+New wall (precisely identified): the boot spins on `BTST #7,$4FFFF1 / BEQ` —
+polling **MCD212 CSR1R bit 7 = DA (Display Active)**, which our register-file
+model never sets. CeDImu drives DA from display-line timing (Display.cpp:
+SetDA after vertical retrace, UnsetDA at frame end) and passes it, reaching a
+later shell-idle loop at `$40A3E2` (user mode). Next: model MCD212 DA timing
+(MC-CDI-012/007) so the poll completes.
+
+Then drive the remaining MC-CDI device tickets, oracle-diffed, in first-divergence order:
 MMU/memory (MC-CDI-006) → MCD212 register file already present, add decoders
 (MC-CDI-012) → IKAT (MC-CDI-023) → Timekeeper (MC-CDI-022) → interrupt delivery
 + pacing (MC-CDI-007/010) → hybrid interpreter for RAM-built stubs (MC-CDI-011).
