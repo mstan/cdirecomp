@@ -7,9 +7,51 @@
  */
 #include "cdi_runtime.h"
 #include "debug_server.h"
+#include "m68k_interp.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+/* Generated dispatch-table accessors (bios/generated/cdrtos_dispatch.c). */
+int      game_dispatch_table_size(void);
+uint32_t game_dispatch_table_addr(int i);
+
+/* Is `addr` the entry of a statically recompiled function? (Used by the hybrid
+ * interpreter to know when it has re-entered recompiled territory.) */
+int dispatch_has_addr(uint32_t addr) {
+    addr &= 0xFFFFFFu;
+    int n = game_dispatch_table_size();
+    for (int i = 0; i < n; i++)
+        if (game_dispatch_table_addr(i) == addr) return 1;
+    return 0;
+}
+
+/* ---- Hybrid interpreter handoff (MC-CDI-011) ----
+ * CD-RTOS builds vector stubs and relocates modules into RAM, so indirect
+ * control flow reaches code the static recompiler never saw (a "dispatch
+ * miss"). Rather than no-op it, interpret the un-recompiled gap on the clean-
+ * room m68k_interp until execution re-enters a recompiled function, then resume
+ * native there. `ret` is the return address on the guest stack (optional stop).
+ * Returns 1 if it handled the target, 0 to fall through to miss logging. */
+static int s_in_hybrid = 0;
+
+static int hybrid_enter(uint32_t target, uint32_t ret) {
+    if (s_in_hybrid) return 0;           /* nested miss: log it rather than recurse blindly */
+    s_in_hybrid = 1;
+    M68kiStatus st = m68k_interp_run_until_known(target, ret);
+    s_in_hybrid = 0;
+
+    if (st == (M68kiStatus)M68KI_REENTER) {
+        recomp_call_addr(g_cpu.PC);      /* resume native at the recompiled entry */
+        return 1;
+    }
+    if (st == M68KI_OK) return 1;        /* interpreted cleanly back to `ret` */
+
+    fprintf(stderr, "[hybrid] interp halt(%d) entering $%06X: opcode $%04X at $%06X\n",
+            st, target, g_m68ki_bad_op, g_m68ki_bad_pc);
+    debug_dump_fault_trail("hybrid interp halt");
+    return 0;                            /* let the dispatch-miss path record it */
+}
 
 /* ---- CPU + ABI globals (generated code references these) ---- */
 M68KState g_cpu;
@@ -54,9 +96,12 @@ void genesis_log_dispatch_miss(uint32_t addr) {
             addr, (unsigned long long)g_frame_count);
 }
 
-/* Default dispatch override: no hand-written handler. A specific OS/game module
- * may override this. Generated dispatch falls back to the miss logger. */
-int game_dispatch_override(uint32_t addr) { (void)addr; return 0; }
+/* Generated dispatch calls this before logging a miss. We treat a miss as a
+ * hybrid-interpreter handoff: the target was reached via a recomp JSR/exception
+ * that left a return address on the guest stack, so interpret from there. */
+int game_dispatch_override(uint32_t addr) {
+    return hybrid_enter(addr, m68k_read32(g_cpu.A[7]));
+}
 
 /* JSR/BSR return-address push onto the guest supervisor stack. The flat-call
  * model returns control via the C stack (RTS = C `return`), so this exists to
@@ -156,14 +201,16 @@ void m68k_movec_write(uint16_t cc, uint32_t val) {
     abort();
 }
 
-/* ---- Interpreter fallbacks (not modelled yet) ---- */
+/* ---- Interpreter fallbacks for unresolved dynamic control flow (MC-CDI-011) ----
+ * Emitted by generated code at computed JMP sites and unresolved calls. Both
+ * route through the same clean-room interpreter handoff. JMP has no fresh
+ * return push (the enclosing function's return is already on the stack); a
+ * call's return address is at [A7]. */
 void hybrid_jmp_interpret(uint32_t target_pc) {
-    fprintf(stderr, "[hybrid] JMP interpret @$%08X not implemented (TODO MC-CDI-011)\n", target_pc);
-    abort();
+    hybrid_enter(target_pc, m68k_read32(g_cpu.A[7]));
 }
 void hybrid_call_interpret(uint32_t target_pc) {
-    fprintf(stderr, "[hybrid] call interpret @$%08X not implemented (TODO MC-CDI-011)\n", target_pc);
-    abort();
+    hybrid_enter(target_pc, m68k_read32(g_cpu.A[7]));
 }
 
 /* ---- misc ---- */

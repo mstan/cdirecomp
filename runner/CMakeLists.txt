@@ -21,12 +21,18 @@ add_executable(CdiRuntime
     src/periph.c
     src/cdrtos.c
     src/debug_server.c
+    src/m68k_interp.c
+    # Clean-room hybrid interpreter (MC-CDI-011) reuses the recompiler's own
+    # decoder for parity-by-construction with the static C emitter.
+    "${CMAKE_CURRENT_SOURCE_DIR}/../recompiler/src/m68k_decoder.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../recompiler/src/rom_parser.c"
     ${BIOS_GEN_SRCS}
     ${GAME_GEN_SRCS}
 )
 
 target_include_directories(CdiRuntime PRIVATE
     include
+    "${CMAKE_CURRENT_SOURCE_DIR}/../recompiler/src"
     "${CMAKE_CURRENT_SOURCE_DIR}/../bios/generated"
     "${CMAKE_CURRENT_SOURCE_DIR}/../hotelmario/generated"
 )
