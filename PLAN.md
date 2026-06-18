@@ -137,12 +137,22 @@ validated by the oracle (native lands exactly where CeDImu is during boot). So
 the clean-room replacement the licensing plan deferred is already done; clown68000
 stays a dev-only cycle-probe in the recompiler.
 
-New wall (precisely identified): the boot spins on `BTST #7,$4FFFF1 / BEQ` —
-polling **MCD212 CSR1R bit 7 = DA (Display Active)**, which our register-file
-model never sets. CeDImu drives DA from display-line timing (Display.cpp:
-SetDA after vertical retrace, UnsetDA at frame end) and passes it, reaching a
-later shell-idle loop at `$40A3E2` (user mode). Next: model MCD212 DA timing
-(MC-CDI-012/007) so the poll completes.
+**Device bring-up via oracle-guided first-divergence (2026-06-17/18).** Each wall
+is a status bit/region the runtime didn't model; each fix mirrors CeDImu exactly
+and pushes the boot further:
+- `$400E96` `BTST #7,$4FFFF1` — **MCD212 CSR1R DA** (Display Active). Modelled
+  display-line timing (`mcd212_tick`, 262 lines/22 retrace NTSC, driven by CPU
+  cycles from both tiers). Boot passes; frame counter now advances. ✓
+- `$400B44` UART TX handshake — polls **USR bit 2 (TxRDY)** at `$80002013`.
+  CeDImu sets TxRDY at reset and never clears it (instant transmit = always
+  ready); added `periph_reset()` to mirror. Boot passes. ✓
+- `$400790` — **unmapped bus read at `$600000`** during a memory-region probe
+  (`D6=$FFFF8000` walking pattern). Next target: the Mono-IV `$600000` decode
+  (MC-CDI-004) — model per CeDImu's bus so the probe resolves.
+
+The pattern is steady: free-run → hit a loud wall → identify the exact register/
+region in CeDImu → mirror it → advance. CeDImu reaches a shell-idle loop at
+`$40A3E2` (user mode), the boot-to-shell finish line.
 
 Then drive the remaining MC-CDI device tickets, oracle-diffed, in first-divergence order:
 MMU/memory (MC-CDI-006) → MCD212 register file already present, add decoders

@@ -139,6 +139,10 @@ void runtime_request_vblank(void);
 void     mcd212_write(uint32_t addr, uint32_t val, int size);
 uint32_t mcd212_read (uint32_t addr, int size);
 void     mcd212_render_frame(uint32_t *framebuf);   /* 384x280 (PAL) ARGB8888 */
+/* Advance MCD212 display timing by `cycles` of CPU time. Drives the vertical
+ * line counter and the CSR1R DA (Display Active) bit the boot polls. Called per
+ * instruction from both execution tiers (glue_check_vblank + the interpreter). */
+void     mcd212_tick(uint32_t cycles);
 
 /* CDIC — CD Interface Controller: sector delivery + ADPCM audio decode. */
 void     cdic_write(uint32_t addr, uint32_t val, int size);
@@ -161,6 +165,7 @@ extern uint32_t g_irq_pending;           /* bitmask of pending IRQ levels */
  * 2 DMA channels, MMU, peripheral interrupt-control registers. */
 void     periph_write(uint32_t addr, uint32_t val, int size);
 uint32_t periph_read (uint32_t addr, int size);
+void     periph_reset(void);             /* power-on state (UART TxRDY, etc.) */
 
 /* ====================================================================== */
 /*  ABI globals the generator references (mirrors genesis_runtime.h)      */

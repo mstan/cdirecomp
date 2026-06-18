@@ -1054,6 +1054,11 @@ M68kiStatus m68k_interp_step(void) {
         return M68KI_HALT_UNIMPL;
     }
     g_cpu.PC = next & 0xFFFFFFu;
+    /* Advance MCD212 display timing so DA toggles while the boot polls it from
+     * interpreted code. The interpreter doesn't compute exact cycle costs, so
+     * use a per-instruction average (~10, a typical 68000 instruction); exact
+     * timing is MC-CDI-005. The recompiled tier drains real cycles instead. */
+    mcd212_tick(10);
     return M68KI_OK;
 }
 
