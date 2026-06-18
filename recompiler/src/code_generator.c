@@ -1598,19 +1598,184 @@ static int estimate_cycles_prm(const M68KInstr *instr)
     }
 }
 
-/* Primary cycle-cost entry point. Asks the clown68000 interpreter (via
- * cycle_probe) for the exact cost; falls back to the PRM-derived table
- * above if the probe isn't initialised (e.g. unit-test paths) or if
- * clown returned an unreasonable value. */
+/* =========================================================================
+ * SCC68070 cycle model (MC-CDI-005) — the CD-i CPU is a 68070, NOT a plain
+ * 68000, and its per-instruction timings differ (NOP=7, MOVE reg-reg=7,
+ * RTS=15, ...). The behavioral oracle (CeDImu) drives MCD212 display timing
+ * (the DA bit the boot polls) from these exact 68070 cycle counts, so the
+ * recompiled tier must emit 68070 cycles too or its accumulated display phase
+ * drifts out of lockstep — clown68000 (a 68000 core) is wrong for CD-i here.
+ *
+ * This MIRRORS CeDImu cores/SCC68070/{InstructionSet,AddressingModes,
+ * MemoryAccess}.cpp, and is the static-codegen twin of the runtime interpreter's
+ * m68k_cycles() (runner/src/m68k_interp.c) — the two must agree. (TODO MC-CDI-009
+ * extracts the one cycle model both consume.) The interpreter computes the few
+ * data-dependent costs (register shift counts, DBcc condition, RTE frame) from
+ * live state; codegen can't, so it bakes the dominant-case estimate noted below.
+ * ========================================================================= */
+
+/* SCC68070 effective-address calculation time (CeDImu IT* constants). sb =
+ * operand size in bytes; only byte/word (<4 → "BW") vs long (==4 → "L") matters. */
+static int scc_ea(int ea6, int sb)
+{
+    int mode = (ea6 >> 3) & 7, reg = ea6 & 7;
+    int isL = (sb == 4);
+    switch (mode) {
+    case 0: case 1: return 0;                 /* Dn / An                */
+    case 2:         return isL ? 8  : 4;      /* (An)        ITARI      */
+    case 3:         return isL ? 8  : 4;      /* (An)+       ITARIWPo   */
+    case 4:         return isL ? 11 : 7;      /* -(An)       ITARIWPr   */
+    case 5:         return isL ? 15 : 11;     /* d16(An)     ITARIWD    */
+    case 6:         return isL ? 18 : 14;     /* d8(An,Xn)   ITARIWI8   */
+    case 7:
+        switch (reg) {
+        case 0: return isL ? 12 : 8;          /* (xxx).W     ITAS       */
+        case 1: return isL ? 16 : 12;         /* (xxx).L     ITAL       */
+        case 2: return isL ? 15 : 11;         /* d16(PC)     ITPCIWD    */
+        case 3: return isL ? 18 : 14;         /* d8(PC,Xn)   ITPCIWI8   */
+        case 4: return isL ? 8  : 4;          /* #imm        ITIL/ITIBW */
+        }
+    }
+    return 0;
+}
+
+static int scc_sb(M68KSize sz) { return sz == M68K_SIZE_L ? 4 : sz == M68K_SIZE_B ? 1 : 2; }
+
+static int estimate_cycles_scc68070(const M68KInstr *instr)
+{
+    const uint16_t op     = instr->words[0];
+    const int      eamode = (op >> 3) & 7;
+    const int      eareg  =  op       & 7;
+    const int      ea6    =  op & 0x3F;
+    const int      sb     = scc_sb(instr->size);
+    const int      isL    = (sb == 4);
+
+    switch (instr->mnemonic) {
+    /* ---- control flow ---- */
+    case MN_NOP:    return 7;
+    case MN_RTS:    return 15;
+    case MN_RTR:    return 22;
+    case MN_STOP:   return 13;
+    case MN_RESET:  return 154;
+    case MN_RTE:    return 39;   /* short frame (dominant); long frame = 146 (runtime) */
+    case MN_BRA:    return 13 + (((op & 0xFF) == 0) ? 1 : 0);
+    case MN_Bcc:    return 13 + (((op & 0xFF) == 0) ? 1 : 0);
+    case MN_BSR:    return ((op & 0xFF) == 0) ? 22 : 17;
+    case MN_DBcc:   return 17;   /* loop-taken / counter-expire (dominant); cond-true = 14 */
+    case MN_JMP:    return ((eamode == 7 && eareg <= 1) ? 6  : 3)  + scc_ea(ea6, 1);
+    case MN_JSR:    return ((eamode == 7 && eareg <= 1) ? 17 : 14) + scc_ea(ea6, 1);
+
+    /* ---- moves ---- */
+    case MN_MOVE: {
+        int dst_ea = (((op >> 6) & 7) << 3) | ((op >> 9) & 7);
+        return 7 + scc_ea(ea6, sb) + scc_ea(dst_ea, sb);
+    }
+    case MN_MOVEA:  return 7 + scc_ea(ea6, sb);
+    case MN_MOVEQ:  return 7;
+    case MN_LEA:    return ((eamode == 7 && eareg <= 1) ? 6  : 3)  + scc_ea(ea6, 2);
+    case MN_PEA:    return ((eamode == 7 && eareg <= 1) ? 13 : 10) + scc_ea(ea6, 4);
+    case MN_MOVEM: {
+        uint16_t list = (instr->word_count >= 2) ? instr->words[1] : 0;
+        int szl  = (op >> 6) & 1;
+        int base = (((eamode == 7 && eareg <= 1) || eamode <= 4) ? 19 : 16)
+                   + (((op >> 10) & 1) ? 3 : 0) + (szl ? -4 : 0);
+        return base + scc_ea(ea6, szl ? 4 : 2) + popcount16(list) * (szl ? 11 : 7);
+    }
+
+    /* ---- ALU binary ---- */
+    case MN_ADD: case MN_SUB:
+    case MN_AND: case MN_OR:
+        return 7 + scc_ea(ea6, sb) + (((op >> 8) & 1) ? (isL ? 8 : 4) : 0);
+    case MN_EOR:    return 7 + scc_ea(ea6, sb) + (eamode ? (isL ? 8 : 4) : 0);
+    case MN_CMP:    return 7 + scc_ea(ea6, sb);
+    case MN_ADDA: case MN_SUBA: case MN_CMPA:
+        return 7 + scc_ea(ea6, ((op >> 8) & 1) ? 4 : 2);
+    case MN_ADDQ: case MN_SUBQ:
+        if (eamode == 1) return 7;
+        return 7 + scc_ea(ea6, sb) + (eamode ? (isL ? 8 : 4) : 0);
+
+    /* ---- ALU immediate ---- */
+    case MN_ADDI: case MN_SUBI:
+        return 14 + scc_ea(ea6, sb) + (eamode ? (isL ? 12 : 4) : (isL ? 4 : 0));
+    case MN_CMPI:   return 14 + scc_ea(ea6, sb) + (isL ? 4 : 0);
+    case MN_ANDI: case MN_EORI:
+        return scc_ea(ea6, sb) + (isL ? (eamode ? 8 : 4) : 0) + (eamode ? 18 : 14);
+    case MN_ORI:
+        return 14 + scc_ea(ea6, sb) + (isL ? (eamode ? 8 : 4) : 0) + (eamode ? 4 : 0);
+
+    /* ---- unary ---- */
+    case MN_TST:    return 7 + scc_ea(ea6, sb);
+    case MN_CLR:    return 7 + scc_ea(ea6, sb);
+    case MN_NEG: case MN_NEGX: case MN_NOT:
+        return 7 + scc_ea(ea6, sb) + (eamode ? (isL ? 8 : 4) : 0);
+    case MN_EXT:    return 7;
+    case MN_SWAP:   return 7;
+    case MN_NBCD:   return (eamode ? 14 : 10) + scc_ea(ea6, 1);
+    case MN_TAS:    return 10 + scc_ea(ea6, 1) + (eamode ? 1 : 0);
+    case MN_Scc:    return (eamode ? 17 : 13) + scc_ea(ea6, 1);
+
+    /* ---- shifts / rotates ---- */
+    case MN_LSL: case MN_LSR: case MN_ASL: case MN_ASR:
+    case MN_ROL: case MN_ROR: case MN_ROXL: case MN_ROXR:
+        if (instr->mem_shift)
+            return 14 + scc_ea(ea6, 2);            /* 1-bit word memory shift   */
+        if (op & 0x20)
+            return 13 + 3 * 4;                     /* Dn-count: data-dependent estimate */
+        { int cnt = (op >> 9) & 7; return 13 + 3 * (cnt ? cnt : 8); }  /* imm-count: exact */
+
+    /* ---- multiply / divide (CeDImu fixed costs) ---- */
+    case MN_MULS: case MN_MULU: return 76  + scc_ea(ea6, 2);
+    case MN_DIVS:               return 169 + scc_ea(ea6, 2);
+    case MN_DIVU:               return 130 + scc_ea(ea6, 2);
+
+    /* ---- bit ops ---- */
+    case MN_BTST:   return 7  + ((op & 0x100) ? 0 : 7) + (eamode ? scc_ea(ea6, 1)     : 0);
+    case MN_BCHG: case MN_BCLR: case MN_BSET:
+                    return 10 + ((op & 0x100) ? 0 : 7) + (eamode ? scc_ea(ea6, 1) + 4 : 0);
+
+    /* ---- BCD / extended ---- */
+    case MN_ABCD: case MN_SBCD: return instr->predec_mem_form ? 31 : 10;
+    case MN_ADDX: case MN_SUBX: return instr->predec_mem_form ? (isL ? 40 : 28) : 7;
+
+    /* ---- link / misc ---- */
+    case MN_LINK:     return 25;
+    case MN_UNLK:     return 15;
+    case MN_EXG:      return 13;
+    case MN_MOVE_USP: return 7;
+    case MN_MOVEP:    return ((op >> 7) & 1) ? (((op >> 6) & 1) ? 39 : 25)
+                                             : (((op >> 6) & 1) ? 36 : 22);
+    case MN_CHK:      return 19 + scc_ea(ea6, 2);
+    case MN_MOVE_CCR:
+    case MN_MOVE_SR:
+        return instr->dst_is_ea ? (eamode ? 11 : 7) + scc_ea(ea6, 2)
+                                : 10 + scc_ea(ea6, 2);
+    case MN_MOVEC:    return 12;
+
+    case MN_ORI_TO_CCR:  case MN_ORI_TO_SR:
+    case MN_ANDI_TO_CCR: case MN_ANDI_TO_SR:
+    case MN_EORI_TO_CCR: case MN_EORI_TO_SR: return 14;
+
+    case MN_CMPM:     return isL ? 26 : 18;
+
+    case MN_TRAP:     return 52;
+    case MN_TRAPV:    return 10;
+    case MN_ILLEGAL:  return 55;
+
+    case MN_OTHER:
+    default:
+        /* Unclassified opcode: fall back to the EA-aware PRM estimate (close
+         * enough; the dominant classified instructions above carry the phase). */
+        return estimate_cycles_prm(instr);
+    }
+}
+
+/* Primary cycle-cost entry point. The CD-i CPU is an SCC68070, so we use the
+ * 68070 model (above) — matching the CeDImu oracle's display-timing cycle base.
+ * The clown68000 probe and the 68000 PRM table remain for reference/diff tooling
+ * but are NOT used for CD-i emission (they are 68000-accurate, not 68070). */
 static int estimate_cycles(const M68KInstr *instr)
 {
-    int measured = cycle_probe_measure(instr->addr);
-    /* Guard: any positive value within a sane range wins. Outside that
-     * range, fall back — clown returned <=0 (not initialised) or some
-     * absurd count (illegal opcode trap path, etc). */
-    if (measured > 0 && measured <= 300)
-        return measured;
-    return estimate_cycles_prm(instr);
+    return estimate_cycles_scc68070(instr);
 }
 
 /* emit_mem_shift — the 68K memory shift/rotate forms (opcode size field == 11,
@@ -1903,7 +2068,9 @@ static void emit_instr(FILE *f, const GenesisRom *rom,
              * odd address (mirrors CeDImu ProcessException: PC and lastAddress =
              * the odd PC). The OS-9 handler reads them, so set PC to the target
              * before the trap or the kernel resumes at the wrong place. */
-            fprintf(f, "  g_cpu.PC = 0x%06Xu; /* odd target = faulting address (frame PC/TPF) */\n",
+            fprintf(f, "  g_cpu.PC = 0x%06Xu; /* odd target = stacked PC (post-fetch) */\n",
+                    instr->target_addr);
+            fprintf(f, "  g_fault_addr = 0x%06Xu; /* TPF = faulting address = odd target */\n",
                     instr->target_addr);
             /* Record the faulting fetch as its own trace sample so the trace
              * aligns with the oracle (which steps onto the odd PC, then faults);

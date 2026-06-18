@@ -33,3 +33,8 @@ void debug_dump_fault_trail(const char *reason);
  * parks the faulting thread (the server thread keeps serving). */
 extern int g_hold_on_fault;
 void cdi_fault_hold(void);
+
+/* Freeze the run (rings intact) once this many blocks have been traced. 0 =
+ * disabled. Set from --stop-seq N; deterministic stop for diffing a window the
+ * (now non-faulting) boot would otherwise run past and evict. */
+extern uint64_t g_stop_seq;

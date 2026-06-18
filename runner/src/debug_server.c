@@ -79,12 +79,19 @@ typedef struct {
 static CdiTraceRecord s_trace_ring[CDI_TRACE_RING_LEN];
 static uint64_t       s_trace_seq = 0;   /* number of blocks captured */
 
+/* When non-zero, freeze the run once this many blocks have been traced, leaving
+ * the rings intact for diffing — the deterministic analogue of --fault-hold for
+ * a boot that no longer faults (the bus error is now handled, so execution runs
+ * past the window of interest and would otherwise evict it). Set via --stop-seq. */
+uint64_t g_stop_seq = 0;
+
 /* Hot path: one per executed block. Kept to a single struct copy. */
 void debug_trace_block(void) {
     CdiTraceRecord *r = &s_trace_ring[s_trace_seq & CDI_TRACE_MASK];
     r->seq = s_trace_seq;
     r->cpu = g_cpu;
     s_trace_seq++;
+    if (g_stop_seq && s_trace_seq >= g_stop_seq) cdi_fault_hold();
 }
 
 /* Snapshot the most recent `count` trace records (oldest-first) into `out`.

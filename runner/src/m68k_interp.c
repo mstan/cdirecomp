@@ -19,6 +19,29 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <setjmp.h>
+
+/* ---- mid-instruction bus-error unwind (MC-CDI-004) ----
+ * A memory access to an unmapped address is a real SCC68070 bus error. The
+ * faulting instruction must be ABORTED (no result committed) and the exception
+ * raised — exactly as CeDImu throws a C++ Exception out of GetWord. The
+ * generated/recompiled tier reaches memory through plain C calls we can't
+ * unwind, but the interpreter owns its instruction loop, so it arms a longjmp
+ * around exec_one. cdi_bus.c's fault path calls m68k_interp_bus_error(), which
+ * longjmps back here when armed. s_bus_env is saved/restored per step so nested
+ * interpreter runs (e.g. the handler the bus error vectors into) don't clobber
+ * an outer frame's landing pad. */
+static jmp_buf s_bus_env;
+static int     s_bus_armed = 0;
+static uint32_t s_fault_pc = 0;   /* post-fetch PC to stack on the frame */
+
+int m68k_interp_bus_error(uint32_t addr) {
+    if (!s_bus_armed) return 0;   /* not in an armed interpreter step: fail loud upstream */
+    g_fault_addr = addr;          /* TPF = the unmapped DATA address (CeDImu lastAddress) */
+    s_bus_armed = 0;              /* disarm before unwinding past exec_one */
+    longjmp(s_bus_env, 1);
+    return 1;                     /* unreachable */
+}
 
 /* ---- per-run diagnostics ---- */
 uint32_t g_m68ki_bad_pc = 0;
@@ -842,9 +865,12 @@ static M68kiStatus exec_one(const M68KInstr *ins, uint32_t *next_pc) {
         *next_pc = pop32();
         return M68KI_OK;
     }
-    case MN_RTE: {                       /* pop SR (word), then PC (long) */
+    case MN_RTE: {                       /* pop SR, PC, format word (CeDImu RTE) */
         g_cpu.SR = pop16() & 0xA71Fu;     /* mask to valid SR bits (T,S,I,CCR) */
         *next_pc = pop32();
+        uint16_t fmt = pop16();           /* format/vector word */
+        if ((fmt & 0xF000u) == 0xF000u)   /* long (bus/address-error) frame */
+            g_cpu.A[7] += 26;             /* discard the remaining internal frame words */
         return M68KI_OK;
     }
 
@@ -1026,6 +1052,193 @@ static M68kiStatus exec_one(const M68KInstr *ins, uint32_t *next_pc) {
 }
 
 /* =========================================================================
+ * m68k_cycles — clean-room SCC68070 per-instruction cycle cost (MC-CDI-005).
+ *
+ * The interpreter must advance device timing (MCD212 DA, timers) at the SAME
+ * rate the CeDImu oracle does, or it drifts out of phase on the boot's
+ * vertical-sync poll loops (BTST #7,$4FFFF1 / BNE). CeDImu sums a per-handler
+ * `calcTime` per instruction; this mirrors that table EXACTLY. The values are
+ * SCC68070 timings — NOT a plain 68000 (PRM) and NOT clown68000: the 68070's
+ * costs differ (e.g. NOP=7, MOVE reg-reg=7, RTS=15), so matching the *oracle*
+ * is what keeps lockstep. Source of truth: external/CeDImu cores/SCC68070/
+ * {InstructionSet,AddressingModes,MemoryAccess}.cpp.
+ *
+ * Must be evaluated in the instruction's ENTRY state (before exec_one mutates
+ * g_cpu): a few costs read entry register/flag/stack state (register shift
+ * counts, DBcc condition, RTE frame format).
+ * ========================================================================= */
+static int cyc_popcount16(uint16_t v) {
+    int c = 0;
+    while (v) { c += v & 1; v >>= 1; }
+    return c;
+}
+
+/* SCC68070 effective-address calculation time (CeDImu IT* constants,
+ * AddressingModes.cpp / MemoryAccess.cpp). sb = operand size in bytes; only
+ * byte/word (<4 → "BW") vs long (==4 → "L") matters. Dn/An cost nothing;
+ * immediate (mode 7, reg 4) costs ITIBW(4)/ITIL(8). */
+static int cyc_ea(int ea6, int sb) {
+    int mode = (ea6 >> 3) & 7, reg = ea6 & 7;
+    int isL = (sb == 4);
+    switch (mode) {
+    case 0: case 1: return 0;                 /* Dn / An                */
+    case 2:         return isL ? 8  : 4;      /* (An)        ITARI      */
+    case 3:         return isL ? 8  : 4;      /* (An)+       ITARIWPo   */
+    case 4:         return isL ? 11 : 7;      /* -(An)       ITARIWPr   */
+    case 5:         return isL ? 15 : 11;     /* d16(An)     ITARIWD    */
+    case 6:         return isL ? 18 : 14;     /* d8(An,Xn)   ITARIWI8   */
+    case 7:
+        switch (reg) {
+        case 0: return isL ? 12 : 8;          /* (xxx).W     ITAS       */
+        case 1: return isL ? 16 : 12;         /* (xxx).L     ITAL       */
+        case 2: return isL ? 15 : 11;         /* d16(PC)     ITPCIWD    */
+        case 3: return isL ? 18 : 14;         /* d8(PC,Xn)   ITPCIWI8   */
+        case 4: return isL ? 8  : 4;          /* #imm        ITIL/ITIBW */
+        }
+    }
+    return 0;
+}
+
+static int sb_of(M68KSize sz) {
+    return sz == M68K_SIZE_L ? 4 : sz == M68K_SIZE_B ? 1 : 2;
+}
+
+/* Cycle cost of `ins`, mirroring CeDImu's SCC68070 instruction handlers. */
+int m68k_cycles(const M68KInstr *ins) {
+    const uint16_t op     = ins->words[0];
+    const int      eamode = (op >> 3) & 7;
+    const int      eareg  =  op       & 7;
+    const int      ea6    =  op & 0x3F;          /* EA field = low 6 bits   */
+    const int      sb     = sb_of(ins->size);
+    const int      isL    = (sb == 4);
+
+    switch (ins->mnemonic) {
+
+    /* ---- control flow ---- */
+    case MN_NOP:    return 7;
+    case MN_RTS:    return 15;
+    case MN_RTR:    return 22;
+    case MN_STOP:   return 13;
+    case MN_RESET:  return 154;
+    case MN_RTE: {  /* 39 short frame / 146 long frame; format word at SP+6 */
+        uint16_t fmt = m68k_read16((g_cpu.A[7] + 6) & 0xFFFFFFu);
+        return ((fmt & 0xF000) == 0xF000) ? 146 : 39;
+    }
+    case MN_BRA:    return 13 + (((op & 0xFF) == 0) ? 1 : 0);  /* +1 for .W disp */
+    case MN_Bcc:    return 13 + (((op & 0xFF) == 0) ? 1 : 0);
+    case MN_BSR:    return ((op & 0xFF) == 0) ? 22 : 17;
+    case MN_DBcc:   return eval_cond((op >> 8) & 0xF) ? 14 : 17;
+    case MN_JMP:    return ((eamode == 7 && eareg <= 1) ? 6  : 3)  + cyc_ea(ea6, 1);
+    case MN_JSR:    return ((eamode == 7 && eareg <= 1) ? 17 : 14) + cyc_ea(ea6, 1);
+
+    /* ---- moves ---- */
+    case MN_MOVE: {  /* base 7 + src-EA + dst-EA (dst = (mode<<3)|reg from 11:6) */
+        int dst_ea = (((op >> 6) & 7) << 3) | ((op >> 9) & 7);
+        return 7 + cyc_ea(ea6, sb) + cyc_ea(dst_ea, sb);
+    }
+    case MN_MOVEA:  return 7 + cyc_ea(ea6, sb);
+    case MN_MOVEQ:  return 7;
+    case MN_LEA:    return ((eamode == 7 && eareg <= 1) ? 6  : 3)  + cyc_ea(ea6, 2);
+    case MN_PEA:    return ((eamode == 7 && eareg <= 1) ? 13 : 10) + cyc_ea(ea6, 4);
+    case MN_MOVEM: {
+        uint16_t list = ins->words[1];
+        int szl  = (op >> 6) & 1;                 /* 1 = long transfer */
+        int base = (((eamode == 7 && eareg <= 1) || eamode <= 4) ? 19 : 16)
+                   + (((op >> 10) & 1) ? 3 : 0)   /* dr: mem->reg +3   */
+                   + (szl ? -4 : 0);
+        return base + cyc_ea(ea6, szl ? 4 : 2)
+               + cyc_popcount16(list) * (szl ? 11 : 7);
+    }
+
+    /* ---- ALU binary (Dn <-> EA) ---- */
+    case MN_ADD: case MN_SUB:
+    case MN_AND: case MN_OR:                       /* +write penalty when EA is dst */
+        return 7 + cyc_ea(ea6, sb) + (((op >> 8) & 1) ? (isL ? 8 : 4) : 0);
+    case MN_EOR:                                   /* EA is dst whenever it's memory */
+        return 7 + cyc_ea(ea6, sb) + (eamode ? (isL ? 8 : 4) : 0);
+    case MN_CMP:    return 7 + cyc_ea(ea6, sb);
+    case MN_ADDA: case MN_SUBA: case MN_CMPA:
+        return 7 + cyc_ea(ea6, ((op >> 8) & 1) ? 4 : 2);
+    case MN_ADDQ: case MN_SUBQ:
+        if (eamode == 1) return 7;                 /* An: flat 7         */
+        return 7 + cyc_ea(ea6, sb) + (eamode ? (isL ? 8 : 4) : 0);
+
+    /* ---- ALU immediate ---- */
+    case MN_ADDI: case MN_SUBI:                    /* mem: BW+4/L+12; reg: L+4 */
+        return 14 + cyc_ea(ea6, sb) + (eamode ? (isL ? 12 : 4) : (isL ? 4 : 0));
+    case MN_CMPI:   return 14 + cyc_ea(ea6, sb) + (isL ? 4 : 0);
+    case MN_ANDI: case MN_EORI:                    /* base 0; +(L?8/4); +(mem?18:14) */
+        return cyc_ea(ea6, sb) + (isL ? (eamode ? 8 : 4) : 0) + (eamode ? 18 : 14);
+    case MN_ORI:                                   /* base 14; +(L?8/4); +(mem?4:0) */
+        return 14 + cyc_ea(ea6, sb) + (isL ? (eamode ? 8 : 4) : 0) + (eamode ? 4 : 0);
+
+    /* ---- unary ---- */
+    case MN_TST:    return 7 + cyc_ea(ea6, sb);
+    case MN_CLR:    return 7 + cyc_ea(ea6, sb);
+    case MN_NEG: case MN_NEGX: case MN_NOT:
+        return 7 + cyc_ea(ea6, sb) + (eamode ? (isL ? 8 : 4) : 0);
+    case MN_EXT:    return 7;
+    case MN_SWAP:   return 7;
+    case MN_NBCD:   return (eamode ? 14 : 10) + cyc_ea(ea6, 1);
+    case MN_TAS:    return 10 + cyc_ea(ea6, 1) + (eamode ? 1 : 0);
+    case MN_Scc:    return (eamode ? 17 : 13) + cyc_ea(ea6, 1);
+
+    /* ---- shifts / rotates ---- */
+    case MN_LSL: case MN_LSR: case MN_ASL: case MN_ASR:
+    case MN_ROL: case MN_ROR: case MN_ROXL: case MN_ROXR:
+        if (ins->mem_shift)
+            return 14 + cyc_ea(ea6, 2);            /* 1-bit word memory shift */
+        else {
+            int cnt = (op >> 9) & 7;
+            int shift = (op & 0x20) ? (int)(g_cpu.D[cnt] % 64) : (cnt ? cnt : 8);
+            return 13 + 3 * shift;
+        }
+
+    /* ---- multiply / divide (CeDImu uses fixed costs) ---- */
+    case MN_MULS: case MN_MULU: return 76  + cyc_ea(ea6, 2);
+    case MN_DIVS:               return 169 + cyc_ea(ea6, 2);
+    case MN_DIVU:               return 130 + cyc_ea(ea6, 2);
+
+    /* ---- bit ops (static form +7; memory form reads byte + writes) ---- */
+    case MN_BTST:   return 7  + ((op & 0x100) ? 0 : 7) + (eamode ? cyc_ea(ea6, 1)      : 0);
+    case MN_BCHG: case MN_BCLR: case MN_BSET:
+                    return 10 + ((op & 0x100) ? 0 : 7) + (eamode ? cyc_ea(ea6, 1) + 4  : 0);
+
+    /* ---- BCD / extended ---- */
+    case MN_ABCD: case MN_SBCD: return ins->predec_mem_form ? 31 : 10;
+    case MN_ADDX: case MN_SUBX: return ins->predec_mem_form ? (isL ? 40 : 28) : 7;
+
+    /* ---- link / misc ---- */
+    case MN_LINK:     return 25;
+    case MN_UNLK:     return 15;
+    case MN_EXG:      return 13;
+    case MN_MOVE_USP: return 7;
+    case MN_MOVEP:    return ((op >> 7) & 1) ? (((op >> 6) & 1) ? 39 : 25)   /* reg->mem */
+                                             : (((op >> 6) & 1) ? 36 : 22);  /* mem->reg */
+    case MN_CHK:      return 19 + cyc_ea(ea6, 2);
+    case MN_MOVE_CCR:                                 /* MOVE <ea>,CCR (or CCR,<ea>) */
+    case MN_MOVE_SR:                                  /* MOVE <ea>,SR  (or SR,<ea>)  */
+        return ins->dst_is_ea ? (eamode ? 11 : 7) + cyc_ea(ea6, 2)
+                              : 10 + cyc_ea(ea6, 2);
+    case MN_MOVEC:    return 12;                       /* SCC68070 control-reg move   */
+
+    case MN_ORI_TO_CCR:  case MN_ORI_TO_SR:
+    case MN_ANDI_TO_CCR: case MN_ANDI_TO_SR:
+    case MN_EORI_TO_CCR: case MN_EORI_TO_SR: return 14;
+
+    case MN_CMPM:     return isL ? 26 : 18;
+
+    /* ---- traps / illegal (exception-processing clock periods) ---- */
+    case MN_TRAP:     return 52;   /* TRAP #n → vectors 32..47 */
+    case MN_TRAPV:    return 10;   /* untaken; taken path traps via the exception model */
+    case MN_ILLEGAL:  return 55;
+
+    case MN_OTHER:
+    default:          return 14;   /* unclassified: a reasonable SCC68070 default */
+    }
+}
+
+/* =========================================================================
  * Public entries.
  * ========================================================================= */
 
@@ -1045,20 +1258,53 @@ M68kiStatus m68k_interp_step(void) {
         g_m68ki_bad_pc = pc; g_m68ki_bad_op = m68k_read16(pc);
         return M68KI_HALT_UNIMPL;
     }
+    /* Cost the instruction at ENTRY state — a few costs (register shift counts,
+     * DBcc condition, RTE frame format) read registers/flags/stack that exec_one
+     * is about to mutate. See m68k_cycles (MC-CDI-005). */
+    int cyc = m68k_cycles(&ins);
+
+    /* Publish this instruction's exception context, in case a memory access
+     * inside exec_one hits an unmapped address (bus error). CeDImu stacks the
+     * post-fetch PC and currentOpcode; byte_length is the post-fetch advance.
+     * (For an instruction that source-reads before fetching trailing dest
+     * extension words this slightly overshoots — the boot's probe is a register-
+     * indirect read with no extension words, so it is exact.) */
+    s_fault_pc     = (ins.addr + ins.byte_length) & 0xFFFFFFu;
+    g_fault_opcode = ins.words[0];
+
+    /* Arm the mid-instruction bus-error unwind around exec_one. Save/restore the
+     * landing pad so a nested interpreter run (the handler this may vector into)
+     * leaves the outer frame's pad intact. */
+    jmp_buf prev_env;  int prev_armed = s_bus_armed;
+    memcpy(prev_env, s_bus_env, sizeof prev_env);
+    if (setjmp(s_bus_env) != 0) {
+        /* A bus error aborted exec_one. Restore the outer pad, then raise a
+         * faithful SCC68070 bus error (vector 2): stack PC = post-fetch PC,
+         * TPF = the unmapped address, and continue the loop into the handler. */
+        memcpy(s_bus_env, prev_env, sizeof prev_env);
+        s_bus_armed = prev_armed;
+        g_cpu.PC = s_fault_pc;
+        m68k_raise_exception_frame(2);
+        mcd212_tick(158);   /* CeDImu ProcessException: BusError = 158 clock periods */
+        return M68KI_OK;
+    }
+    s_bus_armed = 1;
+
     uint32_t next;
     s_illegal_ea = 0;
     M68kiStatus st = exec_one(&ins, &next);
+    memcpy(s_bus_env, prev_env, sizeof prev_env);   /* disarm: restore outer pad */
+    s_bus_armed = prev_armed;
     if (st != M68KI_OK) return st;
     if (s_illegal_ea) {                       /* illegal An-destination encoding */
         g_m68ki_bad_pc = ins.addr; g_m68ki_bad_op = ins.words[0];
         return M68KI_HALT_UNIMPL;
     }
     g_cpu.PC = next & 0xFFFFFFu;
-    /* Advance MCD212 display timing so DA toggles while the boot polls it from
-     * interpreted code. The interpreter doesn't compute exact cycle costs, so
-     * use a per-instruction average (~10, a typical 68000 instruction); exact
-     * timing is MC-CDI-005. The recompiled tier drains real cycles instead. */
-    mcd212_tick(10);
+    /* Advance MCD212 display timing with this instruction's real SCC68070 cycle
+     * cost, so DA toggles in phase with the oracle while the boot polls it from
+     * interpreted code. The recompiled tier drains its own real cycles. */
+    mcd212_tick(cyc);
     return M68KI_OK;
 }
 
