@@ -93,11 +93,62 @@ int main(int argc, char *argv[]) {
     fflush(stdout);
     recomp_call_addr(reset_pc);
 
-    /* If we get here the reset path returned without aborting — unexpected
-     * this early; report honestly rather than imply a successful boot. */
-    printf("[cdi] reset entry returned after %llu instructions "
-           "(no abort) — unexpected; investigate.\n",
-           (unsigned long long)g_native_insn_count);
+    /* ---- top-level trampoline (MC-CDI-012) ----
+     * The flat-call model returns control up the C stack on RTS, but the OS-9
+     * boot does NOT bottom out at the reset entry — it transitions to the shell
+     * via the dispatcher. Two ways control reaches here:
+     *   (a) g_redirect_pending — a JSR site detected a rewritten return (the
+     *       dispatcher resuming a different process) and unwound every C frame
+     *       uncleared; re-dispatch at C-depth ~0 so the new context isn't nested
+     *       inside the abandoned one.
+     *   (b) a recompiled RTS bottomed out to main with the guest stack still
+     *       holding a return address. That happens when a function was entered
+     *       WITHOUT a mirroring C JSR (via the exception/dispatcher path), so no
+     *       JSR site popped [A7]. The bare C `return` lands here while the guest
+     *       wants to resume at [A7]. Pop it and dispatch — exactly what the guest
+     *       RTS does. (This is the $406354 RTS -> $4040F0 wall.)
+     * Loop until STOP (shell idle, g_halted) or the guest stack unwinds to its
+     * boot base (nothing left to return to). A no-progress guard fails loud. */
+    {
+        uint64_t last_insn = (uint64_t)-1;
+        unsigned stuck = 0;
+        for (;;) {
+            uint32_t target;
+            if (g_redirect_pending) {
+                g_redirect_pending = 0;
+                target = g_redirect_addr;
+            } else if (g_halted) {
+                break;                                  /* STOP: shell idle reached */
+            } else if (g_cpu.A[7] >= g_recomp_initial_ssp) {
+                break;                                  /* guest stack unwound to base */
+            } else {
+                target = m68k_read32(g_cpu.A[7]) & 0xFFFFFFu;  /* desynced RTS: follow [A7] */
+                g_cpu.A[7] += 4;
+            }
+
+            if (g_native_insn_count == last_insn) {
+                if (++stuck > 100000u) {
+                    fprintf(stderr, "[cdi] top-level trampoline made no progress over "
+                            "%u dispatches (last target $%06X) — aborting.\n", stuck, target);
+                    debug_dump_fault_trail("trampoline no-progress");
+                    break;
+                }
+            } else {
+                stuck = 0;
+                last_insn = g_native_insn_count;
+            }
+            recomp_call_addr(target);
+        }
+    }
+
+    if (g_halted)
+        printf("[cdi] CPU halted (STOP) after %llu instructions — shell idle reached. "
+               "PC=$%08X SR=$%04X (MC-CDI-007 will wake on IRQ).\n",
+               (unsigned long long)g_native_insn_count, g_cpu.PC, g_cpu.SR);
+    else
+        printf("[cdi] top-level returned after %llu instructions "
+               "(A7=$%08X) — investigate.\n",
+               (unsigned long long)g_native_insn_count, g_cpu.A[7]);
     if (g_miss_count_any)
         printf("[cdi] %u dispatch miss(es); last at $%08X — RULE 0a: resolve "
                "before other debugging.\n", g_miss_count_any, g_miss_last_addr);

@@ -2044,6 +2044,11 @@ static void emit_instr(FILE *f, const GenesisRom *rom,
          * Doing our pop here would double-adjust A7 by +4. Skipping the
          * pop keeps A7 in sync with hardware. Flag is cleared so the
          * next level up resumes normally. */
+        /* Context-switch unwind (MC-CDI-012): a deeper JSR site already detected
+         * a rewritten return and set g_redirect_pending. Propagate it uncleared
+         * up to the top-level trampoline — do NOT pop or continue here; this
+         * frame belongs to the outgoing context. */
+        fprintf(f, "  if (g_redirect_pending) return; /* context-switch unwind */\n");
         fprintf(f, "  if (g_rte_pending) { g_rte_pending = 0;\n");
         emit_cycle_accounting(f, "    ", estimate_cycles(instr));
         fprintf(f, "    return; } /* RTE/skip propagation (pre-pop) */\n");
@@ -2052,14 +2057,16 @@ static void emit_instr(FILE *f, const GenesisRom *rom,
          * what is actually on the guest stack. That breaks the OS-9 dispatcher,
          * which REWRITES the stacked return address to resume a different process
          * / saved PC (a context switch). Read [A7]: if it is no longer our static
-         * continuation, the callee subtree redirected the return — dispatch that
-         * address through the tail-call trampoline (a recompiled entry, or the
-         * hybrid interpreter for an arbitrary PC) instead of continuing at the
-         * wrong place. Normal returns ([A7] == ret_addr) fall through unchanged. */
+         * continuation, the callee subtree redirected the return — this IS the
+         * RTS popping the rewritten PC, so consume the slot (A7 += 4) and raise
+         * g_redirect_pending so the C stack unwinds to the top-level trampoline,
+         * which re-dispatches at depth ~0 (a recompiled entry, or the hybrid
+         * interpreter for an arbitrary PC). Normal returns ([A7] == ret_addr)
+         * fall through unchanged. */
         fprintf(f, "  { uint32_t _ret = m68k_read32(g_cpu.A[7]); g_cpu.A[7] += 4; /* JSR pop */\n");
         fprintf(f, "    if ((_ret & 0xFFFFFFu) != 0x%06Xu) {\n", ret_addr & 0xFFFFFFu);
         emit_cycle_accounting(f, "      ", estimate_cycles(instr));
-        fprintf(f, "      recomp_tail_call(_ret & 0xFFFFFFu); return;\n");
+        fprintf(f, "      g_redirect_addr = _ret & 0xFFFFFFu; g_redirect_pending = 1; return;\n");
         fprintf(f, "    } }\n");
         break;
     }
@@ -2337,6 +2344,17 @@ static void emit_instr(FILE *f, const GenesisRom *rom,
         snprintf(stmp, sizeof(stmp), "_ts%06X", addr);
 
         emit_ea_load(f, instr, src_ea, sz, &er_src, stmp, src_expr);
+        /* Register-direct sources (Dn/An) are returned as a lazy "g_cpu.X[reg]"
+         * expression read at STORE time. If the destination EA predecrements
+         * that same register (MOVE An,-(An)), the lazy read would see the
+         * DECREMENTED value. CeDImu/the 68000 read the source fully BEFORE
+         * computing the destination EA, so materialise register-direct sources
+         * into the temp first. (Memory sources already materialise via tmp.) */
+        if (src_mode == 0 || src_mode == 1) {
+            const char *ct = size_ctype(sz);
+            fprintf(f, "  %s %s = (%s)(%s);\n", ct, stmp, ct, src_expr);
+            snprintf(src_expr, 256, "%s", stmp);
+        }
         emit_ea_store(f, instr, dst_ea, sz, &er_dst, src_expr);
 
         /* Update N,Z; clear V,C */
@@ -2367,8 +2385,13 @@ static void emit_instr(FILE *f, const GenesisRom *rom,
 
     /* ------------------------------------------------------------------ */
     case MN_PEA: {
+        /* PEA computes the effective address FIRST, then pushes it. If the EA is
+         * A7-relative (PEA (A7), PEA (d16,A7), …) it must be evaluated from the
+         * pre-push A7 — capture it before the predecrement, or the re-evaluated
+         * addr_expr would see the decremented A7 (the PEA (A7) -> off-by-4 bug). */
         emit_ea_addr(f, instr, instr->src_ea, &er, addr_expr);
-        fprintf(f, "  g_cpu.A[7] -= 4; m68k_write32(g_cpu.A[7], %s);\n", addr_expr);
+        fprintf(f, "  { uint32_t _ea = %s; g_cpu.A[7] -= 4; m68k_write32(g_cpu.A[7], _ea); }\n",
+                addr_expr);
         break;
     }
 
@@ -4314,6 +4337,8 @@ bool codegen_emit(const GenesisRom *rom, const FunctionList *funcs,
         "        recomp_dispatch_once(addr);\n"
         "        if (g_rte_pending)\n"
         "            break;\n"
+        "        if (g_redirect_pending)\n"
+        "            break;       /* context-switch unwind to the top-level trampoline */\n"
         "        if (++guard > 1000000u) {\n"
         "            fprintf(stderr, \"recompiled tail-dispatch runaway at $%%06X\\n\", addr);\n"
         "            exit(2);\n"

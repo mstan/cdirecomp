@@ -50,12 +50,23 @@
 using Reg = SCC68070::Register;
 
 /* ---- block-trace ring (mirrors the native CdiTraceRecord shape) ---- */
-struct TraceRec { uint64_t seq; uint32_t pc, sr, d[8], a[8]; };
+struct TraceRec { uint64_t seq; uint32_t pc, sr, d[8], a[8], a7top; };
 static constexpr uint32_t RING = 1u << 18;
 static constexpr uint32_t MASK = RING - 1;
 static std::vector<TraceRec> g_ring(RING);
 static uint64_t g_seq = 0;
 static CDI *g_cdi = nullptr;
+
+/* Side-effect-free byte/longword peek of guest memory (definition below). Used
+ * to sample [A7] (stack top) per record — mirrors the native a7_top capture so
+ * the realign tool can fold the stack top into its alignment key. */
+static int peek_byte(uint32_t addr, uint8_t *out);
+static uint32_t peek_be32(uint32_t addr) {
+    uint8_t b0 = 0, b1 = 0, b2 = 0, b3 = 0;
+    peek_byte(addr,     &b0); peek_byte(addr + 1, &b1);
+    peek_byte(addr + 2, &b2); peek_byte(addr + 3, &b3);
+    return ((uint32_t)b0 << 24) | ((uint32_t)b1 << 16) | ((uint32_t)b2 << 8) | (uint32_t)b3;
+}
 
 /* Record one executed instruction: `pc` is currentPC (the address that just
  * executed) and `r` is the register snapshot taken BEFORE the step (entry state
@@ -71,6 +82,7 @@ static void capture(uint32_t pc, const std::map<Reg, uint32_t> &r) {
     t.sr = r.at(Reg::SR);
     for (int i = 0; i < 8; i++) t.d[i] = r.at(static_cast<Reg>(static_cast<int>(Reg::D0) + i));
     for (int i = 0; i < 8; i++) t.a[i] = r.at(static_cast<Reg>(static_cast<int>(Reg::A0) + i));
+    t.a7top = peek_be32(t.a[7]);   /* stack top at instruction entry */
     g_seq++;
 }
 
@@ -114,11 +126,12 @@ static void trace_records(char *out, int outlen, uint64_t from, int count, bool 
         for (uint64_t i = 0; i < n; i++, got++) recs[got] = g_ring[(start + i) & MASK];
     }
     int n = snprintf(out, outlen, "{\"ok\":true,\"total\":%llu,\"records\":[", (unsigned long long)g_seq);
-    for (int i = 0; i < got && n < outlen - 320; i++) {
+    for (int i = 0; i < got && n < outlen - 400; i++) {
         n += snprintf(out + n, outlen - n, "%s{\"seq\":%llu,\"pc\":%u,\"sr\":%u",
                       i ? "," : "", (unsigned long long)recs[i].seq, recs[i].pc, recs[i].sr);
         for (int r = 0; r < 8; r++) n += snprintf(out + n, outlen - n, ",\"d%d\":%u", r, recs[i].d[r]);
         for (int r = 0; r < 8; r++) n += snprintf(out + n, outlen - n, ",\"a%d\":%u", r, recs[i].a[r]);
+        n += snprintf(out + n, outlen - n, ",\"a7top\":%u", recs[i].a7top);
         n += snprintf(out + n, outlen - n, "}");
     }
     snprintf(out + n, outlen - n, "]}");

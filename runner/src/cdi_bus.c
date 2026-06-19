@@ -123,8 +123,13 @@ uint32_t m68k_read32(uint32_t addr) {
 }
 
 /* ---- writes (big-endian) ---- */
+/* When set, the store ring suppresses recording — used so a 32-bit write logs a
+ * single 4-byte record rather than the two 16-bit writes it decomposes into. */
+static int s_store_suppress = 0;
+
 void m68k_write8(uint32_t addr, uint8_t val) {
     g_last_access_addr = addr;
+    if (!s_store_suppress) debug_trace_store(addr, val, 1);
     uint8_t *p = ram_ptr(addr);
     if (p) { *p = val; return; }
     switch (classify(addr)) {
@@ -138,6 +143,7 @@ void m68k_write8(uint32_t addr, uint8_t val) {
 }
 void m68k_write16(uint32_t addr, uint16_t val) {
     g_last_access_addr = addr;
+    if (!s_store_suppress) debug_trace_store(addr, val, 2);
     uint8_t *p = ram_ptr(addr);
     if (p) { p[0] = (uint8_t)(val >> 8); p[1] = (uint8_t)val; return; }
     switch (classify(addr)) {
@@ -150,9 +156,12 @@ void m68k_write16(uint32_t addr, uint16_t val) {
     }
 }
 void m68k_write32(uint32_t addr, uint32_t val) {
+    s_store_suppress = 1;
     m68k_write16(addr,     (uint16_t)(val >> 16));
     m68k_write16(addr + 2, (uint16_t)val);
+    s_store_suppress = 0;
     g_last_access_addr = addr;   /* operand-base EA, not the +2 of the low word */
+    debug_trace_store(addr, val, 4);
 }
 
 /* Side-effect-free read for the debug surface: RAM and ROM only. MMIO and
