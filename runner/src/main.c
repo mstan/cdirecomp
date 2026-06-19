@@ -91,27 +91,52 @@ int main(int argc, char *argv[]) {
      * the first thing the recompiled OS needs from the hardware. */
     printf("[cdi] entering recompiled CD-RTOS at $%08X ...\n", reset_pc);
     fflush(stdout);
-    recomp_call_addr(reset_pc);
 
     /* ---- top-level trampoline (MC-CDI-012) ----
      * The flat-call model returns control up the C stack on RTS, but the OS-9
      * boot does NOT bottom out at the reset entry — it transitions to the shell
-     * via the dispatcher. Two ways control reaches here:
+     * via the dispatcher. Ways control reaches the loop body:
      *   (a) g_redirect_pending — a JSR site detected a rewritten return (the
      *       dispatcher resuming a different process) and unwound every C frame
      *       uncleared; re-dispatch at C-depth ~0 so the new context isn't nested
-     *       inside the abandoned one.
+     *       inside the abandoned one. Also seeds the very first dispatch (the
+     *       reset entry) and the bus-error handler dispatch (setjmp below).
      *   (b) a recompiled RTS bottomed out to main with the guest stack still
      *       holding a return address. That happens when a function was entered
      *       WITHOUT a mirroring C JSR (via the exception/dispatcher path), so no
      *       JSR site popped [A7]. The bare C `return` lands here while the guest
      *       wants to resume at [A7]. Pop it and dispatch — exactly what the guest
-     *       RTS does. (This is the $406354 RTS -> $4040F0 wall.)
+     *       RTS does. (This is the $406354 RTS -> $4040F0 wall.) A skip-RTS that
+     *       set g_rte_pending also bubbles here; depth 0 is where that skip
+     *       resolves — its return target is [A7] (g_cpu.PC is the RTS's own stale
+     *       address), so follow [A7] and clear the flag before dispatching, or
+     *       the fresh callee's first JSR site would wrongly see a return pending.
      * Loop until STOP (shell idle, g_halted) or the guest stack unwinds to its
-     * boot base (nothing left to return to). A no-progress guard fails loud. */
+     * boot base (nothing left to return to). A no-progress guard fails loud.
+     *
+     * The setjmp below is the recompiled-tier bus-error landing pad (MC-CDI-004):
+     * an unmapped access from recompiled code longjmps here via g_recomp_bus_env
+     * with the vector-2 frame already built and g_cpu.PC pointing at the OS-9
+     * handler. The handler lives in RAM (the recompiler never saw it), so
+     * dispatching g_cpu.PC routes through the hybrid interpreter, which runs the
+     * handler, its RTE, and the resume in one shot before handing back to
+     * recompiled code — no g_rte_pending plumbing needed here. (Variables read
+     * after the longjmp are volatile per the setjmp/longjmp clobber rule.) */
     {
-        uint64_t last_insn = (uint64_t)-1;
-        unsigned stuck = 0;
+        volatile uint64_t last_insn = (uint64_t)-1;
+        volatile unsigned stuck = 0;
+
+        g_redirect_addr    = reset_pc;     /* first dispatch = the reset entry */
+        g_redirect_pending = 1;
+
+        g_recomp_bus_armed = 1;
+        if (setjmp(g_recomp_bus_env) != 0) {
+            /* Recompiled-tier bus error: frame built, g_cpu.PC = handler. */
+            g_recomp_bus_armed = 1;
+            g_redirect_addr    = g_cpu.PC & 0xFFFFFFu;
+            g_redirect_pending = 1;
+        }
+
         for (;;) {
             uint32_t target;
             if (g_redirect_pending) {
@@ -122,7 +147,7 @@ int main(int argc, char *argv[]) {
             } else if (g_cpu.A[7] >= g_recomp_initial_ssp) {
                 break;                                  /* guest stack unwound to base */
             } else {
-                target = m68k_read32(g_cpu.A[7]) & 0xFFFFFFu;  /* desynced RTS: follow [A7] */
+                target = m68k_read32(g_cpu.A[7]) & 0xFFFFFFu;  /* (skip-)RTS: follow [A7] */
                 g_cpu.A[7] += 4;
             }
 
@@ -137,8 +162,10 @@ int main(int argc, char *argv[]) {
                 stuck = 0;
                 last_insn = g_native_insn_count;
             }
-            recomp_call_addr(target);
+            g_rte_pending = 0;   /* a fresh depth-0 dispatch never inherits a propagating return */
+            recomp_top_resume(target);
         }
+        g_recomp_bus_armed = 0;
     }
 
     if (g_halted)

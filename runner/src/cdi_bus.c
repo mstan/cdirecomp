@@ -47,6 +47,11 @@ static void bus_fault(const char *op, uint32_t addr, int bits) {
      * un-unwindable (recompiled) code reaches the fail-loud path below — that is
      * a genuinely unmodelled region, not an architectural bus error. */
     if (m68k_interp_bus_error(addr)) return;   /* unreachable: longjmp on success */
+    /* Not interpreting: try the recompiled-tier landing pad armed by the top-
+     * level trampoline. Builds the vector-2 frame and longjmps there; only a
+     * fault with no armed pad at all (genuinely unmodelled region) falls
+     * through to fail loud below. */
+    if (recomp_bus_error(addr)) return;        /* unreachable: longjmp on success */
 
     fprintf(stderr, "[bus] UNMAPPED %s%d @ $%08X (PC=$%08X) — region not modelled "
                     "(see TODO.md MC-CDI-004)\n", op, bits, addr, g_cpu.PC);

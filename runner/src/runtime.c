@@ -53,6 +53,30 @@ static int hybrid_enter(uint32_t target, uint32_t ret) {
     return 0;                            /* let the dispatch-miss path record it */
 }
 
+/* Depth-0 resume for the top-level trampoline. See cdi_runtime.h. A recompiled
+ * entry is dispatched flat-call (its RTS bottoms back to the loop, which then
+ * follows [A7] for the next return). A non-entry target is interpreted with NO
+ * ret-stop: its RTS self-pops the next return and execution FLOWS into it, so we
+ * run until re-entering a recompiled entry, then dispatch that. This is what the
+ * loop's plain [A7]-follow gets wrong for the `pea ret; pea tgt; rts` idiom — the
+ * hybrid callee pops `ret` itself, and a second [A7]-follow would double-pop. */
+void recomp_top_resume(uint32_t addr) {
+    addr &= 0xFFFFFFu;
+    if (dispatch_has_addr(addr)) {
+        recomp_call_addr(addr);              /* recompiled entry: flat-call */
+        return;
+    }
+    M68kiStatus st = m68k_interp_run_until_known(addr, 0);  /* stop_pc=0: no ret-stop */
+    if (st == (M68kiStatus)M68KI_REENTER) {
+        recomp_call_addr(g_cpu.PC);          /* re-entered recompiled territory */
+        return;
+    }
+    if (st == M68KI_OK) return;              /* interpreted to a clean halt/stop */
+    fprintf(stderr, "[top-resume] interp halt(%d) at $%06X: opcode $%04X at $%06X\n",
+            st, addr, g_m68ki_bad_op, g_m68ki_bad_pc);
+    debug_dump_fault_trail("top-resume interp halt");
+}
+
 /* ---- CPU + ABI globals (generated code references these) ---- */
 M68KState g_cpu;
 uint64_t  g_frame_count       = 0;
@@ -207,6 +231,39 @@ static uint32_t build_exception_frame(uint8_t vec) {
 
 void m68k_raise_exception_frame(uint8_t vec) {
     build_exception_frame(vec);   /* caller (the interpreter) resumes at the handler */
+}
+
+/* ---- Recompiled-tier bus error (MC-CDI-004, recomp half) ----
+ * The faulting access in cdi_bus.c has already set g_last_access_addr to the
+ * unmapped address (TPF). We cannot return into the half-executed recompiled C
+ * function, so build the vector-2 frame here and longjmp to the trampoline's
+ * landing pad, which dispatches the handler g_cpu.PC now points at. Disarm first
+ * so a fault while building the frame (e.g. a stray push) fails loud rather than
+ * recursing — main() re-arms in the setjmp landing. See cdi_runtime.h. */
+jmp_buf g_recomp_bus_env;
+int     g_recomp_bus_armed = 0;
+
+int recomp_bus_error(uint32_t addr) {
+    if (!g_recomp_bus_armed) return 0;   /* no recomp landing pad: fail loud upstream */
+    g_recomp_bus_armed = 0;
+
+    uint32_t tpf = g_last_access_addr;    /* the unmapped address (TPF), set by the accessor */
+
+    /* CeDImu stacks the post-fetch PC and currentOpcode. g_cpu.PC holds the
+     * faulting instruction's address (set at its entry in the generated code);
+     * decode it to recover its length and opcode. If undecodable, stack the
+     * instruction address itself rather than fabricate a length. */
+    M68KInstr ins;
+    int len = m68k_interp_decode_at(g_cpu.PC, &ins);
+    g_fault_opcode = len ? ins.words[0] : (uint16_t)0;
+    uint32_t post_fetch = (g_cpu.PC + (uint32_t)(len ? len : 0)) & 0xFFFFFFu;
+
+    g_last_access_addr = tpf;             /* restore TPF (decode read through the bus) */
+    g_cpu.PC = post_fetch;                /* stacked PC = post-fetch PC */
+    build_exception_frame(2);             /* long frame; sets g_cpu.PC = handler */
+    mcd212_tick(158);                     /* CeDImu ProcessException: BusError = 158 clock periods */
+    longjmp(g_recomp_bus_env, 1);
+    return 1;                             /* unreachable */
 }
 
 void m68k_trap_vector(uint8_t vec) {

@@ -93,6 +93,17 @@ static const GenesisRom *busview(uint32_t pc) {
     return &s_busview;
 }
 
+int m68k_interp_decode_at(uint32_t pc, M68KInstr *out) {
+    /* busview() fetches its window through m68k_read8, which updates
+     * g_last_access_addr. The recomp-tier bus-error path calls this AFTER the
+     * faulting access set g_last_access_addr (the TPF) but BEFORE building the
+     * frame, so preserve it across the decode. */
+    uint32_t saved = g_last_access_addr;
+    int ok = m68k_decode(busview(pc), pc & 0xFFFFFFu, out);
+    g_last_access_addr = saved;
+    return ok ? out->byte_length : 0;
+}
+
 /* =========================================================================
  * Size helpers (mirror code_generator.c)
  * ========================================================================= */
