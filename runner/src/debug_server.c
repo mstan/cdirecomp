@@ -74,10 +74,28 @@ void debug_ring_capture_frame(void) {
 typedef struct {
     uint64_t  seq;     /* monotonic block index since boot */
     M68KState cpu;     /* full register file AT block entry (PC live) */
+    uint32_t  a7_top;  /* longword at [A7] (stack top) at block entry. Folded
+                          into the realign alignment key so a caller / context-
+                          switch split (identical registers but a different
+                          pushed return address) can't hide behind register
+                          alignment — and so fill/copy loops can be told apart
+                          from in-place poll loops. */
 } CdiTraceRecord;
 
 static CdiTraceRecord s_trace_ring[CDI_TRACE_RING_LEN];
 static uint64_t       s_trace_seq = 0;   /* number of blocks captured */
+
+/* Side-effect-free big-endian longword read of guest memory. debug_peek8 lives
+ * in cdi_bus.c and, unlike m68k_read, does NOT touch g_last_access_addr — so
+ * sampling [A7] on the hot trace path can't perturb the address-error frame's
+ * captured fault address. Unmapped bytes read back as 0. */
+int debug_peek8(uint32_t addr, uint8_t *out);   /* cdi_bus.c */
+static uint32_t debug_peek_be32(uint32_t addr) {
+    uint8_t b0 = 0, b1 = 0, b2 = 0, b3 = 0;
+    debug_peek8(addr,     &b0); debug_peek8(addr + 1, &b1);
+    debug_peek8(addr + 2, &b2); debug_peek8(addr + 3, &b3);
+    return ((uint32_t)b0 << 24) | ((uint32_t)b1 << 16) | ((uint32_t)b2 << 8) | (uint32_t)b3;
+}
 
 /* When non-zero, freeze the run once this many blocks have been traced, leaving
  * the rings intact for diffing — the deterministic analogue of --fault-hold for
@@ -90,6 +108,7 @@ void debug_trace_block(void) {
     CdiTraceRecord *r = &s_trace_ring[s_trace_seq & CDI_TRACE_MASK];
     r->seq = s_trace_seq;
     r->cpu = g_cpu;
+    r->a7_top = debug_peek_be32(g_cpu.A[7]);
     s_trace_seq++;
     if (g_stop_seq && s_trace_seq >= g_stop_seq) cdi_fault_hold();
 }
@@ -121,6 +140,36 @@ static int trace_range(CdiTraceRecord *out, uint64_t from, int count, uint64_t *
         out[n] = s_trace_ring[s & CDI_TRACE_MASK];
     *first_seq = from;
     return n;
+}
+
+/* ====================================================================== */
+/*  Store ring (every guest memory write: PC + addr + value + block seq)   */
+/* ====================================================================== */
+/* Always-on per-write log so a memory-divergence (a cell read back with the
+ * wrong value) can be chased to its WRITER without re-running: query the most
+ * recent store covering an address before a given seq. ~1M records (~16 MB). */
+#define CDI_STORE_RING_LEN (1u << 20)
+#define CDI_STORE_MASK     (CDI_STORE_RING_LEN - 1u)
+
+typedef struct {
+    uint64_t seq;      /* block seq in flight when the store happened */
+    uint32_t pc;       /* g_cpu.PC at the store (the writing instruction) */
+    uint32_t addr;     /* guest address written */
+    uint32_t val;      /* value written (low `size` bytes meaningful) */
+    uint8_t  size;     /* 1, 2, or 4 */
+} CdiStoreRecord;
+
+static CdiStoreRecord s_store_ring[CDI_STORE_RING_LEN];
+static uint64_t       s_store_count = 0;
+
+void debug_trace_store(uint32_t addr, uint32_t val, int size) {
+    CdiStoreRecord *r = &s_store_ring[s_store_count & CDI_STORE_MASK];
+    r->seq  = s_trace_seq;
+    r->pc   = g_cpu.PC;
+    r->addr = addr;
+    r->val  = val;
+    r->size = (uint8_t)size;
+    s_store_count++;
 }
 
 /* ---- fault trail: dump the executed path into an abort ---- */
@@ -246,14 +295,53 @@ static void resp_trace(const char *line, char *out, int outlen) {
     else           got = trace_tail(recs, (int)count);                  /* most-recent tail */
     int n = snprintf(out, outlen, "{\"ok\":true,\"total\":%llu,\"records\":[",
                      (unsigned long long)s_trace_seq);
-    for (int i = 0; i < got && n < outlen - 320; i++) {
+    for (int i = 0; i < got && n < outlen - 400; i++) {
         const M68KState *c = &recs[i].cpu;
         n += snprintf(out + n, outlen - n,
             "%s{\"seq\":%llu,\"pc\":%u,\"sr\":%u", i ? "," : "",
             (unsigned long long)recs[i].seq, c->PC, c->SR);
         for (int r = 0; r < 8; r++) n += snprintf(out + n, outlen - n, ",\"d%d\":%u", r, c->D[r]);
         for (int r = 0; r < 8; r++) n += snprintf(out + n, outlen - n, ",\"a%d\":%u", r, c->A[r]);
+        n += snprintf(out + n, outlen - n, ",\"a7top\":%u", recs[i].a7_top);
         n += snprintf(out + n, outlen - n, "}");
+    }
+    snprintf(out + n, outlen - n, "]}");
+}
+
+/* stores: chase a memory-divergence to its writer. Params:
+ *   addr   (required) the byte whose writers we want
+ *   before (optional) only stores with seq < before (default: all)
+ *   count  (optional) how many most-recent matches to return (default 16, max 64)
+ * Returns matches oldest-first (so the LAST element is the most recent writer),
+ * scanning the ring backward. A store matches if its [addr, addr+size) covers
+ * the queried byte. */
+static void resp_stores(const char *line, char *out, int outlen) {
+    uint64_t addr = 0, before = 0, count = 16;
+    if (!json_int(line, "addr", &addr)) { snprintf(out, outlen, "{\"ok\":false,\"error\":\"addr required\"}"); return; }
+    int have_before = json_int(line, "before", &before);
+    json_int(line, "count", &count);
+    if (count > 64) count = 64;
+
+    uint64_t total  = s_store_count;
+    uint64_t oldest = total > CDI_STORE_RING_LEN ? total - CDI_STORE_RING_LEN : 0;
+    static CdiStoreRecord hits[64];
+    int nh = 0;
+    /* scan backward; collect up to `count` most-recent covering stores */
+    for (uint64_t i = total; i > oldest && nh < (int)count; ) {
+        i--;
+        const CdiStoreRecord *r = &s_store_ring[i & CDI_STORE_MASK];
+        if (have_before && r->seq >= before) continue;
+        if (addr >= r->addr && addr < (uint64_t)r->addr + r->size)
+            hits[nh++] = *r;
+    }
+    int n = snprintf(out, outlen, "{\"ok\":true,\"addr\":%u,\"total\":%llu,\"oldest\":%llu,\"records\":[",
+                     (uint32_t)addr, (unsigned long long)total, (unsigned long long)oldest);
+    /* emit oldest-first (reverse of the backward scan) */
+    for (int k = nh - 1; k >= 0 && n < outlen - 160; k--) {
+        const CdiStoreRecord *r = &hits[k];
+        n += snprintf(out + n, outlen - n,
+            "%s{\"seq\":%llu,\"pc\":%u,\"addr\":%u,\"val\":%u,\"size\":%u}",
+            k == nh - 1 ? "" : ",", (unsigned long long)r->seq, r->pc, r->addr, r->val, r->size);
     }
     snprintf(out + n, outlen - n, "]}");
 }
@@ -268,6 +356,7 @@ static int handle_line(const char *line, char *out, int outlen) {
     else if (!strcmp(cmd, "get_registers")) resp_registers(out, outlen);
     else if (!strcmp(cmd, "read_mem"))      resp_read_mem(line, out, outlen);
     else if (!strcmp(cmd, "trace"))         resp_trace(line, out, outlen);
+    else if (!strcmp(cmd, "stores"))        resp_stores(line, out, outlen);
     else if (!strcmp(cmd, "dispatch_miss_info")) resp_miss(out, outlen);
     else if (!strcmp(cmd, "quit"))        { snprintf(out, outlen, "{\"ok\":true,\"bye\":true}"); return 0; }
     else snprintf(out, outlen, "{\"ok\":false,\"error\":\"unknown cmd '%s'\"}", cmd);

@@ -19,6 +19,10 @@ bios/generated/*.log
 # Don't commit its working tree wholesale until then.
 /external/CeDImu/
 
+# Python bytecode
+__pycache__/
+*.pyc
+
 # Editor / OS noise
 *.obj
 *.o

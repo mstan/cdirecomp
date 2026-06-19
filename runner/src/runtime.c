@@ -65,6 +65,24 @@ static int s_rte_pending = 0;
 int *g_rte_pending_ptr = &s_rte_pending;
 int  g_early_return    = 0;
 
+/* ---- Context-switch redirect (MC-CDI-012) ----
+ * When a recompiled callee's subtree rewrites its stacked return address (the
+ * OS-9 dispatcher resuming a different process at a saved PC), the JSR site that
+ * detects it can't just continue at its static continuation — that belongs to
+ * the OUTGOING context. Unlike g_rte_pending (which the immediate caller clears
+ * to unwind one level), g_redirect_pending propagates up through EVERY C frame
+ * uncleared, until the top-level trampoline in main() re-dispatches g_cpu.PC at
+ * C-stack depth ~0. This is the faithful model the flat-call scheme lacks: a
+ * context switch abandons the outgoing process's C frames rather than returning
+ * through them. */
+int      g_redirect_pending = 0;
+uint32_t g_redirect_addr    = 0;
+
+/* Set when the CPU executes STOP (shell idle waits here for an interrupt). The
+ * top-level trampoline stops following the guest stack once halted; MC-CDI-007
+ * will resume it on an IRQ above the SR I-mask. */
+int g_halted = 0;
+
 /* Faulting opcode for the bus/address-error frame's IRC/IR (see cdi_runtime.h). */
 uint16_t g_fault_opcode = 0;
 /* Faulting DATA address for the bus/address-error frame's TPF (see cdi_runtime.h). */
@@ -146,6 +164,8 @@ void genesis_reset_devices(void) {
 }
 void genesis_stop_until_interrupt(uint16_t sr_imm) {
     g_cpu.SR = sr_imm;
+    g_halted = 1;   /* the top-level trampoline stops here; MC-CDI-007 will
+                     * wake on an IRQ above the I-mask and clear this. */
     /* TODO MC-CDI-007: halt until an IRQ above the I-mask; yield to pacing. */
 }
 /* SCC68070 exception processing (faithful port of CeDImu ProcessException):

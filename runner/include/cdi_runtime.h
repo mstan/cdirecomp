@@ -212,6 +212,18 @@ extern int *g_rte_pending_ptr;
 #define g_rte_pending (*g_rte_pending_ptr)
 extern int g_early_return;
 
+/* Context-switch redirect (MC-CDI-012). Set at a JSR site when the callee
+ * subtree rewrote the stacked return address (OS-9 process switch); propagates
+ * UNCLEARED up every C frame to the top-level trampoline in main(), which
+ * re-dispatches g_redirect_addr. Distinct from g_rte_pending, which the
+ * immediate caller clears to unwind a single level. */
+extern int      g_redirect_pending;
+extern uint32_t g_redirect_addr;
+
+/* Set by STOP (genesis_stop_until_interrupt). The top-level trampoline stops
+ * following the guest stack once halted; MC-CDI-007 clears it on an IRQ. */
+extern int g_halted;
+
 /* Dispatch-miss monitor. */
 extern uint32_t g_miss_count_any;
 extern uint32_t g_miss_last_addr;

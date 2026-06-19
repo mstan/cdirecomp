@@ -28,6 +28,12 @@ void debug_trace_block(void);
  * crash report shows HOW we got there, not just the final registers. */
 void debug_dump_fault_trail(const char *reason);
 
+/* Always-on store ring: one record per guest memory WRITE (PC, addr, value,
+ * size, block seq). Lets a memory-divergence be chased to its writer — query
+ * "last write covering address A before seq S" rather than re-running. Called
+ * from the bus write path (cdi_bus.c). `size` is 1/2/4 bytes. */
+void debug_trace_store(uint32_t addr, uint32_t val, int size);
+
 /* --fault-hold: freeze at a fatal fault instead of aborting, keeping the rings
  * queryable for first-divergence. `g_hold_on_fault` gates it; cdi_fault_hold()
  * parks the faulting thread (the server thread keeps serving). */

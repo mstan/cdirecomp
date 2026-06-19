@@ -7,11 +7,20 @@ stops at the first mismatch. But the CD-i boot has benign frame-sync spin loops
 iterations, then re-converge. Index alignment trips on that jitter and reports it
 as "the divergence", masking the real one downstream.
 
-This tool re-aligns. It compares by FULL register state (pc,sr,d0-7,a0-7), and
+This tool re-aligns. It compares by FULL register state (pc,sr,d0-7,a0-7) PLUS
+the stack top [A7] (so a context-switch / caller split with identical registers
+but a different pushed return address can't hide behind register alignment), and
 when two records don't match it searches a lookahead window on BOTH sides for the
 nearest re-sync (one side spun extra iterations of a loop). It only declares a
 TRUE divergence when neither side reaches the other's state within the window —
 i.e. a real control-flow / data split, not a spin-count difference.
+
+It also un-masks WRITING-LOOP divergences: a one-sided skip is benign only if it
+is an in-place poll/wait loop (no pointer advances). If the skipped records march
+an address register (a fill/copy loop), a different iteration count means a
+different span of memory was written — a real data split that register-only
+re-alignment papers over (both sides re-sync to equal registers at loop exit).
+Requires a7top capture on both rings (debug_server.c / cdi_oracle.cpp).
 
 Both runs must have the comparison window in their rings. Typical setup:
     CdiOracle  rom --steps 250000 --hold              # :4381, ring holds 0..250000
@@ -26,7 +35,36 @@ Tuning:
 """
 import argparse, json, socket, sys
 
-REG_KEYS = ["pc", "sr"] + [f"d{i}" for i in range(8)] + [f"a{i}" for i in range(8)]
+REG_KEYS = ["pc", "sr"] + [f"d{i}" for i in range(8)] + [f"a{i}" for i in range(8)] + ["a7top"]
+A_REG_IDX = {n: REG_KEYS.index(f"a{n}") for n in range(8)}   # state-tuple index of An
+A7TOP_IDX = REG_KEYS.index("a7top")
+
+
+def addr_advances(states, rng):
+    """Writing-loop signature: across the records in `rng` (a one-sided skip that
+    re-aligned), does some address register A0..A6 march monotonically?
+
+    A benign wait/poll loop re-reads the SAME location every iteration — no
+    pointer advances (only a down-counter Dn, or nothing, changes). A fill/copy
+    loop ADVANCES a pointer each iteration (MOVE.L D1,(A2)+ ; DBF), touching a
+    span of memory. So a one-sided skip whose An marches is NOT benign jitter —
+    it is a different number of WRITES, a real divergence the register-only
+    realign would otherwise paper over (both sides re-sync to identical regs at
+    the loop exit, hiding that different memory was written).
+
+    Returns (reg_n, first_val, last_val, stride) on a hit, else None. A7 is
+    excluded — stack push/pop is not a fill — and so is the captured a7top."""
+    idxs = list(rng)
+    if len(idxs) < 2:
+        return None            # need >=2 records to see a march
+    for n in range(7):         # A0..A6
+        ai = A_REG_IDX[n]
+        vals = [states[k][ai] for k in idxs]
+        diffs = [vals[t + 1] - vals[t] for t in range(len(vals) - 1)]
+        nz = [x for x in diffs if x != 0]
+        if len(nz) >= 2 and (all(x > 0 for x in nz) or all(x < 0 for x in nz)):
+            return n, vals[0], vals[-1], nz[0]
+    return None
 
 
 class Trace:
@@ -79,7 +117,8 @@ class Trace:
         d = dict(zip(REG_KEYS, st))
         ds = " ".join(f"D{k}={d['d'+str(k)]:08X}" for k in range(8))
         as_ = " ".join(f"A{k}={d['a'+str(k)]:08X}" for k in range(8))
-        return f"seq {self.seqs[i]:>7} PC=${d['pc']:08X} SR=${d['sr']:04X}\n        {ds}\n        {as_}"
+        return (f"seq {self.seqs[i]:>7} PC=${d['pc']:08X} SR=${d['sr']:04X} "
+                f"[A7]=${d['a7top']:08X}\n        {ds}\n        {as_}")
 
 
 def first_diff_field(a, b):
@@ -102,8 +141,9 @@ def main():
     ap.add_argument("--log-skips", type=int, default=0, metavar="D",
                     help="print every one-sided re-sync of >= D records (0 = off)")
     ap.add_argument("--no-split-detect", action="store_true",
-                    help="don't stop on a control-flow split; only stop on a same-position "
-                         "register mismatch (the old behaviour)")
+                    help="don't stop on a control-flow split OR a writing-loop count "
+                         "divergence; only stop on a same-position register mismatch "
+                         "(the old behaviour)")
     args = ap.parse_args()
 
     try:
@@ -182,12 +222,14 @@ def main():
         # paper over (a shared callee re-normalizes the registers downstream).
         if side in ("oracle", "native") and d >= 1:
             if side == "oracle":
-                skipped = [O.states[k][0] for k in range(j, j + d)]
+                src_states, rng = O.states, range(j, j + d)
+                skipped = [O.states[k][0] for k in rng]
                 lo = max(0, i - args.loop_window)
                 seen = {N.states[k][0] for k in range(lo, min(len(N.states), i + args.loop_window))}
                 seqs_a, seqs_b = (O.seqs[j], "oracle"), (N.seqs[i], "native")
             else:
-                skipped = [N.states[k][0] for k in range(i, i + d)]
+                src_states, rng = N.states, range(i, i + d)
+                skipped = [N.states[k][0] for k in rng]
                 lo = max(0, j - args.loop_window)
                 seen = {O.states[k][0] for k in range(lo, min(len(O.states), j + args.loop_window))}
                 seqs_a, seqs_b = (N.seqs[i], "native"), (O.seqs[j], "oracle")
@@ -216,6 +258,34 @@ def main():
                 for kk in range(max(0, (j if side=='oracle' else i) - 2), k + 1):
                     print(("  > " if kk == k else "    ") + src.fmt(kk))
                 print(f"\n  --- {seqs_b[1]} (stayed) ---")
+                for kk in range(max(0, oth_i - 2), min(len(oth.states), oth_i + 2)):
+                    print("    " + oth.fmt(kk))
+                return 1
+            # Not a control-flow split (same PCs both sides), but did the skipped
+            # records WRITE a span of memory? A fill/copy loop run a different
+            # number of times = different memory written = a REAL divergence,
+            # even though both sides re-sync to identical registers at loop exit.
+            adv = addr_advances(src_states, rng) if not args.no_split_detect else None
+            if adv:
+                n_reg, v0, v1, stride = adv
+                src = O if side == "oracle" else N
+                oth = N if side == "oracle" else O
+                k0 = rng.start
+                oth_i = i if side == "oracle" else j
+                print(f"\n*** WRITING-LOOP DIVERGENCE — {side} ran a fill/copy loop "
+                      f"{d} records the other side did not ***")
+                print(f"  at {seqs_a[1]} seq {seqs_a[0]} A{n_reg} marches "
+                      f"${v0:08X} -> ${v1:08X} (stride {stride:+d}, "
+                      f"{abs(v1 - v0)} bytes) while {seqs_b[1]} runs fewer iterations.")
+                print(f"  register-alignment masked this: a poll loop spins in place (benign), "
+                      f"but a marching pointer means a SPAN of memory was written a different "
+                      f"number of times — the real data split behind a later "
+                      f"same-register/different-memory divergence.")
+                print(f"  {resyncs} benign re-syncs skipped earlier; max spin skew {max_skew}.")
+                print(f"\n  --- {side} (ran the extra iterations) ---")
+                for kk in range(max(0, k0 - 1), min(len(src.states), rng.stop + 1)):
+                    print(("  > " if kk in rng else "    ") + src.fmt(kk))
+                print(f"\n  --- {seqs_b[1]} (ran fewer) ---")
                 for kk in range(max(0, oth_i - 2), min(len(oth.states), oth_i + 2)):
                     print("    " + oth.fmt(kk))
                 return 1
