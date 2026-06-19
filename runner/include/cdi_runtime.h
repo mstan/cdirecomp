@@ -16,6 +16,7 @@
 #pragma once
 #include <stdint.h>
 #include <stdbool.h>
+#include <setjmp.h>
 
 /* ====================================================================== */
 /*  CPU state — SCC68070 (68000-compatible programming model)             */
@@ -82,6 +83,14 @@ typedef void (*RecompFuncPtr)(void);
 void call_by_address(uint32_t addr);          /* JMP (An) / jump tables       */
 void recomp_tail_call(uint32_t addr);
 void recomp_call_addr(uint32_t addr);
+/* Depth-0 resume used by the top-level trampoline. A recompiled-entry target is
+ * dispatched flat-call; a non-entry target is interpreted until it re-enters a
+ * recompiled entry, WITHOUT the ret-stop game_dispatch_override applies for
+ * nested JSR misses — at depth 0 there is no C caller to return to, so a hybrid
+ * RTS that pops the next return must FLOW into it rather than hand a consumed
+ * guest stack back to the loop (which would double-follow [A7]). DEFINED in the
+ * runner (runtime.c), not the generated TU. */
+void recomp_top_resume(uint32_t addr);
 void recomp_call_func(RecompFuncPtr fn);
 void recomp_push_return(uint32_t ret_addr);
 
@@ -138,6 +147,23 @@ extern uint32_t g_last_access_addr;
  * interpreter unwind is armed, so the caller falls through to fail-loud (a
  * genuinely unmodelled region reached from recompiled code). */
 int m68k_interp_bus_error(uint32_t addr);
+
+/* ---- Recompiled-tier bus-error unwind (MC-CDI-004, recomp half) ----
+ * The interpreter owns its instruction loop and arms a longjmp around exec_one
+ * (m68k_interp_bus_error above). The recompiled tier reaches memory through
+ * plain C calls we cannot unwind in place, so instead the top-level trampoline
+ * in main() arms a landing pad with setjmp(g_recomp_bus_env) and sets
+ * g_recomp_bus_armed. When a fault from recompiled code reaches cdi_bus.c's
+ * fault path and the interpreter is NOT armed, recomp_bus_error() builds the
+ * faithful vector-2 frame (post-fetch PC, faulting opcode, TPF = unmapped
+ * address), points PC at the OS-9 handler, and longjmps back to the trampoline,
+ * which dispatches the handler. Abandoning the half-executed recompiled C frame
+ * IS the faithful abort of the faulting instruction. Returns 0 when no recomp
+ * landing pad is armed, so the caller falls through to fail-loud. */
+extern jmp_buf g_recomp_bus_env;
+extern int     g_recomp_bus_armed;
+int  recomp_bus_error(uint32_t addr);
+
 void m68k_illegal_trap(uint32_t pc, uint16_t opcode);
 void genesis_reset_devices(void);                /* RESET instruction */
 void genesis_stop_until_interrupt(uint16_t sr_imm); /* STOP #imm */

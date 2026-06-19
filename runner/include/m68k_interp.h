@@ -78,6 +78,17 @@ M68kiStatus m68k_interp_step(void);
  */
 int m68k_cycles(const M68KInstr *ins);
 
+/*
+ * Decode the instruction at `pc` from the live CD-i bus into `*out`, reusing the
+ * recompiler's decoder (parity-by-construction with the static emitter). Returns
+ * the instruction's byte_length (>0) on success, or 0 if undecodable. The bus
+ * window is fetched through m68k_read8, which would perturb g_last_access_addr
+ * (the bus-error TPF source); this helper saves and restores it, so the call is
+ * side-effect-free w.r.t. the fault frame. Used by the recompiled-tier bus-error
+ * path to compute the post-fetch PC and faulting opcode for the vector-2 frame.
+ */
+int m68k_interp_decode_at(uint32_t pc, M68KInstr *out);
+
 /* Per-run diagnostics (the manifest/floor layers read these). */
 extern uint32_t g_m68ki_bad_pc;      /* PC of the offending instruction (UNIMPL) */
 extern uint16_t g_m68ki_bad_op;      /* opcode word of the offending instruction */
