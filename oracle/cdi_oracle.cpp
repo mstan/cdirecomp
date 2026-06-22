@@ -51,8 +51,9 @@ using Reg = SCC68070::Register;
 
 /* ---- block-trace ring (mirrors the native CdiTraceRecord shape) ---- */
 struct TraceRec { uint64_t seq; uint32_t pc, sr, d[8], a[8], a7top; };
-static constexpr uint32_t RING = 1u << 19;   /* 524288 — match the native trace ring
-                                                so [1,400000) is diffable from seq 1 */
+static constexpr uint32_t RING = 1u << 20;   /* 1048576 — match the native trace ring
+                                                so [1,~1M) is diffable from seq 1 (boot
+                                                reaches the IRQ frontier at ~seq 575k) */
 static constexpr uint32_t MASK = RING - 1;
 static std::vector<TraceRec> g_ring(RING);
 static uint64_t g_seq = 0;

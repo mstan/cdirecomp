@@ -1,31 +1,104 @@
 /*
- * cdic.c — CDIC: CD Interface Controller (skeleton).
+ * cdic.c — CIAP: CD Interface and Audio Processor (Mono-3/4 board).
  *
- * The CDIC streams Mode-2 sectors off the disc, raises the data-ready
- * interrupt, and decodes CD-i ADPCM audio (levels A/B/C) into PCM. CD-RTOS
- * talks to it to read files/modules and to play the audio that is interleaved
- * with the level-data sectors (the L*_s*_sub.o streaming model we saw in the
- * disc inventory).
+ * On the Mono-3 board — which CeDImu maps cdi490a (Mono-IV) to — the CD
+ * interface at $300000..$304000 is the CIAP, NOT the Mono-1/2 "CDIC" chip.
+ * (The RGN_CDIC / cdic_* / CDI_CDIC_BASE names in the bus layer are legacy;
+ * the region and entry points are kept, the model is the CIAP.)
  *
- * Reference: external/CeDImu CDIC core + our own disc_parser sector model.
- * TODO MC-CDI-013: sector DMA + ADPCM decode + interrupts.
+ * CeDImu models the CIAP as HLE: a flat 16-bit register array with exactly two
+ * pieces of live behavior —
+ *   - ID ($25C4) reads a fixed signature 0xCD02. CD-RTOS probes it to detect
+ *     the CIAP during device init; THIS is the read that previously fail-stopped
+ *     the boot at $3025C4.
+ *   - ISR_221 ($2586) is the data-interrupt status. CeDImu's CIAP::IncrementTime
+ *     sets it to 9 and GetWord clears it on read — but IncrementTime runs after
+ *     EVERY instruction (Interpreter.cpp), so a guest read ALWAYS observes 9.
+ *     Our flat-call runtime has no per-instruction hook, so the faithful
+ *     observable equivalent is simply: ISR_221 reads return 9.
+ * Every other offset is plain storage: writes < 0x2600 stick, reads return the
+ * stored word (0 at reset, except ID). The CIAP raises NO CPU interrupt in
+ * CeDImu — the display IRQ that wakes the shell-idle STOP comes from the MCD212
+ * via INT1 (MC-CDI-007), not from here.
+ *
+ * Faithful mirror of:
+ *   external/CeDImu/src/CDI/HLE/CIAP/CIAP.{cpp,hpp}   (register map + behavior)
+ *   external/CeDImu/src/CDI/boards/Mono3/Bus.cpp      (byte/word access split)
+ * TODO MC-CDI-013.
  */
 #include "cdi_runtime.h"
 #include "debug_server.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+
+/* CIAP register offsets (CeDImu HLE::CIAP::Registers). Only ID and ISR_221 have
+ * live behavior; the rest are documented register slots backed by plain storage. */
+enum {
+    CIAP_ISR_221   = 0x2586,   /* data-interrupt status (reads 9)              */
+    CIAP_ID        = 0x25C4,   /* fixed signature 0xCD02                       */
+    CIAP_REGS_SIZE = 0x2600,   /* documented register window (CeDImu _size)    */
+};
+
+static uint16_t s_reg[CIAP_REGS_SIZE / 2];
+static int      s_inited = 0;
+
+static void ciap_init(void) {
+    memset(s_reg, 0, sizeof s_reg);
+    s_reg[CIAP_ID >> 1] = 0xCD02;
+    s_inited = 1;
+}
+
+/* Word value at a word-aligned CIAP offset, mirroring CeDImu CIAP::GetWord. */
+static uint16_t ciap_get_word(uint32_t woff) {
+    if (woff == CIAP_ISR_221)
+        return 9;                    /* IncrementTime re-sets it every instruction */
+    return s_reg[woff >> 1];
+}
 
 uint32_t cdic_read(uint32_t addr, int size) {
-    fprintf(stderr, "[cdic] read%d @ $%08X — CD controller not modelled "
-                    "(TODO MC-CDI-013)\n", size * 8, addr);
-    debug_dump_fault_trail("CDIC read (not modelled)");
-    if (g_hold_on_fault) cdi_fault_hold();   /* --fault-hold: freeze rings-intact for diffing */
-    abort();
+    if (!s_inited) ciap_init();
+    uint32_t off = addr - CDI_CDIC_BASE;
+    if (off >= CIAP_REGS_SIZE) {
+        /* CeDImu CIAP::GetWord indexes its register array unguarded, so a read
+         * here is out-of-bounds (UB) — there is no faithful value to return.
+         * The boot only WRITES beyond the window (CIAP firmware download), so a
+         * read here is a genuine "we don't know what the oracle returns": fail
+         * loud rather than invent a value. */
+        fprintf(stderr, "[ciap] read%d @ $%08X (off $%X) beyond register window "
+                        "— CeDImu reads OOB here (TODO MC-CDI-013)\n",
+                        size * 8, addr, off);
+        debug_dump_fault_trail("CIAP read beyond register window");
+        if (g_hold_on_fault) cdi_fault_hold();
+        abort();
+    }
+
+    uint16_t w = ciap_get_word(off & ~1u);
+    if (size == 1)
+        return (off & 1) ? (w & 0xFF) : (w >> 8);   /* CeDImu Mono3::GetByte */
+    return w;
 }
+
 void cdic_write(uint32_t addr, uint32_t val, int size) {
-    fprintf(stderr, "[cdic] write%d @ $%08X = $%X — CD controller not modelled "
-                    "(TODO MC-CDI-013)\n", size * 8, addr, val);
-    debug_dump_fault_trail("CDIC write (not modelled)");
-    if (g_hold_on_fault) cdi_fault_hold();
-    abort();
+    if (!s_inited) ciap_init();
+    uint32_t off = addr - CDI_CDIC_BASE;
+
+    /* CeDImu CIAP::SetWord stores ONLY offsets < 0x2600 ("if(addr < 0x2600)");
+     * writes beyond the documented window are silently dropped. The CD-RTOS CD
+     * driver downloads CIAP firmware into offsets that run past 0x2600 (a
+     * MOVE.W (A0)+,(A4)+ block copy from $42795C); those writes are no-ops in
+     * CeDImu, so dropping them here is the faithful behavior — NOT a fault. */
+    if (off >= CIAP_REGS_SIZE)
+        return;
+
+    /* Byte writes read-modify-write the addressed byte half (Mono3::SetByte). */
+    uint32_t idx = off >> 1;
+    if (size == 1) {
+        uint16_t w = s_reg[idx];
+        if (off & 1) w = (uint16_t)((w & 0xFF00) | (uint8_t)val);
+        else         w = (uint16_t)((w & 0x00FF) | ((uint16_t)(uint8_t)val << 8));
+        s_reg[idx] = w;
+    } else {
+        s_reg[idx] = (uint16_t)val;
+    }
 }

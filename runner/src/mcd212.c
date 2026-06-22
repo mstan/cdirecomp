@@ -46,6 +46,14 @@ static uint8_t  s_csr2r = 0;    /* CSR2R read-side status (IT1/IT2/BE)      */
  * recompiled tier's accumulator; matching the oracle's *time base* here closes
  * the loop. NTSC board (the ROM under test); PAL would use 15.0 MHz / m_isPAL. */
 #define MCD_DA  0x80u
+/* CSR1R.PA (bit 5, Parity) — CeDImu Display.cpp::DrawVideoLine sets PA every
+ * active line: non-interlaced -> always set; interlaced (DCR1.SM) -> set on odd
+ * frames, clear on even. UnsetDA at frame end keeps PA (CeDImu `&= 0x20`), so
+ * CSR1R reads 0x20 during retrace and 0xA0 during active display. The boot's
+ * `MOVE.W $4FFFF0,Dn` polls both bits (DA+PA); modelling only DA gave 0x80 vs
+ * the oracle's 0xA0 and diverged at $41BF94. */
+#define MCD_PA  0x20u
+#define MCD_DCR1_SM (1u<<12)   /* DCR1.SM: 1 = interlaced scan mode */
 
 /* SCC68070 NTSC clock: ns between cycles = 1e9 / 15,104,900 (SCC68070.hpp). */
 #define MCD_CYCLE_DELAY_NS (1.0e9 / 15104900.0)
@@ -69,10 +77,18 @@ void mcd212_tick(uint32_t cycles) {
     while (s_time_ns >= line_ns) {
         s_time_ns -= line_ns;
         s_vlines++;
-        if (s_vlines == mcd_retrace_lines() + 1)    /* leaving retrace -> active */
+        if (s_vlines == mcd_retrace_lines() + 1) {  /* leaving retrace -> active */
             s_csr1r |= MCD_DA;
+            /* PA: non-interlaced -> always set; interlaced -> odd frames set,
+             * even clear (CeDImu uses m_totalFrameCount parity; g_frame_count
+             * tracks it 1:1 since both increment at frame end). */
+            if (!(s_reg[MCD_DCR1] & MCD_DCR1_SM) || (g_frame_count & 1))
+                s_csr1r |= MCD_PA;
+            else
+                s_csr1r &= (uint8_t)~MCD_PA;
+        }
         if (s_vlines >= mcd_total_lines()) {        /* frame end -> retrace      */
-            s_csr1r &= (uint8_t)~MCD_DA;
+            s_csr1r &= (uint8_t)~MCD_DA;            /* keeps PA (CeDImu &= 0x20) */
             s_vlines = 0;
             g_frame_count++;
         }
