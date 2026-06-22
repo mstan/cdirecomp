@@ -239,6 +239,17 @@ static int             s_extra_seed_count = 0;
 static const uint32_t *s_all_func_addrs = NULL;
 static int             s_all_func_count = 0;
 
+/* Fall-off-end audit (MC-CDI coverage): a recompiled function whose last
+ * instruction is NOT a hard terminator and whose fall-through address is NOT a
+ * known function entry will silently `return` — i.e. a C function ending wrongly
+ * means "guest control flow ended". That is the func_4006A2 truncation class.
+ * We record each occurrence and report loudly after emission so a bad boundary
+ * split can never pass silently. */
+#define CODEGEN_MAX_FALLOFF 256
+static uint32_t s_falloff_func[CODEGEN_MAX_FALLOFF];
+static uint32_t s_falloff_next[CODEGEN_MAX_FALLOFF];
+static int      s_falloff_count = 0;
+
 /* Optional diagnostic: when set (via --dump-functions), codegen_emit writes
  * the final post-boundary-split function-entry set (one hex address per line)
  * to this path. Powers the heuristic-coverage exercise: diff the dump from a
@@ -3876,6 +3887,7 @@ bool codegen_emit(const GenesisRom *rom, const FunctionList *funcs,
     s_extra_seed_count = cfg ? cfg->extra_seed_count : 0;
     codegen_diag_reset();
     audit_reset();
+    s_falloff_count = 0;
 
     FILE *f_full     = fopen(out_full_path,     "w");
     FILE *f_dispatch = fopen(out_dispatch_path, "w");
@@ -3924,10 +3936,20 @@ bool codegen_emit(const GenesisRom *rom, const FunctionList *funcs,
          * useful for data labels the disasm never marks as code that
          * boundary-split would otherwise promote into bogus function
          * entries. */
-        int added = 0, skipped_blacklist = 0, skipped_data = 0;
+        int added = 0, skipped_blacklist = 0, skipped_data = 0, skipped_odd = 0;
         for (int i = 0; i < extern_targets.count; i++) {
             uint32_t a = extern_targets.addrs[i];
             if (addrset_contains(&all_funcs, a)) continue;
+            /* An odd address is never a legal 68000 instruction start (it would
+             * be an address error on hardware). Promoting one as a function entry
+             * splits its even neighbour mid-instruction, producing a 1-instruction
+             * stub whose body decodes from garbage — exactly the func_4006A3 vs
+             * func_4006A2 truncation a misdecoded/over-run scan can introduce.
+             * Reject it here, the single promotion chokepoint. */
+            if (a & 1) {
+                skipped_odd++;
+                continue;
+            }
             if (game_config_is_blacklisted(cfg, a)) {
                 skipped_blacklist++;
                 continue;
@@ -3946,6 +3968,9 @@ bool codegen_emit(const GenesisRom *rom, const FunctionList *funcs,
             added++;
         }
         addrset_free(&extern_targets);
+        if (skipped_odd > 0)
+            printf("[Codegen] Skipped %d ODD-address boundary-split entries "
+                   "(not instruction starts)\n", skipped_odd);
         if (skipped_blacklist > 0)
             printf("[Codegen] Skipped %d blacklisted boundary-split entries\n",
                    skipped_blacklist);
@@ -4262,6 +4287,15 @@ bool codegen_emit(const GenesisRom *rom, const FunctionList *funcs,
                         addrset_contains(&all_funcs, fall_through)) {
                         emit_split_tail_call(f_full, "  ", fall_through, has_sp_adjust != 0,
                                              -1);
+                    } else if (fall_through != func_addr &&
+                               s_falloff_count < CODEGEN_MAX_FALLOFF) {
+                        /* Non-terminating function with no fall-through linkage:
+                         * it will silently `return`, ending guest control flow
+                         * at a non-terminator. Record for the loud post-emit
+                         * audit — this is a boundary-split bug, not valid code. */
+                        s_falloff_func[s_falloff_count] = func_addr;
+                        s_falloff_next[s_falloff_count] = fall_through;
+                        s_falloff_count++;
                     }
                 }
             }
@@ -4531,6 +4565,24 @@ bool codegen_emit(const GenesisRom *rom, const FunctionList *funcs,
                 printf("[Codegen] WARNING: %d interior_unresolved JMP-table sites — see %s\n",
                        n_fb_interior, audit_path);
         }
+    }
+
+    /* Fall-off-end audit (loud): every recompiled function that ends on a
+     * non-terminator with no fall-through linkage will silently `return`,
+     * ending guest control flow at a non-terminator — a boundary-split bug
+     * (the func_4006A2 truncation class). A clean build reports zero. */
+    if (s_falloff_count > 0) {
+        fprintf(stderr, "[Codegen] *** FALL-OFF AUDIT: %d function(s) end without a "
+                "terminator or fall-through linkage — these silently return and WILL "
+                "diverge: ***\n", s_falloff_count);
+        for (int i = 0; i < s_falloff_count; i++)
+            fprintf(stderr, "    func_%06X falls off into $%06X (not a function entry)\n",
+                    s_falloff_func[i], s_falloff_next[i]);
+        fprintf(stderr, "[Codegen] Fix the boundary split (or seed $%06X-style "
+                "continuations) before trusting this build.\n", s_falloff_next[0]);
+    } else {
+        printf("[Codegen] Fall-off audit: clean (every function ends on a terminator "
+               "or linked fall-through).\n");
     }
 
     addrset_free(&all_funcs);

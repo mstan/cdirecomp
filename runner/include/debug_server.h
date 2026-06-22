@@ -60,6 +60,17 @@ extern int g_fallback_reason;
  * the trace-ring sample. Aggregates by PC + g_fallback_reason + region. */
 void debug_trace_interp(uint32_t pc);
 
+/* ---- Indirect-call target collection (trace-guided discovery) ----
+ * Every target passed to call_by_address that the static recompiler did NOT
+ * have a function for (i.e. every game_dispatch_override addr) is recorded as a
+ * distinct entry here. These are precisely the function entries the recompiler
+ * should have discovered but couldn't (reached via register-indirect JSR (An)
+ * through dispatch tables the kernel builds at runtime). Dump them via the
+ * `indirect_targets` TCP command, union the in-ROM ones into a discovery seed
+ * file, and re-seed the recompiler — the general, iterate-until-dry coverage
+ * loop. Recording the entry, not every interpreted PC, gives the exact seeds. */
+void debug_record_indirect_target(uint32_t addr);
+
 /* --fault-hold: freeze at a fatal fault instead of aborting, keeping the rings
  * queryable for first-divergence. `g_hold_on_fault` gates it; cdi_fault_hold()
  * parks the faulting thread (the server thread keeps serving). */

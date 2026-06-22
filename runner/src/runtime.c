@@ -160,6 +160,7 @@ void genesis_log_dispatch_miss(uint32_t addr) {
  * hybrid-interpreter handoff: the target was reached via a recomp JSR/exception
  * that left a return address on the guest stack, so interpret from there. */
 int game_dispatch_override(uint32_t addr) {
+    debug_record_indirect_target(addr);   /* trace-guided discovery seed */
     return hybrid_enter(addr, m68k_read32(g_cpu.A[7]));
 }
 

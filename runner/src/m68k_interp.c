@@ -54,6 +54,16 @@ uint32_t g_m68ki_discover[M68KI_MAX_DISCOVER];
 int      g_m68ki_discover_count = 0;
 static void discover(uint32_t t) {
     t &= 0xFFFFFFu;
+    /* Accumulate every call/jump target seen during interpretation into the
+     * persistent trace-guided discovery set (deduped there). These are the
+     * function/block entries the static finder didn't reach — when interpreted
+     * code calls into ROM that isn't a recompiled dispatch entry, the
+     * interpreter keeps running instead of handing back, which is why the
+     * fallback is dominated by uncovered ROM. Seeding these (collect_seeds.py →
+     * cdrtos_discovered.txt → CdiRecompBios --seeds) recompiles them so the
+     * interpreter hands back at their entry. Unlike g_m68ki_discover below, this
+     * set is NOT reset per run. */
+    debug_record_indirect_target(t);
     for (int i = 0; i < g_m68ki_discover_count; i++)
         if (g_m68ki_discover[i] == t) return;
     if (g_m68ki_discover_count < M68KI_MAX_DISCOVER)

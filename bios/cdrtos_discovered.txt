@@ -1,0 +1,40 @@
+# cdrtos_discovered.txt — trace-guided discovery seeds (in-ROM
+# indirect-call targets the static finder missed). One hex addr
+# per line. Auto-unioned by tools/collect_seeds.py; re-seeded by
+# CdiRecompBios. Regen + rebuild + re-run + collect until dry.
+4004E0
+4006A2
+400798
+4007DC
+400864
+4009AC
+4009D6
+4009DC
+400A00
+400A02
+400A08
+400A0E
+400A7C
+400A92
+400B02
+400B3E
+400B84
+400F5E
+403EAC
+404558
+404690
+404716
+4048BE
+404B4A
+404B86
+404BC2
+405222
+405836
+4059C0
+406330
+406396
+406450
+4064D8
+4064EA
+406608
+406CBA
