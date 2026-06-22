@@ -101,6 +101,7 @@ uint32_t  g_audio_cycle_counter = 0;
 static int s_rte_pending = 0;
 int *g_rte_pending_ptr = &s_rte_pending;
 int  g_early_return    = 0;
+int  g_rte_resume      = 0;   /* recompiled RTE → resume at g_cpu.PC in the trampoline */
 
 /* ---- Context-switch redirect (MC-CDI-012) ----
  * When a recompiled callee's subtree rewrites its stacked return address (the
@@ -291,13 +292,12 @@ int recomp_bus_error(uint32_t addr) {
 }
 
 void m68k_trap_vector(uint8_t vec) {
-    if (vec == 0x20) {            /* TRAP #0 = OS-9 gateway. TODO: route through the
-                                   * vector table to the recompiled kernel like every
-                                   * other vector and drop this HLE vestige. */
-        cdrtos_syscall();
-        return;
-    }
-
+    /* Every vector — including TRAP #0 (vec 0x20), the OS-9 system-call gateway —
+     * goes through the real exception frame + the kernel's installed handler in
+     * the vector table. No HLE: the recompiled CD-RTOS kernel services the call
+     * (MC-CDI-001). For TRAP #0 the emit has already advanced g_cpu.PC to the
+     * inline OS9 service-code word, so build_exception_frame stacks that address;
+     * the kernel's F$ dispatcher reads the code there and RTEs past it. */
     uint32_t handler = build_exception_frame(vec);
     call_by_address(handler);     /* recompiled handler, or dispatch-miss → RAM-built stub
                                    * needs the hybrid interpreter (MC-CDI-011) */

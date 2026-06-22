@@ -238,6 +238,14 @@ extern int *g_rte_pending_ptr;
 #define g_rte_pending (*g_rte_pending_ptr)
 extern int g_early_return;
 
+/* Set by a recompiled RTE (alongside g_rte_pending): the exception handler has
+ * popped SR/PC/format and g_cpu.PC now holds the resume PC. When this unwind
+ * bottoms out to the top-level trampoline (the exception was entered via
+ * m68k_trap_vector -> call_by_address at depth 0, so no JSR site owns it), the
+ * trampoline must resume at g_cpu.PC — NOT follow [A7] like a (skip-)RTS, whose
+ * g_cpu.PC is stale. Distinguishes a real RTE return from the skip-RTS idiom. */
+extern int g_rte_resume;
+
 /* Context-switch redirect (MC-CDI-012). Set at a JSR site when the callee
  * subtree rewrote the stacked return address (OS-9 process switch); propagates
  * UNCLEARED up every C frame to the top-level trampoline in main(), which
