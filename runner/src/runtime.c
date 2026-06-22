@@ -35,10 +35,19 @@ int dispatch_has_addr(uint32_t addr) {
  * Returns 1 if it handled the target, 0 to fall through to miss logging. */
 static int s_in_hybrid = 0;
 
+/* One-shot fallback-reason override for the NEXT interpreter entry. recomp_bus_error
+ * dispatches the OS-9 bus handler a moment later via the trampoline (→
+ * recomp_top_resume), with no intervening interpreter run, so a one-shot set here
+ * is consumed exactly there. Default attribution otherwise comes from the entry. */
+static int s_pending_fallback_reason = FB_NONE;
+
 static int hybrid_enter(uint32_t target, uint32_t ret) {
     if (s_in_hybrid) return 0;           /* nested miss: log it rather than recurse blindly */
     s_in_hybrid = 1;
+    int saved_reason = g_fallback_reason;
+    g_fallback_reason = FB_DISPATCH_MISS;   /* attribute this run: no compiled function */
     M68kiStatus st = m68k_interp_run_until_known(target, ret);
+    g_fallback_reason = saved_reason;
     s_in_hybrid = 0;
 
     if (st == (M68kiStatus)M68KI_REENTER) {
@@ -66,6 +75,10 @@ void recomp_top_resume(uint32_t addr) {
         recomp_call_addr(addr);              /* recompiled entry: flat-call */
         return;
     }
+    /* Attribute this interpreter run: a bus/exception handler dispatched via the
+     * trampoline carries a one-shot reason; otherwise it's a plain depth-0 target. */
+    g_fallback_reason = s_pending_fallback_reason ? s_pending_fallback_reason : FB_TOP_RESUME;
+    s_pending_fallback_reason = FB_NONE;
     M68kiStatus st = m68k_interp_run_until_known(addr, 0);  /* stop_pc=0: no ret-stop */
     if (st == (M68kiStatus)M68KI_REENTER) {
         recomp_call_addr(g_cpu.PC);          /* re-entered recompiled territory */
@@ -262,6 +275,7 @@ int recomp_bus_error(uint32_t addr) {
     g_cpu.PC = post_fetch;                /* stacked PC = post-fetch PC */
     build_exception_frame(2);             /* long frame; sets g_cpu.PC = handler */
     mcd212_tick(158);                     /* CeDImu ProcessException: BusError = 158 clock periods */
+    s_pending_fallback_reason = FB_BUS_HANDLER;  /* the handler runs in the interpreter next */
     longjmp(g_recomp_bus_env, 1);
     return 1;                             /* unreachable */
 }
