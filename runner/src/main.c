@@ -144,6 +144,12 @@ int main(int argc, char *argv[]) {
                 target = g_redirect_addr;
             } else if (g_halted) {
                 break;                                  /* STOP: shell idle reached */
+            } else if (g_rte_resume) {
+                /* A recompiled RTE unwound to here: the handler already popped
+                 * SR/PC/format and g_cpu.PC holds the resume PC. Resume there —
+                 * NOT at [A7] (that's the post-frame stack, not the return). */
+                g_rte_resume = 0;
+                target = g_cpu.PC & 0xFFFFFFu;
             } else {
                 /* (skip-)RTS or dispatcher resume: follow the guest return on
                  * [A7]. A7 climbing above the boot SSP is NOT "guest done" — it
@@ -169,6 +175,7 @@ int main(int argc, char *argv[]) {
                 last_insn = g_native_insn_count;
             }
             g_rte_pending = 0;   /* a fresh depth-0 dispatch never inherits a propagating return */
+            g_rte_resume  = 0;   /* consumed above; never leak into the next dispatch */
             recomp_top_resume(target);
         }
         g_recomp_bus_armed = 0;

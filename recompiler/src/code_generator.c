@@ -1932,8 +1932,18 @@ static void emit_instr(FILE *f, const GenesisRom *rom,
          * need to be reinstated as the sole SR restore mechanism. */
         fprintf(f, "  g_cpu.SR = (uint16_t)m68k_read16(g_cpu.A[7]); g_cpu.A[7] += 2; /* RTE: pop SR */\n");
         fprintf(f, "  g_cpu.PC = m68k_read32(g_cpu.A[7]);            g_cpu.A[7] += 4; /* RTE: pop PC */\n");
+        /* CD-i divergence from the 68000 base (like the cdi_runtime.h include):
+         * the SCC68070 (68010-like) frame carries a format/vector word AFTER the
+         * PC, which RTE must pop — a long (format $F) bus/address-error frame has
+         * 13 more internal words. build_exception_frame + the interpreter's RTE
+         * both use this layout; popping only SR+PC left A7 2 bytes short and the
+         * trampoline then followed the leftover format word as a bogus return
+         * ($0080.. -> $800040). g_rte_resume tells the trampoline to resume at the
+         * popped g_cpu.PC rather than [A7] (the exception unwinds to depth 0). */
+        fprintf(f, "  { uint16_t _fmt = (uint16_t)m68k_read16(g_cpu.A[7]); g_cpu.A[7] += 2;\n");
+        fprintf(f, "    if ((_fmt & 0xF000u) == 0xF000u) g_cpu.A[7] += 26; }  /* RTE: pop format word */\n");
         emit_cycle_accounting(f, "  ", estimate_cycles(instr));
-        fprintf(f, "  g_rte_pending = 1; return; /* RTE */\n");
+        fprintf(f, "  g_rte_pending = 1; g_rte_resume = 1; return; /* RTE */\n");
         *skip_until_label = true;
         break;
 
@@ -1962,9 +1972,14 @@ static void emit_instr(FILE *f, const GenesisRom *rom,
 
     /* ------------------------------------------------------------------ */
     case MN_TRAP:
-        /* TRAP #N: vectors 0x20..0x2F. Hand off to the runtime; on Sonic
-         * this aborts loud since no trap is expected in steady state. */
+        /* TRAP #N: vectors 0x20..0x2F. A 68000 TRAP stacks the NEXT instruction's
+         * PC (unlike bus/address errors, which stack the faulting PC). For OS-9,
+         * TRAP #0 is followed by an inline service-code word, so the stacked PC
+         * must point AT that word — the kernel's F$ dispatcher reads the code
+         * there and RTEs past it. Advance g_cpu.PC to post-TRAP before vectoring
+         * (the per-instruction emit set it to the TRAP's own address). */
         emit_cycle_accounting(f, "  ", estimate_cycles(instr));
+        fprintf(f, "  g_cpu.PC = 0x%06Xu;\n", instr->addr + instr->byte_length);
         fprintf(f, "  m68k_trap_vector(0x%02Xu); return;\n",
                 0x20u + (unsigned)(instr->imm32 & 0xF));
         *skip_until_label = true;

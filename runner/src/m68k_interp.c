@@ -895,6 +895,16 @@ static M68kiStatus exec_one(const M68KInstr *ins, uint32_t *next_pc) {
             g_cpu.A[7] += 26;             /* discard the remaining internal frame words */
         return M68KI_OK;
     }
+    case MN_TRAP:                        /* TRAP #n → vector 32+n. Stack the NEXT
+                                          * instruction's PC (post-TRAP) — for
+                                          * OS-9, the inline service-code word —
+                                          * then vector to the kernel handler the
+                                          * loop continues into (build_exception_
+                                          * frame sets g_cpu.PC = handler). */
+        g_cpu.PC = (ins->addr + ins->byte_length) & 0xFFFFFFu;
+        m68k_raise_exception_frame((uint8_t)(0x20u + (ins->imm32 & 0xFu)));
+        *next_pc = g_cpu.PC;
+        return M68KI_OK;
 
     /* ---- shifts / rotates (register Dn target) ---- */
     case MN_LSL: case MN_LSR: case MN_ASL: case MN_ASR:
