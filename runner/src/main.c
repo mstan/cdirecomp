@@ -144,10 +144,16 @@ int main(int argc, char *argv[]) {
                 target = g_redirect_addr;
             } else if (g_halted) {
                 break;                                  /* STOP: shell idle reached */
-            } else if (g_cpu.A[7] >= g_recomp_initial_ssp) {
-                break;                                  /* guest stack unwound to base */
             } else {
-                target = m68k_read32(g_cpu.A[7]) & 0xFFFFFFu;  /* (skip-)RTS: follow [A7] */
+                /* (skip-)RTS or dispatcher resume: follow the guest return on
+                 * [A7]. A7 climbing above the boot SSP is NOT "guest done" — it
+                 * is the OS-9 dispatcher switching to another task's (higher)
+                 * stack (MOVE.L Dn,A7; push; RTS at $40637E/$406384). The OS
+                 * never returns to nothing; only STOP (g_halted) or the
+                 * no-progress guard ends this loop. (The old `A7 >= initial_ssp
+                 * -> break` heuristic mistook that stack switch for the end of
+                 * the boot and quit at ~seq 423000.) */
+                target = m68k_read32(g_cpu.A[7]) & 0xFFFFFFu;
                 g_cpu.A[7] += 4;
             }
 

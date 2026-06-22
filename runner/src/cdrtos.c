@@ -19,6 +19,7 @@
  * dominant-class-first triage the recompiler discipline asks for.
  */
 #include "cdi_runtime.h"
+#include "debug_server.h"
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -80,5 +81,7 @@ void cdrtos_syscall(void) {
         "[cdrtos] OS-9 call %s (0x%04X)  D0=$%08X D1=$%08X A0=$%08X A1=$%08X\n"
         "         CD-RTOS HLE not implemented yet — see TODO.md MC-CDI-001.\n",
         os9_call_name(code), code, g_cpu.D[0], g_cpu.D[1], g_cpu.A[0], g_cpu.A[1]);
+    debug_dump_fault_trail("OS-9 TRAP #0 (HLE not implemented)");
+    if (g_hold_on_fault) cdi_fault_hold();   /* --fault-hold: freeze rings-intact for diffing */
     abort();
 }

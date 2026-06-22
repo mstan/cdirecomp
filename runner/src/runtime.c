@@ -169,8 +169,17 @@ int game_dispatch_override(uint32_t addr) {
  * keep the guest A7 frame consistent for code that inspects or pops the return
  * address. Mirrors segagenesisrecomp glue.c. */
 void recomp_push_return(uint32_t ret_addr) {
-    if (g_recomp_initial_ssp && g_cpu.A[7] > g_recomp_initial_ssp)
-        g_cpu.A[7] = g_recomp_initial_ssp;
+    /* A faithful JSR/BSR push: A7 -= 4; [A7] = return. NO clamp.
+     *
+     * The old code reset A7 to the boot SSP whenever A7 > initial_ssp (a flat-
+     * call band-aid). That is wrong once OS-9's dispatcher switches to another
+     * task's stack (MOVE.L Dn,A7 to a HIGHER address, then JSRs on it): the
+     * clamp dragged A7 from the new stack ($2CD8) back to $14FC, corrupting it —
+     * the divergence at JSR $40433A -> $40636A. Removing it lets the boot run
+     * faithfully through the context switch; validated no-divergence over
+     * [1,421871) (844 benign re-syncs) up to the first real OS-9 TRAP #0. (Full
+     * guest-A7 authority — RTS popping [A7] — is the dispatcher migration; this
+     * push is already correct on its own.) */
     g_cpu.A[7] -= 4;
     m68k_write32(g_cpu.A[7], ret_addr & 0xFFFFFFu);
 }
