@@ -16,6 +16,7 @@
 #include "m68k_interp.h"
 #include "m68k_decoder.h"   /* recompiler/src — added to the runner include path */
 #include "rom_parser.h"     /* GenesisRom, rom_read* (decoder's fetch source)    */
+#include "debug_server.h"   /* debug_trace_interp (fallback classifier)          */
 
 #include <stdio.h>
 #include <string.h>
@@ -1263,6 +1264,10 @@ M68kiStatus m68k_interp_step(void) {
      * the oracle exactly like recompiled ones — the trace is one continuous
      * per-instruction stream regardless of which tier executed it. */
     debug_trace_block();
+    /* Classify this interpreted instruction (PC + why-we-fell-through + region)
+     * into the always-on fallback aggregate, so "the interpreter ran X%" becomes
+     * "which PCs, for which reason" — see debug_server.h. */
+    debug_trace_interp(pc);
 
     M68KInstr ins;
     if (!m68k_decode(busview(pc), pc, &ins)) {   /* fetch from the CD-i bus (RAM or ROM) */

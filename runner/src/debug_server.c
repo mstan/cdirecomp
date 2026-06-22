@@ -172,6 +172,78 @@ void debug_trace_store(uint32_t addr, uint32_t val, int size) {
     s_store_count++;
 }
 
+/* ====================================================================== */
+/*  Interpreter-fallback classifier (always-on; per-PC + reason + region)  */
+/* ====================================================================== */
+/* A live aggregation keyed by PC (open-addressing hash) rather than a ring:
+ * we want totals over the whole run, and distinct interpreted PCs are bounded
+ * by code size (thousands), not by instruction count. Each slot accumulates the
+ * interpreted-instruction count at that PC and an OR-mask of the reasons seen. */
+#define CDI_FB_HASH_LEN  (1u << 16)            /* 65536 distinct PCs — ample for OS code */
+#define CDI_FB_HASH_MASK (CDI_FB_HASH_LEN - 1u)
+
+enum { FB_REG_VECTORS = 0, FB_REG_RAM0, FB_REG_RAM1, FB_REG_ROM, FB_REG_OTHER, FB_REGION_COUNT };
+
+typedef struct {
+    uint32_t pc;            /* interpreted PC (valid only when count > 0) */
+    uint64_t count;         /* interpreted instructions executed at this PC */
+    uint16_t reason_mask;   /* OR of (1u << reason) observed at this PC */
+} CdiFbSlot;
+
+static CdiFbSlot s_fb_hash[CDI_FB_HASH_LEN];
+static uint64_t  s_fb_total = 0;                    /* total interpreted instructions */
+static uint64_t  s_fb_by_reason[FB_REASON_COUNT];
+static uint64_t  s_fb_by_region[FB_REGION_COUNT];
+static uint32_t  s_fb_distinct = 0;
+static uint64_t  s_fb_dropped  = 0;                 /* instrs lost when the table is full */
+
+int g_fallback_reason = FB_NONE;
+
+static int fb_region_of(uint32_t pc) {
+    pc &= 0xFFFFFFu;
+    if (pc < 0x000400u)                                           return FB_REG_VECTORS; /* 256 exception vectors */
+    if (pc < CDI_RAM0_SIZE)                                       return FB_REG_RAM0;    /* 0x000400..0x07FFFF */
+    if (pc >= CDI_RAM1_BASE && pc < CDI_RAM1_BASE + CDI_RAM1_SIZE) return FB_REG_RAM1;
+    if (pc >= CDI_ROM_BASE  && pc < CDI_ROM_BASE  + CDI_ROM_SIZE)  return FB_REG_ROM;
+    return FB_REG_OTHER;
+}
+
+void debug_trace_interp(uint32_t pc) {
+    pc &= 0xFFFFFFu;
+    int reason = g_fallback_reason;
+    if (reason < 0 || reason >= FB_REASON_COUNT) reason = FB_NONE;
+    s_fb_total++;
+    s_fb_by_reason[reason]++;
+    s_fb_by_region[fb_region_of(pc)]++;
+
+    /* Open-addressing (linear-probe) insert/update keyed by pc. count==0 marks
+     * an empty slot (PC 0 is the reset-SSP word, never executed as code). */
+    uint32_t h = (pc * 2654435761u) & CDI_FB_HASH_MASK;
+    for (uint32_t probe = 0; probe < CDI_FB_HASH_LEN; probe++) {
+        CdiFbSlot *s = &s_fb_hash[(h + probe) & CDI_FB_HASH_MASK];
+        if (s->count == 0) {                       /* empty: claim it */
+            s->pc = pc;
+            s->count = 1;
+            s->reason_mask = (uint16_t)(1u << reason);
+            s_fb_distinct++;
+            return;
+        }
+        if (s->pc == pc) {                         /* existing PC: accumulate */
+            s->count++;
+            s->reason_mask |= (uint16_t)(1u << reason);
+            return;
+        }
+    }
+    s_fb_dropped++;                                /* table full (not expected for OS code) */
+}
+
+static void fb_reset(void) {
+    memset(s_fb_hash, 0, sizeof s_fb_hash);
+    memset(s_fb_by_reason, 0, sizeof s_fb_by_reason);
+    memset(s_fb_by_region, 0, sizeof s_fb_by_region);
+    s_fb_total = 0; s_fb_distinct = 0; s_fb_dropped = 0;
+}
+
 /* ---- fault trail: dump the executed path into an abort ---- */
 void debug_dump_fault_trail(const char *reason) {
     enum { N = 24 };
@@ -253,9 +325,10 @@ static void resp_registers(char *out, int outlen) {
 
 static void resp_status(char *out, int outlen) {
     snprintf(out, outlen,
-        "{\"ok\":true,\"insns\":%llu,\"blocks\":%llu,\"frame\":%llu,\"pc\":%u,"
+        "{\"ok\":true,\"insns\":%llu,\"blocks\":%llu,\"interp\":%llu,\"frame\":%llu,\"pc\":%u,"
         "\"miss_count\":%u,\"miss_last\":%u,\"irq_pending\":%u}",
         (unsigned long long)g_native_insn_count, (unsigned long long)s_trace_seq,
+        (unsigned long long)s_fb_total,
         (unsigned long long)g_frame_count, g_cpu.PC,
         g_miss_count_any, g_miss_last_addr, g_irq_pending);
 }
@@ -346,6 +419,61 @@ static void resp_stores(const char *line, char *out, int outlen) {
     snprintf(out + n, outlen - n, "]}");
 }
 
+/* interp_report: classify the hybrid-interpreter fallback. Params:
+ *   count  (optional) top PCs by instruction count to return (default 40, max 200)
+ *   reason (optional) restrict the top-PC list to PCs that saw this reason index
+ *   reset  (optional) zero ALL counters AFTER building the response (window scoping)
+ * by_reason / by_region are arrays indexed by the FB_* / FB_REG_* enums (the
+ * client labels them). `native` is g_native_insn_count for the recompiled-vs-
+ * interpreted ratio. Always-on aggregate; reads are racy but monotonic. */
+static void resp_interp_report(const char *line, char *out, int outlen) {
+    uint64_t count = 40, reason_filter = 0, reset = 0;
+    json_int(line, "count", &count);
+    int have_reason = json_int(line, "reason", &reason_filter);
+    json_int(line, "reset", &reset);
+    if (count > 200) count = 200;
+
+    /* Top-K by count: insertion into a descending buffer (O(distinct * cap)). */
+    static CdiFbSlot top[200];
+    int cap = (int)count, have = 0;
+    for (uint32_t i = 0; i < CDI_FB_HASH_LEN; i++) {
+        const CdiFbSlot *s = &s_fb_hash[i];
+        if (s->count == 0) continue;
+        if (have_reason && !(s->reason_mask & (1u << (uint32_t)reason_filter))) continue;
+        if (have < cap) {
+            int j = have++;
+            while (j > 0 && top[j - 1].count < s->count) { top[j] = top[j - 1]; j--; }
+            top[j] = *s;
+        } else if (cap > 0 && s->count > top[have - 1].count) {
+            int j = have - 1;
+            while (j > 0 && top[j - 1].count < s->count) { top[j] = top[j - 1]; j--; }
+            top[j] = *s;
+        }
+    }
+
+    int n = snprintf(out, outlen,
+        "{\"ok\":true,\"total\":%llu,\"native\":%llu,\"distinct\":%u,\"dropped\":%llu,"
+        "\"by_reason\":[",
+        (unsigned long long)s_fb_total, (unsigned long long)g_native_insn_count,
+        s_fb_distinct, (unsigned long long)s_fb_dropped);
+    for (int r = 0; r < FB_REASON_COUNT && n < outlen; r++)
+        n += snprintf(out + n, outlen - n, "%s%llu", r ? "," : "",
+                      (unsigned long long)s_fb_by_reason[r]);
+    n += snprintf(out + n, outlen - n, "],\"by_region\":[");
+    for (int r = 0; r < FB_REGION_COUNT && n < outlen; r++)
+        n += snprintf(out + n, outlen - n, "%s%llu", r ? "," : "",
+                      (unsigned long long)s_fb_by_region[r]);
+    n += snprintf(out + n, outlen - n, "],\"top\":[");
+    for (int k = 0; k < have && n < outlen - 96; k++)
+        n += snprintf(out + n, outlen - n,
+            "%s{\"pc\":%u,\"count\":%llu,\"reasons\":%u,\"region\":%d}",
+            k ? "," : "", top[k].pc, (unsigned long long)top[k].count,
+            top[k].reason_mask, fb_region_of(top[k].pc));
+    snprintf(out + n, outlen - n, "]}");
+
+    if (reset) fb_reset();
+}
+
 /* Returns 1 to keep the connection open, 0 to close it (quit). */
 static int handle_line(const char *line, char *out, int outlen) {
     char cmd[32];
@@ -357,6 +485,7 @@ static int handle_line(const char *line, char *out, int outlen) {
     else if (!strcmp(cmd, "read_mem"))      resp_read_mem(line, out, outlen);
     else if (!strcmp(cmd, "trace"))         resp_trace(line, out, outlen);
     else if (!strcmp(cmd, "stores"))        resp_stores(line, out, outlen);
+    else if (!strcmp(cmd, "interp_report")) resp_interp_report(line, out, outlen);
     else if (!strcmp(cmd, "dispatch_miss_info")) resp_miss(out, outlen);
     else if (!strcmp(cmd, "quit"))        { snprintf(out, outlen, "{\"ok\":true,\"bye\":true}"); return 0; }
     else snprintf(out, outlen, "{\"ok\":false,\"error\":\"unknown cmd '%s'\"}", cmd);
@@ -407,7 +536,8 @@ static void server_loop(void) {
     }
     listen(ls, 1);
     fprintf(stderr, "[dbg] TCP debug server live on 127.0.0.1:%d "
-                    "(ping/status/get_registers/read_mem/trace/dispatch_miss_info)\n", s_port);
+                    "(ping/status/get_registers/read_mem/trace/stores/interp_report/"
+                    "dispatch_miss_info)\n", s_port);
     for (;;) {
         sock_t cs = accept(ls, NULL, NULL);
         if (cs == BAD_SOCK) break;
