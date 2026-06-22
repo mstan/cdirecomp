@@ -3,11 +3,28 @@
 **Date:** 2026-06-21
 **Phase:** Phase C — boot the recompiled CD-RTOS to the player shell (PLAN.md). Phases A (observability) and B (CeDImu oracle parity) are done.
 
-> Read this handoff + the `cdi-boot-status` auto-memory + `CLAUDE.md`/`PRINCIPLES.md`/`DEBUG.md`. This handoff is authoritative for the most recent work. **Everything described below is COMMITTED and pushed** (tree is clean, `master` == `origin/master` == `67e737a`).
+> Read this handoff + the `cdi-boot-status` + `architecture-dispatcher-direction` auto-memories + `CLAUDE.md`/`PRINCIPLES.md`/`DEBUG.md`. This handoff is authoritative for the most recent work.
 
 ---
 
-## Headline
+## Branch `rom-coverage` (current work, committed locally — NOT yet on `master`/origin)
+
+Three commits ahead of `67e737a` (the last pushed `master`):
+- `ff8555e` — **always-on interpreter-fallback classifier** (`interp_report` TCP cmd + `tools/interp_report.py`; tags every interpreted instr by reason+region). Showed the interpreter ran **40% of boot, 99% uncovered ROM** — a recompiler-coverage smell the old `miss_count=0` monitor was blind to.
+- `74af685` — **trace-guided ROM discovery + codegen boundary fixes** (this is the big one, below).
+- (HANDOFF/classifier docs.)
+
+**Trace-guided discovery result (validated):** the runtime records the indirect-call targets the interpreter hits (`indirect_targets`); `tools/collect_seeds.py` unions the in-ROM ones into `bios/cdrtos_discovered.txt`; `CdiRecompBios --seeds` re-seeds them; iterate to dryness (converged: 36 seeds → 353 functions). **dispatch_miss 157,809 → ~2; interpreted instrs at seq 400000 161,209 → 92,173 (−43%).** Validated **faithful across the FULL `[1,400000)` window from an aligned seq-1 start: 825 benign re-syncs, no true divergence.** Residual interp is `top_resume` (the flat-call RTS-to-interior tax — only the dispatcher migration retires it).
+
+**Codegen fixes (root-caused with the ChatGPT consult):** (1) **reject odd addresses at the boundary-split promotion** — an odd addr is never a legal instruction start; promoting one split its even neighbour into a 1-instruction stub that silently returned (the `func_4006A2` bug that diverged at seq 43163). This was the real fix. (2) **fall-off audit (fail-loud)** — flags any emitted function ending on a non-terminator with no fall-through linkage; surfaced **13 PRE-EXISTING latent cases** in unexercised driver/FM modules (`$417xxx–$435xxx`), not on the boot path. Trace rings bumped `1<<18 → 1<<19` so low-interp builds diff from seq 1 across `[1,400000)`.
+
+`bios/generated/*.c` (353 funcs) is regenerated from the committed seed file (gitignored). **To resume:** rebuild recompiler, `CdiRecompBios … --emit` (auto-loads `cdrtos_discovered.txt`), rebuild runner.
+
+> Earlier pushed state (`master` == `origin/master` == `67e737a`): the `$600000` wall beaten; boot oracle-validated through seq 400000 (`[1,250000)` 773 + `[138000,400000)` 552 re-syncs). Repo is private at `github.com/mstan/cdirecomp` (ROMs/`build/`/generated C/CeDImu gitignored).
+
+---
+
+## Headline (pushed milestone — `master`)
 
 The `$600000` memory-sizing-probe wall (the read **from the recompiled tier** at seq **276326** that the old bus path couldn't turn into a faithful vector-2 bus error) is **beaten**. The boot now runs **oracle-validated through seq 400000** with **no true divergence** (realign over both `[1,250000)` and `[138000,400000)`: 773 + 552 benign re-syncs). The run no longer hits a wall — it stops because `--stop-seq` told it to.
 
@@ -137,21 +154,16 @@ propagation with structured `ExitResult` returns), (C) IRQ delivery on the curre
 model. The classifier now gives the data to choose; the architecture review favors
 (B) before building IRQ on another longjmp/trampoline escape.
 
-1. **ROM coverage (the measured 40 % fallback lever).** Improve recompiler static
-   discovery to follow indirect-dispatch (`call_by_address`) targets in ROM so the
-   missed functions (~`$400B00–$401300`, `$400E00–$400F00`) get recompiled. Re-run
-   `tools/interp_report.py` to confirm the dispatch_miss bucket shrinks. (NOTE: a
-   `code_generator.c`/discovery change here DOES require a BIOS regen.)
+0. **Decide what to do with branch `rom-coverage`** — merge to `master` and push (it's validated faithful `[1,400000)`), or keep iterating first. ROM coverage (was the #1 lever) is **DONE & validated**.
+1. **Fix the 13 latent fall-off functions** the audit surfaced: extend the codegen so a fall-through target that's *interior* to another function gets promoted to a function entry (split there) and linked — then the fall-off audit can become **fatal**. Unblocks the boot reaching driver/FM code past the shell.
 2. **Stage-1 dispatcher migration** (per the architecture review): structured
    `ExitResult` returns replacing `g_redirect_pending` propagation, keeping
-   flat-call working — so IRQ delivery lands on a dispatcher, not a new escape.
+   flat-call working — retires the `top_resume` tax (now the dominant interp reason) and lands IRQ on a dispatcher, not a new escape.
 3. **IRQ delivery (MC-CDI-007):** STOP idle until an IRQ above the SR I-mask;
    vector via `build_exception_frame`, clear `g_halted`, resume. Wakes the shell.
-4. **Continue diffing past 400000 toward `STOP #$2000 @ $40A3E2`** (a7top key +
-   store ring + realign), confirming no true divergence to the shell-idle STOP.
+4. **Continue diffing past 400000 toward `STOP #$2000 @ $40A3E2`**, confirming no true divergence to the shell-idle STOP.
 
-New tooling this session: `tools/interp_report.py [--port N] [--count K] [--reason R] [--reset]`
-and the `interp_report` TCP command — the always-on fallback classifier.
+New tooling on `rom-coverage`: `tools/interp_report.py` (+ `interp_report` TCP cmd, the always-on fallback classifier) and `tools/collect_seeds.py` (+ `indirect_targets` TCP cmd, the trace-guided discovery collector). Loop: run → `collect_seeds.py` → `CdiRecompBios --emit` → rebuild runner → repeat until dry. Validate low-interp builds with `realign_divergence.py --start 1` (rings now hold `[1,400000)`).
 
 ---
 
