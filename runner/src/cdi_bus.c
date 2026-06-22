@@ -88,7 +88,7 @@ static BusRegion classify(uint32_t a) {
     if (a >= CDI_ROM_BASE   && a <  CDI_MCD212_BASE)    return RGN_ROM;
     if (a >= CDI_CDIC_BASE  && a <  0x00304000u)        return RGN_CDIC;
     if (a >= CDI_SLAVE_BASE && a <  0x0031001Eu)        return RGN_SLAVE;
-    if (a >= CDI_NVRAM_BASE && a <  0x00324000u)        return RGN_NVRAM;
+    if (a >= CDI_NVRAM_BASE && a <  0x00330000u)        return RGN_NVRAM;  /* 32KB DS1216 (even bytes) */
     if (a >= CDI_PERIPH_BASE && a <= CDI_PERIPH_LAST)   return RGN_PERIPH;
     return RGN_NONE;
 }
@@ -104,6 +104,9 @@ uint8_t m68k_read8(uint32_t addr) {
         case RGN_CDIC:   return (uint8_t)cdic_read(addr, 1);
         case RGN_SLAVE:  return (uint8_t)slave_read(addr, 1);
         case RGN_PERIPH: return (uint8_t)periph_read(addr, 1);
+        /* DS1216 wired to even bytes; an odd byte access is a bus error. */
+        case RGN_NVRAM:  if (addr & 1) { bus_fault("R", addr, 8); return 0; }
+                         return nvram_get_byte((uint16_t)((addr - CDI_NVRAM_BASE) >> 1));
         default:         bus_fault("R", addr, 8); return 0;
     }
 }
@@ -118,6 +121,8 @@ uint16_t m68k_read16(uint32_t addr) {
         case RGN_CDIC:   return (uint16_t)cdic_read(addr, 2);
         case RGN_SLAVE:  return (uint16_t)slave_read(addr, 2);
         case RGN_PERIPH: return (uint16_t)periph_read(addr, 2);
+        /* word read: chip byte in the HIGH byte (CeDImu Mono3::GetWord). */
+        case RGN_NVRAM:  return (uint16_t)(nvram_get_byte((uint16_t)((addr - CDI_NVRAM_BASE) >> 1)) << 8);
         default:         bus_fault("R", addr, 16); return 0;
     }
 }
@@ -143,6 +148,8 @@ void m68k_write8(uint32_t addr, uint8_t val) {
         case RGN_CDIC:   cdic_write(addr, val, 1);   return;
         case RGN_SLAVE:  slave_write(addr, val, 1);  return;
         case RGN_PERIPH: periph_write(addr, val, 1); return;
+        case RGN_NVRAM:  if (addr & 1) { bus_fault("W", addr, 8); return; }
+                         nvram_set_byte((uint16_t)((addr - CDI_NVRAM_BASE) >> 1), val); return;
         default:         bus_fault("W", addr, 8);    return;
     }
 }
@@ -157,6 +164,8 @@ void m68k_write16(uint32_t addr, uint16_t val) {
         case RGN_CDIC:   cdic_write(addr, val, 2);   return;
         case RGN_SLAVE:  slave_write(addr, val, 2);  return;
         case RGN_PERIPH: periph_write(addr, val, 2); return;
+        /* word write: the chip takes the HIGH byte (CeDImu Mono3::SetWord). */
+        case RGN_NVRAM:  nvram_set_byte((uint16_t)((addr - CDI_NVRAM_BASE) >> 1), (uint8_t)(val >> 8)); return;
         default:         bus_fault("W", addr, 16);   return;
     }
 }
