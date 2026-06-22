@@ -223,6 +223,15 @@ void     periph_write(uint32_t addr, uint32_t val, int size);
 uint32_t periph_read (uint32_t addr, int size);
 void     periph_reset(void);             /* power-on state (UART TxRDY, etc.) */
 
+/* DS1216 SmartWatch timekeeper + 32 KB NVRAM at $320000 (Mono-IV/Mono3). Faithful
+ * port of CeDImu's DS1216 core: NVRAM passthrough until a 64-bit magic pattern
+ * (written to bit 0) unlocks the serial RTC. `dev` is the chip address
+ * (busaddr-$320000)>>1 (the chip is wired to even bytes). nvram_reset() seeds the
+ * SRAM to $FF and the clock from 1989-01-01 (IRTC::defaultTime), as CeDImu does. */
+void    nvram_reset(void);
+uint8_t nvram_get_byte(uint16_t dev);    /* GetByte: SRAM, or one serial RTC bit */
+void    nvram_set_byte(uint16_t dev, uint8_t data);
+
 /* ====================================================================== */
 /*  ABI globals the generator references (mirrors genesis_runtime.h)      */
 /* ====================================================================== */

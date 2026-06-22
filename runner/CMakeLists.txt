@@ -19,6 +19,7 @@ add_executable(CdiRuntime
     src/cdic.c
     src/slave.c
     src/periph.c
+    src/cdi_nvram.c
     src/cdrtos.c
     src/debug_server.c
     src/m68k_interp.c
