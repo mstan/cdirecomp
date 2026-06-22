@@ -48,10 +48,12 @@ int main(int argc, char *argv[]) {
     }
     const char *rom_path = argv[1];
     const char *game_path = NULL;
+    const char *seeds_path = NULL;   /* flat hex list of extra discovery seeds */
     bool emit = false;
     for (int i = 2; i < argc; i++) {
-        if      (!strcmp(argv[i], "--emit"))                 emit = true;
-        else if (!strcmp(argv[i], "--game") && i + 1 < argc) game_path = argv[++i];
+        if      (!strcmp(argv[i], "--emit"))                  emit = true;
+        else if (!strcmp(argv[i], "--game")  && i + 1 < argc) game_path  = argv[++i];
+        else if (!strcmp(argv[i], "--seeds") && i + 1 < argc) seeds_path = argv[++i];
     }
 
     /* ---- load ---- */
@@ -118,9 +120,10 @@ int main(int argc, char *argv[]) {
      * the header, per CeDImu's ModuleExtraHeader) is the entry offset relative
      * to the module start. lang==1 means 68000 object code. The reset vector is
      * already seeded by the finder; these add the kernel + drivers + shell. */
-    static uint32_t seeds[1024];
+    #define CDI_SEED_MAX 16384
+    static uint32_t seeds[CDI_SEED_MAX];
     int nseeds = 0;
-    for (int i = 0; i < n && nseeds < 1024; i++) {
+    for (int i = 0; i < n && nseeds < CDI_SEED_MAX; i++) {
         if (mods[i].lang != 1) continue;
         uint32_t maddr = CDI_BIOS_ROM_BASE + (uint32_t)mods[i].logical_offset;
         if ((uint64_t)maddr + 0x34 > img_size) continue;
@@ -130,10 +133,63 @@ int main(int argc, char *argv[]) {
         if (m_exec == 0 || m_exec >= mods[i].size) continue;  /* entry within module */
         seeds[nseeds++] = maddr + m_exec;
     }
+    int nmod_seeds = nseeds;
+
+    /* Trace-guided discovery seeds: a flat hex list (one address per line, '#'
+     * comments) of indirect-call targets the runtime observed the static finder
+     * miss — register-indirect JSR (An) through RAM-built dispatch tables that
+     * no static walk can follow. The runtime's `indirect_targets` collection,
+     * unioned by tools/collect_seeds.py into bios/cdrtos_discovered.txt, feeds
+     * back here; re-seeding + regen recompiles them and exposes the next layer,
+     * iterating until the miss set is dry. Explicit --seeds wins; otherwise the
+     * default committed list is auto-loaded when present. Only in-ROM seeds are
+     * kept (below-ROM RAM-resident copies are dropped downstream anyway). */
+    {
+        char default_seeds[256] = {0};
+        const char *sp = seeds_path;
+        if (!sp) {
+            /* derive "<dir-of-rom>/cdrtos_discovered.txt" so it works regardless
+             * of CWD; fall back to the literal path if no directory component. */
+            const char *slash = strrchr(rom_path, '/');
+            const char *bslash = strrchr(rom_path, '\\');
+            const char *cut = slash > bslash ? slash : bslash;
+            if (cut) {
+                size_t dlen = (size_t)(cut - rom_path) + 1;
+                if (dlen < sizeof default_seeds - 24) {
+                    memcpy(default_seeds, rom_path, dlen);
+                    strcpy(default_seeds + dlen, "cdrtos_discovered.txt");
+                    sp = default_seeds;
+                }
+            } else {
+                sp = "bios/cdrtos_discovered.txt";
+            }
+        }
+        FILE *sf = sp ? fopen(sp, "r") : NULL;
+        if (sf) {
+            int added = 0, skipped_oob = 0;
+            char ln[64];
+            while (fgets(ln, sizeof ln, sf) && nseeds < CDI_SEED_MAX) {
+                char *p = ln;
+                while (*p == ' ' || *p == '\t') p++;
+                if (*p == '#' || *p == '\n' || *p == '\r' || *p == '\0') continue;
+                uint32_t a = (uint32_t)strtoul(p, NULL, 16) & 0xFFFFFFu;
+                if (a < CDI_BIOS_ROM_BASE || (uint64_t)a >= img_size) { skipped_oob++; continue; }
+                seeds[nseeds++] = a;
+                added++;
+            }
+            fclose(sf);
+            printf("[CdiRecompBios] seed file '%s': +%d in-ROM seeds (%d out-of-ROM skipped)\n",
+                   sp, added, skipped_oob);
+        } else if (seeds_path) {
+            fprintf(stderr, "[CdiRecompBios] WARNING: --seeds '%s' unreadable\n", seeds_path);
+        }
+    }
+
     if (nseeds > 0 && cfg.extra_func_count == 0) {
         cfg.extra_funcs      = seeds;
         cfg.extra_func_count = nseeds;
-        printf("[CdiRecompBios] seeded %d module M$Exec entry points\n", nseeds);
+        printf("[CdiRecompBios] seeded %d entry points (%d module M$Exec + %d trace-guided)\n",
+               nseeds, nmod_seeds, nseeds - nmod_seeds);
     }
 
     if (cycle_probe_init(&rom) == 0)

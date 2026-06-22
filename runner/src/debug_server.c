@@ -68,7 +68,11 @@ void debug_ring_capture_frame(void) {
 /* ====================================================================== */
 /*  Block-trace ring (every executed block: PC + full register file)      */
 /* ====================================================================== */
-#define CDI_TRACE_RING_LEN (1u << 18)   /* 262144 blocks (~20 MB) */
+#define CDI_TRACE_RING_LEN (1u << 19)   /* 524288 blocks (~46 MB) — holds [1,400000)
+                                           from seq 1 so heavily-recompiled (coarse-
+                                           native) builds can be re-aligned from the
+                                           aligned start, where mid-stream realign of
+                                           a low-interp stream is unreliable. */
 #define CDI_TRACE_MASK     (CDI_TRACE_RING_LEN - 1u)
 
 typedef struct {
@@ -242,6 +246,21 @@ static void fb_reset(void) {
     memset(s_fb_by_reason, 0, sizeof s_fb_by_reason);
     memset(s_fb_by_region, 0, sizeof s_fb_by_region);
     s_fb_total = 0; s_fb_distinct = 0; s_fb_dropped = 0;
+}
+
+/* ---- Indirect-call target set (trace-guided discovery seeds) ----
+ * Distinct addresses passed to call_by_address with no compiled function. Small
+ * (a few hundred entries even across a full boot), so a flat array with linear
+ * dedup is fine — this is per-dispatch, not per-instruction. */
+#define CDI_IT_MAX 16384
+static uint32_t s_it_addr[CDI_IT_MAX];
+static int      s_it_count = 0;
+
+void debug_record_indirect_target(uint32_t addr) {
+    addr &= 0xFFFFFFu;
+    for (int i = 0; i < s_it_count; i++)
+        if (s_it_addr[i] == addr) return;
+    if (s_it_count < CDI_IT_MAX) s_it_addr[s_it_count++] = addr;
 }
 
 /* ---- fault trail: dump the executed path into an abort ---- */
@@ -474,6 +493,16 @@ static void resp_interp_report(const char *line, char *out, int outlen) {
     if (reset) fb_reset();
 }
 
+/* indirect_targets: the distinct call_by_address targets with no compiled
+ * function (trace-guided discovery seeds). Emitted unsorted; the collector
+ * sorts + filters in-ROM. Capped by the 64K response buffer (count is small). */
+static void resp_indirect_targets(char *out, int outlen) {
+    int n = snprintf(out, outlen, "{\"ok\":true,\"count\":%d,\"targets\":[", s_it_count);
+    for (int i = 0; i < s_it_count && n < outlen - 16; i++)
+        n += snprintf(out + n, outlen - n, "%s%u", i ? "," : "", s_it_addr[i]);
+    snprintf(out + n, outlen - n, "]}");
+}
+
 /* Returns 1 to keep the connection open, 0 to close it (quit). */
 static int handle_line(const char *line, char *out, int outlen) {
     char cmd[32];
@@ -486,6 +515,7 @@ static int handle_line(const char *line, char *out, int outlen) {
     else if (!strcmp(cmd, "trace"))         resp_trace(line, out, outlen);
     else if (!strcmp(cmd, "stores"))        resp_stores(line, out, outlen);
     else if (!strcmp(cmd, "interp_report")) resp_interp_report(line, out, outlen);
+    else if (!strcmp(cmd, "indirect_targets")) resp_indirect_targets(out, outlen);
     else if (!strcmp(cmd, "dispatch_miss_info")) resp_miss(out, outlen);
     else if (!strcmp(cmd, "quit"))        { snprintf(out, outlen, "{\"ok\":true,\"bye\":true}"); return 0; }
     else snprintf(out, outlen, "{\"ok\":false,\"error\":\"unknown cmd '%s'\"}", cmd);
