@@ -29,6 +29,13 @@ static uint32_t be32(const uint8_t *p) {
 }
 
 int main(int argc, char *argv[]) {
+    /* Unbuffer stdout/stderr: a fail-loud fprintf followed by cdi_fault_hold()
+     * (which blocks) or abort() would otherwise lose its message when output is
+     * redirected to a file/pipe (fully buffered, never flushed). The runtime is
+     * a debug tool — immediate, ordered diagnostics matter more than throughput. */
+    setvbuf(stdout, NULL, _IONBF, 0);
+    setvbuf(stderr, NULL, _IONBF, 0);
+
     const char *rom_path = NULL;
     int port = 4380;   /* native; oracle (CeDImu) on +1 — see TCP.md */
     int hold = 0;      /* keep the rings queryable after the run ends */

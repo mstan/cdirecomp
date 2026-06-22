@@ -68,11 +68,13 @@ void debug_ring_capture_frame(void) {
 /* ====================================================================== */
 /*  Block-trace ring (every executed block: PC + full register file)      */
 /* ====================================================================== */
-#define CDI_TRACE_RING_LEN (1u << 19)   /* 524288 blocks (~46 MB) — holds [1,400000)
+#define CDI_TRACE_RING_LEN (1u << 20)   /* 1048576 blocks (~92 MB) — holds [1,~1M)
                                            from seq 1 so heavily-recompiled (coarse-
                                            native) builds can be re-aligned from the
                                            aligned start, where mid-stream realign of
-                                           a low-interp stream is unreliable. */
+                                           a low-interp stream is unreliable. Bumped
+                                           1<<19 -> 1<<20: boot now reaches the IRQ
+                                           frontier at ~seq 575k, past the old cap. */
 #define CDI_TRACE_MASK     (CDI_TRACE_RING_LEN - 1u)
 
 typedef struct {

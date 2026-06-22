@@ -312,6 +312,27 @@ static void emit_store_dn(FILE *f, const char *indent,
                 indent, dreg, dreg, size_mask(sz), size_ctype(sz), res);
 }
 
+/* Build the index sub-expression for a brief-format extension word (the indexed
+ * addressing modes (d8,An,Xn) and (d8,PC,Xn)). Honors:
+ *   bit 15     D/A — index is a Dn (0) or An (1) register
+ *   bits 14-12 register number
+ *   bit 11     index size — 0 = sign-extended low word (.W), 1 = full long (.L)
+ * The W/L bit IS significant on the 68000/SCC68070: an .L index uses the WHOLE
+ * 32-bit register, not a sign-extended word. (CeDImu computes a JSR (d8,PC,A3.L)
+ * target with the full A3=$0000A4AA; sign-extending the word to $FFFFA4AA gave a
+ * wrong target $411788 vs the correct $421788 — the $4172DC divergence.) Scale
+ * (bits 10-9) is 68020+ and is always 0 here. Output e.g.
+ * "(int32_t)(int16_t)g_cpu.A[3]" (.W) or "(int32_t)g_cpu.A[3]" (.L); both are
+ * int32_t so callers add them uniformly. The .W form is byte-identical to the
+ * old hardcoded expansion, so only .L-indexed sites change on regen. */
+static void fmt_brief_index(char *buf, size_t n, uint16_t ext) {
+    int xreg  = (ext >> 12) & 7;
+    int xtype = (ext >> 15) & 1;   /* 0=Dn, 1=An */
+    int xlong = (ext >> 11) & 1;   /* 0=.W, 1=.L */
+    const char *xr = xtype ? "g_cpu.A" : "g_cpu.D";
+    snprintf(buf, n, xlong ? "(int32_t)%s[%d]" : "(int32_t)(int16_t)%s[%d]", xr, xreg);
+}
+
 /* =========================================================================
  * emit_ea_load — emit pre-statements and fill out_expr with C rvalue
  * ========================================================================= */
@@ -362,12 +383,10 @@ static void emit_ea_load_ex(FILE *f, const M68KInstr *instr, int ea, M68KSize sz
     }
     case 6: { /* (d8,An,Xn) */
         uint16_t ext = er_next(er);
-        int      xreg  = (ext >> 12) & 7;
-        int      xtype = (ext >> 15) & 1; /* 0=Dn, 1=An */
         int8_t   d8    = (int8_t)(ext & 0xFF);
-        const char *xr = xtype ? "g_cpu.A" : "g_cpu.D";
-        fprintf(f, "  %s %s = %s((uint32_t)(g_cpu.A[%d] + (int32_t)(int16_t)%s[%d] + (%d)));\n",
-                ct, tmp, rf, reg, xr, xreg, (int)d8);
+        char     idx[40]; fmt_brief_index(idx, sizeof idx, ext);
+        fprintf(f, "  %s %s = %s((uint32_t)(g_cpu.A[%d] + %s + (%d)));\n",
+                ct, tmp, rf, reg, idx, (int)d8);
         snprintf(out_expr, 256, "%s", tmp);
         break;
     }
@@ -400,12 +419,10 @@ static void emit_ea_load_ex(FILE *f, const M68KInstr *instr, int ea, M68KSize sz
         case 3: { /* (d8,PC,Xn) */
             uint32_t pc_addr = instr->addr + er->bp;
             uint16_t ext = er_next(er);
-            int      xreg  = (ext >> 12) & 7;
-            int      xtype = (ext >> 15) & 1;
             int8_t   d8    = (int8_t)(ext & 0xFF);
-            const char *xr = xtype ? "g_cpu.A" : "g_cpu.D";
-            fprintf(f, "  %s %s = %s((uint32_t)(0x%08X + (int32_t)(int16_t)%s[%d] + (%d)));\n",
-                    ct, tmp, rf, pc_addr, xr, xreg, (int)d8);
+            char     idx[40]; fmt_brief_index(idx, sizeof idx, ext);
+            fprintf(f, "  %s %s = %s((uint32_t)(0x%08X + %s + (%d)));\n",
+                    ct, tmp, rf, pc_addr, idx, (int)d8);
             snprintf(out_expr, 256, "%s", tmp);
             break;
         }
@@ -462,13 +479,11 @@ static void emit_ea_addr_ex(FILE *f, const M68KInstr *instr, int ea,
     }
     case 6: {
         uint16_t ext = er_next(er);
-        int xreg  = (ext >> 12) & 7;
-        int xtype = (ext >> 15) & 1;
         int8_t d8 = (int8_t)(ext & 0xFF);
-        const char *xr = xtype ? "g_cpu.A" : "g_cpu.D";
+        char   idx[40]; fmt_brief_index(idx, sizeof idx, ext);
         snprintf(out_expr, 256,
-                 "(uint32_t)(g_cpu.A[%d] + (int32_t)(int16_t)%s[%d] + (%d))",
-                 reg, xr, xreg, (int)d8);
+                 "(uint32_t)(g_cpu.A[%d] + %s + (%d))",
+                 reg, idx, (int)d8);
         break;
     }
     case 7:
@@ -494,15 +509,13 @@ static void emit_ea_addr_ex(FILE *f, const M68KInstr *instr, int ea,
         case 3: {
             uint32_t pc_addr = instr->addr + er->bp;
             uint16_t ext = er_next(er);
-            int xreg  = (ext >> 12) & 7;
-            int xtype = (ext >> 15) & 1;
             int8_t d8 = (int8_t)(ext & 0xFF);
-            const char *xr = xtype ? "g_cpu.A" : "g_cpu.D";
+            char   idx[40]; fmt_brief_index(idx, sizeof idx, ext);
             snprintf(out_expr, 256,
                      u_suffix
-                       ? "(uint32_t)(0x%08Xu + (int32_t)(int16_t)%s[%d] + (%d))"
-                       : "(uint32_t)(0x%08X + (int32_t)(int16_t)%s[%d] + (%d))",
-                     pc_addr, xr, xreg, (int)d8);
+                       ? "(uint32_t)(0x%08Xu + %s + (%d))"
+                       : "(uint32_t)(0x%08X + %s + (%d))",
+                     pc_addr, idx, (int)d8);
             break;
         }
         default:
@@ -583,12 +596,10 @@ static void emit_ea_store_ex(FILE *f, const M68KInstr *instr, int ea, M68KSize s
     }
     case 6: { /* (d8,An,Xn) */
         uint16_t ext = er_next(er);
-        int xreg  = (ext >> 12) & 7;
-        int xtype = (ext >> 15) & 1;
         int8_t d8 = (int8_t)(ext & 0xFF);
-        const char *xr = xtype ? "g_cpu.A" : "g_cpu.D";
-        fprintf(f, "  %s((uint32_t)(g_cpu.A[%d] + (int32_t)(int16_t)%s[%d] + (%d)), (%s)(%s));\n",
-                wf, reg, xr, xreg, (int)d8, ct, val_expr);
+        char   idx[40]; fmt_brief_index(idx, sizeof idx, ext);
+        fprintf(f, "  %s((uint32_t)(g_cpu.A[%d] + %s + (%d)), (%s)(%s));\n",
+                wf, reg, idx, (int)d8, ct, val_expr);
         break;
     }
     case 7:
@@ -1288,10 +1299,23 @@ static void scan_function(const GenesisRom *rom, uint32_t start_addr,
         while (pc < rom->rom_size) {
             if (addrset_contains(instrs, pc)) break;
 
-            /* Stop linear scan if we've reached another function's entry point */
+            /* Stop linear scan if we've reached another function's entry point,
+             * OR fell through into the RANGE of another function at an address
+             * that is not itself an entry. The latter is the overlapping-code
+             * case: a branch target and a linear fall-through decode the SAME
+             * bytes from different starts and reconverge (e.g. $417234 `SUBI.L`
+             * (6B) reached by `BCC` and $417236 `MOVE.L` (4B) reached by
+             * fall-through from the `LEA` at $417232, both -> $41723A). The
+             * reached `pc` is a real instruction boundary on THIS path, so
+             * promote it to a function entry (via extern_targets) — otherwise
+             * this function has no fall-through linkage and silently `return`s
+             * at a non-terminator (the boundary-split fall-off bug). Promoting
+             * an address that is already an entry is a harmless dedup. */
             if (pc != start_addr &&
-                addr_belongs_to_other_function(pc, start_addr, sorted_funcs, nfuncs))
+                addr_belongs_to_other_function(pc, start_addr, sorted_funcs, nfuncs)) {
+                if (extern_targets) addrset_insert(extern_targets, pc);
                 break;
+            }
 
             M68KInstr instr;
             if (!m68k_decode(rom, pc, &instr)) break;
@@ -3209,13 +3233,11 @@ static void emit_instr(FILE *f, const GenesisRom *rom,
         }
         case 6: {
             uint16_t ext = er_next(&er2);
-            int xreg  = (ext >> 12) & 7;
-            int xtype = (ext >> 15) & 1;
             int8_t d8 = (int8_t)(ext & 0xFF);
-            const char *xr = xtype ? "g_cpu.A" : "g_cpu.D";
+            char   idx[40]; fmt_brief_index(idx, sizeof idx, ext);
             snprintf(base_expr, sizeof(base_expr),
-                     "(uint32_t)(g_cpu.A[%d] + (int32_t)(int16_t)%s[%d] + (%d))",
-                     reg, xr, xreg, (int)d8);
+                     "(uint32_t)(g_cpu.A[%d] + %s + (%d))",
+                     reg, idx, (int)d8);
             break;
         }
         case 7:
