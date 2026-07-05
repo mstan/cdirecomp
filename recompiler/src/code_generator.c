@@ -1900,9 +1900,19 @@ static void emit_instr(FILE *f, const GenesisRom *rom,
                         bool *skip_until_label,
                         int *has_sp_adjust,
                         const char *func_name,
-                        uint32_t func_addr) {
+                        uint32_t func_addr,
+                        bool *cycles_self_accounted) {
     uint32_t addr = instr->addr;
     M68KSize sz   = instr->size;
+    /* The caller (codegen loop) charges every fall-through instruction the
+     * global per-instruction cost once, AFTER emit_instr. Instructions that
+     * self-account on a NON-terminating (fall-through) path — Bcc not-taken,
+     * DBcc counter-expired / condition-true — must set this so the caller
+     * SUPPRESSES that global charge, else the path is billed twice (the boot's
+     * MCD212 frame clock then runs hot vs the CeDImu oracle). Terminators that
+     * self-account then `return` don't need it: their global charge is dead
+     * code after the return. Default: rely on the global charge. */
+    *cycles_self_accounted = false;
     s_diag_func_name = func_name;
     s_diag_func_addr = func_addr;
     s_diag_instr     = instr;
@@ -2296,36 +2306,36 @@ static void emit_instr(FILE *f, const GenesisRom *rom,
         int cond = (instr->words[0] >> 8) & 0xF;
         const char *ce = bcc_cond_expr(cond);
         if (instr->has_target) {
+            /* Cost the Bcc ONCE, UNCONDITIONALLY, before the branch test.
+             * CeDImu's Bcc() returns calcTime (13; .W displacement form 14)
+             * REGARDLESS of whether the condition is met — the cost is the
+             * instruction's, not the jump's. The taken path then goto/tail-calls
+             * (skipping the caller's global charge); the not-taken path FALLS
+             * THROUGH to the caller, so we set cycles_self_accounted to suppress
+             * the global charge there — else not-taken Bcc is billed 13 twice
+             * (this double-count, from an earlier over-correction, ran the boot's
+             * MCD212 frame clock ~1 frame hot vs the oracle — MC-CDI-009). */
+            emit_cycle_accounting(f, "  ", estimate_cycles(instr));
+            *cycles_self_accounted = true;
             if (g_yield_in_next_bne) {
-                /* IRQ-flag-spin loop-back path: the previous tst set
-                 * the polled-flag's Z bit; we're about to branch back
-                 * to retest. Yield first so the runner can advance
-                 * clownmdemu and let the IRQ handler clear the flag.
-                 * Falls through naturally when the flag is clear. */
-                if (addrset_contains(instrs, instr->target_addr)) {
-                    fprintf(f, "  if (%s) {\n", ce);
-                    emit_cycle_accounting(f, "    ", estimate_cycles(instr));
-                    fprintf(f, "    glue_yield_for_interrupt_poll(); goto label_%06X;\n",
-                            instr->target_addr);
-                    fprintf(f, "  }\n");
-                } else {
-                    fprintf(f, "  if (%s) {\n", ce);
-                    emit_cycle_accounting(f, "    ", estimate_cycles(instr));
-                    fprintf(f, "    glue_yield_for_interrupt_poll();\n");
-                    emit_split_tail_call(f, "    ", instr->target_addr, *has_sp_adjust != 0,
-                                         -1);
-                    fprintf(f, "  }\n");
-                }
+                /* IRQ-flag-spin loop-back path: the previous tst set the polled-
+                 * flag's Z bit; yield before branching back so the runner can
+                 * advance devices and let the IRQ handler clear the flag. */
+                fprintf(f, "  if (%s) {\n", ce);
+                fprintf(f, "    glue_yield_for_interrupt_poll();\n");
+                if (addrset_contains(instrs, instr->target_addr))
+                    fprintf(f, "    goto label_%06X;\n", instr->target_addr);
+                else
+                    emit_split_tail_call(f, "    ", instr->target_addr, *has_sp_adjust != 0, -1);
+                fprintf(f, "  }\n");
                 g_yield_in_next_bne = false;
             } else if (addrset_contains(instrs, instr->target_addr)) {
                 fprintf(f, "  if (%s) {\n", ce);
-                emit_cycle_accounting(f, "    ", estimate_cycles(instr));
                 fprintf(f, "    goto label_%06X;\n", instr->target_addr);
                 fprintf(f, "  }\n");
             } else {
                 fprintf(f, "  if (%s) {\n", ce);
-                emit_split_tail_call(f, "    ", instr->target_addr, *has_sp_adjust != 0,
-                                     estimate_cycles(instr));
+                emit_split_tail_call(f, "    ", instr->target_addr, *has_sp_adjust != 0, -1);
                 fprintf(f, "  }\n");
             }
         } else {
@@ -2350,14 +2360,26 @@ static void emit_instr(FILE *f, const GenesisRom *rom,
         fprintf(f, "    if ((int16_t)g_cpu.D[%d] != -1) {\n", dreg);
         if (instr->has_target) {
             if (addrset_contains(instrs, instr->target_addr)) {
-                emit_cycle_accounting(f, "      ", estimate_cycles(instr));
+                emit_cycle_accounting(f, "      ", estimate_cycles(instr));   /* loop: 17 */
                 fprintf(f, "      goto label_%06X;\n", instr->target_addr);
             } else {
                 emit_split_tail_call(f, "      ", instr->target_addr, *has_sp_adjust != 0,
                                      estimate_cycles(instr));
             }
         }
-        fprintf(f, "    }\n  }\n");
+        /* CeDImu DBcc() returns a cost on EVERY path: loop / counter-expired = 17,
+         * condition-true = 14. The loop-back path above goto/tail-calls (skips the
+         * caller's global charge); the counter-expired and condition-true paths
+         * FALL THROUGH to the caller, so we self-account them here (17 / 14) and
+         * set cycles_self_accounted to suppress the caller's global charge — else
+         * those two paths are billed twice (17->34, 14->31), the same double-count
+         * class as Bcc above (MC-CDI-009). */
+        fprintf(f, "    } else {\n");          /* counter expired -> fall through */
+        emit_cycle_accounting(f, "      ", estimate_cycles(instr));
+        fprintf(f, "    }\n  } else {\n");      /* condition true -> fall through */
+        emit_cycle_accounting(f, "    ", 14);
+        fprintf(f, "  }\n");
+        *cycles_self_accounted = true;
         break;
     }
 
@@ -4280,16 +4302,21 @@ bool codegen_emit(const GenesisRom *rom, const FunctionList *funcs,
             fprintf(f_full, "  debug_trace_block();\n");
             if (s_reverse_debug)
                 fprintf(f_full, "  rdb_on_insn(0x%06Xu);\n", pc);
+            bool cycles_self_accounted = false;
             emit_instr(f_full, rom, &instr, &instrs, &skip_until_label, &has_sp_adjust,
-                       name, func_addr);
+                       name, func_addr, &cycles_self_accounted);
 
             /* Contextual recompiler: accumulate cycles and check for
              * pending VBlank.  The runtime maintains g_cycle_accumulator
              * which is checked against the VBlank threshold (~109312
              * 68K cycles from frame start = scanline 224).  This allows
              * the VBlank handler to fire between any two instructions,
-             * matching the interpreter's interrupt-driven behavior. */
-            {
+             * matching the interpreter's interrupt-driven behavior.
+             *
+             * Skip when emit_instr already charged a non-terminating path
+             * itself (Bcc not-taken, DBcc expire/cond-true) — charging again
+             * here would double-bill that path and run the frame clock hot. */
+            if (!cycles_self_accounted) {
                 int cyc = estimate_cycles(&instr);
                 emit_cycle_accounting(f_full, "  ", cyc);
             }

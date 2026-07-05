@@ -108,6 +108,7 @@ void genesis_log_dispatch_miss(uint32_t addr);
  * debug_server.c. (Capturing at instruction END instead would miss the JSR
  * sample, since the call dives into the callee before reaching the hook.) */
 void debug_trace_block(void);
+void debug_record_irq_raise(uint8_t level);   /* always-on IRQ-raise ring (MC-CDI-007 boundary diff) */
 
 /* Interpreter fallbacks for unresolved dynamic control flow. */
 void hybrid_jmp_interpret(uint32_t target_pc);
@@ -163,6 +164,26 @@ int m68k_interp_bus_error(uint32_t addr);
 extern jmp_buf g_recomp_bus_env;
 extern int     g_recomp_bus_armed;
 int  recomp_bus_error(uint32_t addr);
+
+/* ---- Level-triggered external-interrupt delivery (MC-CDI-007) ----
+ * A device raises an autovectored interrupt via cdi_irq_raise(level), which sets
+ * a bit in g_irq_pending. The DA-poll spin the boot blocks in is RECOMPILED (a
+ * tight goto loop inside func_41BEE2) — the top-level trampoline can't preempt it
+ * and we must NOT run the OS-9 ISR nested in that function's C frame (it fights
+ * OS-9 task switching). So delivery mirrors the recomp bus-error unwind: the
+ * per-instruction ENTRY safepoint (debug_trace_block, in BOTH tiers) calls
+ * recomp_take_irq() at an instruction boundary; if an unmasked interrupt is
+ * pending (level 7, or level > SR IPM) it builds the autovector frame (short
+ * frame, stacked PC = g_cpu.PC = the not-yet-executed instruction = faithful
+ * resume PC, exactly as CeDImu checks m_exceptions at the top of its Interpreter
+ * iteration), consumes the pending edge (CeDImu pops the exception queue; IPM is
+ * NOT raised, matching ProcessException), points PC at the handler from the
+ * vector table, and longjmps to the trampoline's IRQ landing pad, which
+ * dispatches it. Returns without effect when disarmed or nothing is deliverable. */
+extern jmp_buf g_recomp_irq_env;
+extern int     g_recomp_irq_armed;
+int  recomp_pending_irq_level(void);   /* highest pending unmasked-agnostic level, or 0 */
+void recomp_take_irq(void);            /* deliver at an instruction boundary (may longjmp) */
 
 void m68k_illegal_trap(uint32_t pc, uint16_t opcode);
 void genesis_reset_devices(void);                /* RESET instruction */

@@ -145,6 +145,21 @@ int main(int argc, char *argv[]) {
             g_redirect_pending = 1;
         }
 
+        /* IRQ delivery landing pad (MC-CDI-007). recomp_take_irq() (called from
+         * the per-instruction entry safepoint) builds the autovector frame,
+         * points g_cpu.PC at the OS-9 handler, and longjmps here — abandoning the
+         * recompiled DA-poll loop's C frame so the ISR does NOT run nested inside
+         * it. Dispatch the handler at depth 0 like any other redirect; its RTE
+         * pops the stacked resume PC and the loop follows [A7] back into the poll,
+         * which now sees the event the ISR posted. Mirrors the bus-error pad. */
+        g_recomp_irq_armed = 1;
+        if (setjmp(g_recomp_irq_env) != 0) {
+            g_recomp_bus_armed = 1;   /* both pads live for the next dispatch */
+            g_recomp_irq_armed = 1;
+            g_redirect_addr    = g_cpu.PC & 0xFFFFFFu;   /* = the interrupt handler */
+            g_redirect_pending = 1;
+        }
+
         for (;;) {
             uint32_t target;
             if (g_redirect_pending) {
@@ -187,6 +202,7 @@ int main(int argc, char *argv[]) {
             recomp_top_resume(target);
         }
         g_recomp_bus_armed = 0;
+        g_recomp_irq_armed = 0;
     }
 
     if (g_halted)
