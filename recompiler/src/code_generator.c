@@ -1798,9 +1798,15 @@ static int estimate_cycles_scc68070(const M68KInstr *instr)
 
     case MN_OTHER:
     default:
-        /* Unclassified opcode: fall back to the EA-aware PRM estimate (close
-         * enough; the dominant classified instructions above carry the phase). */
-        return estimate_cycles_prm(instr);
+        /* Unclassified opcode. MUST match the interpreter's m68k_cycles default
+         * (14) — the two tiers have to agree or the recompiled tier accumulates
+         * the MCD212 display clock at a different rate (the old `4 + PRM-EA`
+         * under-counted these ~10 cycles each; the driver modules at $416xxx/
+         * $417xxx/$427xxx run enough MN_OTHER in the recompiled tier to drift the
+         * frame clock ~1 frame behind the oracle over the boot — MC-CDI-009). 14
+         * is CeDImu's "reasonable SCC68070 default"; the PRM table is 68000, not
+         * 68070, and is kept only for the reference/diff tooling. */
+        return 14;
     }
 }
 

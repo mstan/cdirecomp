@@ -80,6 +80,8 @@ void debug_ring_capture_frame(void) {
 typedef struct {
     uint64_t  seq;     /* monotonic block index since boot */
     M68KState cpu;     /* full register file AT block entry (PC live) */
+    uint64_t  total_cyc; /* g_total_cycles at block entry — diff vs CeDImu totalCycleCount
+                            per seq to localize a sub-frame cycle drift (MC-CDI-009). */
     uint32_t  frame;   /* g_frame_count at block entry — diff display-timing vs
                           the oracle's GetTotalFrameCount() per seq, so a device-
                           clock drift (invisible to register alignment during a
@@ -132,6 +134,7 @@ void debug_trace_block(void) {
     r->seq = s_trace_seq;
     r->cpu = g_cpu;
     r->frame = (uint32_t)g_frame_count;
+    r->total_cyc = g_total_cycles;
     r->a7_top = debug_peek_be32(g_cpu.A[7]);
     s_trace_seq++;
     if (g_stop_seq && s_trace_seq >= g_stop_seq) cdi_fault_hold();
@@ -460,7 +463,8 @@ static void resp_trace(const char *line, char *out, int outlen) {
             (unsigned long long)recs[i].seq, c->PC, c->SR);
         for (int r = 0; r < 8; r++) n += snprintf(out + n, outlen - n, ",\"d%d\":%u", r, c->D[r]);
         for (int r = 0; r < 8; r++) n += snprintf(out + n, outlen - n, ",\"a%d\":%u", r, c->A[r]);
-        n += snprintf(out + n, outlen - n, ",\"a7top\":%u,\"frame\":%u", recs[i].a7_top, recs[i].frame);
+        n += snprintf(out + n, outlen - n, ",\"a7top\":%u,\"frame\":%u,\"tcyc\":%llu",
+                      recs[i].a7_top, recs[i].frame, (unsigned long long)recs[i].total_cyc);
         n += snprintf(out + n, outlen - n, "}");
     }
     snprintf(out + n, outlen - n, "]}");

@@ -93,6 +93,10 @@ void recomp_top_resume(uint32_t addr) {
 /* ---- CPU + ABI globals (generated code references these) ---- */
 M68KState g_cpu;
 uint64_t  g_frame_count       = 0;
+uint64_t  g_total_cycles      = 0;   /* sum of every mcd212_tick input = the SCC68070
+                                      * clock the MCD212 runs on; diff vs CeDImu
+                                      * totalCycleCount per seq to localize a cycle
+                                      * under/over-count (MC-CDI-009 sub-frame drift). */
 uint64_t  g_native_insn_count = 0;
 uint32_t  g_cycle_accumulator = 0;
 uint32_t  g_vblank_threshold  = 0;

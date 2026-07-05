@@ -257,6 +257,7 @@ void    nvram_set_byte(uint16_t dev, uint8_t data);
 /*  ABI globals the generator references (mirrors genesis_runtime.h)      */
 /* ====================================================================== */
 extern uint64_t g_frame_count;
+extern uint64_t g_total_cycles;   /* running SCC68070 clock (sum of mcd212_tick inputs) */
 extern uint64_t g_native_insn_count;
 extern uint32_t g_cycle_accumulator;     /* 68070 cycles since frame start */
 extern uint32_t g_vblank_threshold;
