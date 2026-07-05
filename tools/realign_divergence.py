@@ -38,6 +38,22 @@ import argparse, json, socket, sys
 REG_KEYS = ["pc", "sr"] + [f"d{i}" for i in range(8)] + [f"a{i}" for i in range(8)] + ["a7top"]
 A_REG_IDX = {n: REG_KEYS.index(f"a{n}") for n in range(8)}   # state-tuple index of An
 A7TOP_IDX = REG_KEYS.index("a7top")
+A7_IDX    = REG_KEYS.index("a7")
+# Non-stack fields: everything except A7 and the [A7] snapshot. Two states are
+# "seam-equal" if they agree on all of these — used to bridge an exception-frame
+# CAPTURE seam (a take where one side's handler-entry record already reflects the
+# pushed frame in A7/a7top and the other's does not yet), which is a 1-record
+# trace artifact, not a divergence. See the seam bridge in the re-align loop.
+NONSTACK_IDX = [k for k in range(len(REG_KEYS)) if k not in (A7_IDX, A7TOP_IDX)]
+
+def seam_eq(a, b):
+    """True if a and b agree on every field except A7 and a7top (an exception-
+    frame capture seam), and A7 differs by a plausible SCC68070 frame size
+    (short = 6 or 8 bytes; long bus/addr-error = 34) — so a genuine stack
+    divergence (arbitrary A7 delta) is NOT masked."""
+    if any(a[k] != b[k] for k in NONSTACK_IDX):
+        return False
+    return abs(a[A7_IDX] - b[A7_IDX]) in (6, 8, 34)
 
 
 def addr_advances(states, rng):
@@ -194,6 +210,39 @@ def main():
                 hit = ("oracle", d); break
             if i + d < len(N.states) and N.states[i + d] == O.states[j]:
                 hit = ("native", d); break
+        # Exception-frame capture-seam bridge. A take (interrupt/trap) under a
+        # wait-loop skew leaves the re-sync TARGET differing ONLY in A7/a7top:
+        # one side's handler-entry record already shows the pushed frame, the
+        # other captured the pre-push registers. The exact search above rejects
+        # it; accept it iff the record immediately AFTER the seam exact-aligns
+        # (so it is provably a 1-record artifact, not a control-flow split).
+        seam = False
+        if hit is None:
+            for d in range(0, W + 1):
+                # oracle spun d extra records, then took (seam at O[j+d] ~ N[i])
+                if j + d < len(O.states) and seam_eq(O.states[j + d], N.states[i]) \
+                        and i + 1 < len(N.states) and j + d + 1 < len(O.states) \
+                        and N.states[i + 1] == O.states[j + d + 1]:
+                    hit = ("oracle", d); seam = True; break
+                # native spun d extra records, then took (seam at N[i+d] ~ O[j])
+                if i + d < len(N.states) and seam_eq(N.states[i + d], O.states[j]) \
+                        and j + 1 < len(O.states) and i + d + 1 < len(N.states) \
+                        and O.states[j + 1] == N.states[i + d + 1]:
+                    hit = ("native", d); seam = True; break
+        if seam:
+            side, d = hit
+            resyncs += 1
+            max_skew = max(max_skew, d)
+            if args.log_skips:
+                who = "oracle" if side == "oracle" else "native"
+                print(f"  [exception-frame seam bridged @ {who} seq "
+                      f"{(O.seqs[j+d] if side=='oracle' else N.seqs[i+d])} "
+                      f"PC=${N.states[i][0]:06X}; {who} spun {d} extra record(s) then took]")
+            if side == "oracle":
+                i += 1; j += d + 1
+            else:
+                i += d + 1; j += 1
+            continue
         if hit is None:
             field = first_diff_field(N.states[i], O.states[j])
             print(f"\n*** TRUE DIVERGENCE — native seq {N.seqs[i]} vs oracle seq {O.seqs[j]} "

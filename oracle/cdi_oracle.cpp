@@ -50,7 +50,7 @@
 using Reg = SCC68070::Register;
 
 /* ---- block-trace ring (mirrors the native CdiTraceRecord shape) ---- */
-struct TraceRec { uint64_t seq; uint32_t pc, sr, d[8], a[8], a7top, frame; };
+struct TraceRec { uint64_t seq; uint32_t pc, sr, d[8], a[8], a7top, frame; uint64_t tcyc; };
 static constexpr uint32_t RING = 1u << 20;   /* 1048576 — match the native trace ring
                                                 so [1,~1M) is diffable from seq 1 (boot
                                                 reaches the IRQ frontier at ~seq 575k) */
@@ -86,6 +86,7 @@ static void capture(uint32_t pc, const std::map<Reg, uint32_t> &r) {
     for (int i = 0; i < 8; i++) t.a[i] = r.at(static_cast<Reg>(static_cast<int>(Reg::A0) + i));
     t.a7top = peek_be32(t.a[7]);   /* stack top at instruction entry */
     t.frame = g_cdi->GetTotalFrameCount();   /* MCD212 m_totalFrameCount — diff vs native g_frame_count per seq */
+    t.tcyc  = g_cdi->m_cpu.totalCycleCount;   /* SCC68070 clock — diff vs native g_total_cycles per seq */
     g_seq++;
 }
 
@@ -134,7 +135,8 @@ static void trace_records(char *out, int outlen, uint64_t from, int count, bool 
                       i ? "," : "", (unsigned long long)recs[i].seq, recs[i].pc, recs[i].sr);
         for (int r = 0; r < 8; r++) n += snprintf(out + n, outlen - n, ",\"d%d\":%u", r, recs[i].d[r]);
         for (int r = 0; r < 8; r++) n += snprintf(out + n, outlen - n, ",\"a%d\":%u", r, recs[i].a[r]);
-        n += snprintf(out + n, outlen - n, ",\"a7top\":%u,\"frame\":%u", recs[i].a7top, recs[i].frame);
+        n += snprintf(out + n, outlen - n, ",\"a7top\":%u,\"frame\":%u,\"tcyc\":%llu",
+                      recs[i].a7top, recs[i].frame, (unsigned long long)recs[i].tcyc);
         n += snprintf(out + n, outlen - n, "}");
     }
     snprintf(out + n, outlen - n, "]}");
