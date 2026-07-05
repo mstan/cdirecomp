@@ -1970,7 +1970,13 @@ static void emit_instr(FILE *f, const GenesisRom *rom,
          * and replaced with the simpler original: `g_rte_pending = 1; return;`
          * The manual `g_cpu.SR = saved_sr` restore in glue_service_vblank would then
          * need to be reinstated as the sole SR restore mechanism. */
-        fprintf(f, "  g_cpu.SR = (uint16_t)m68k_read16(g_cpu.A[7]); g_cpu.A[7] += 2; /* RTE: pop SR */\n");
+        /* Pop the WHOLE frame off the supervisor stack (A7) BEFORE applying SR:
+         * m68k_set_sr swaps A7 to the USP when the popped SR returns to user mode
+         * (68000 A7<->SSP/USP alias), so it must run only after the frame is off
+         * the supervisor stack — else the swap discards the still-unpopped words
+         * and the resumed user task runs on the supervisor stack (corrupt returns
+         * — the $800020 crash where an OS-9 RTE-dispatched a user process). */
+        fprintf(f, "  { uint16_t _sr = (uint16_t)m68k_read16(g_cpu.A[7]) & 0xA71Fu; g_cpu.A[7] += 2; /* RTE: pop SR */\n");
         fprintf(f, "  g_cpu.PC = m68k_read32(g_cpu.A[7]);            g_cpu.A[7] += 4; /* RTE: pop PC */\n");
         /* CD-i divergence from the 68000 base (like the cdi_runtime.h include):
          * the SCC68070 (68010-like) frame carries a format/vector word AFTER the
@@ -1982,6 +1988,7 @@ static void emit_instr(FILE *f, const GenesisRom *rom,
          * popped g_cpu.PC rather than [A7] (the exception unwinds to depth 0). */
         fprintf(f, "  { uint16_t _fmt = (uint16_t)m68k_read16(g_cpu.A[7]); g_cpu.A[7] += 2;\n");
         fprintf(f, "    if ((_fmt & 0xF000u) == 0xF000u) g_cpu.A[7] += 26; }  /* RTE: pop format word */\n");
+        fprintf(f, "  m68k_set_sr(_sr); }  /* apply SR + swap A7->USP if returning to user */\n");
         emit_cycle_accounting(f, "  ", estimate_cycles(instr));
         fprintf(f, "  g_rte_pending = 1; g_rte_resume = 1; return; /* RTE */\n");
         *skip_until_label = true;
@@ -2642,7 +2649,7 @@ static void emit_instr(FILE *f, const GenesisRom *rom,
                 (unsigned)(instr->imm32 & 0xFFu));
         break;
     case MN_ORI_TO_SR:
-        fprintf(f, "  g_cpu.SR |= 0x%04Xu; /* ORI #imm,SR */\n",
+        fprintf(f, "  m68k_set_sr((uint16_t)(g_cpu.SR | 0x%04Xu)); /* ORI #imm,SR */\n",
                 (unsigned)(instr->imm32 & 0xFFFFu));
         break;
     case MN_ANDI_TO_CCR:
@@ -2650,7 +2657,7 @@ static void emit_instr(FILE *f, const GenesisRom *rom,
                 (unsigned)(0xFF00u | (instr->imm32 & 0xFFu)));
         break;
     case MN_ANDI_TO_SR:
-        fprintf(f, "  g_cpu.SR &= 0x%04Xu; /* ANDI #imm,SR */\n",
+        fprintf(f, "  m68k_set_sr((uint16_t)(g_cpu.SR & 0x%04Xu)); /* ANDI #imm,SR */\n",
                 (unsigned)(instr->imm32 & 0xFFFFu));
         break;
     case MN_EORI_TO_CCR:
@@ -2658,7 +2665,7 @@ static void emit_instr(FILE *f, const GenesisRom *rom,
                 (unsigned)(instr->imm32 & 0xFFu));
         break;
     case MN_EORI_TO_SR:
-        fprintf(f, "  g_cpu.SR ^= 0x%04Xu; /* EORI #imm,SR */\n",
+        fprintf(f, "  m68k_set_sr((uint16_t)(g_cpu.SR ^ 0x%04Xu)); /* EORI #imm,SR */\n",
                 (unsigned)(instr->imm32 & 0xFFFFu));
         break;
 
@@ -3382,7 +3389,7 @@ static void emit_instr(FILE *f, const GenesisRom *rom,
          *   dst_is_ea=true  → MOVE SR,<ea>  (store SR → EA) */
         if (!instr->dst_is_ea) {
             emit_ea_load(f, instr, instr->src_ea, M68K_SIZE_W, &er, tmp, src_expr);
-            fprintf(f, "  g_cpu.SR = (uint16_t)(%s);\n", src_expr);
+            fprintf(f, "  m68k_set_sr((uint16_t)(%s));  /* MOVE <ea>,SR — swap A7 if S changes */\n", src_expr);
         } else {
             emit_ea_store(f, instr, instr->src_ea, M68K_SIZE_W, &er, "g_cpu.SR");
         }

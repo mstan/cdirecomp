@@ -210,12 +210,29 @@ void glue_yield_for_vblank(void)        { /* TODO MC-CDI-007: fiber yield for fr
 void glue_yield_for_interrupt_poll(void){ /* TODO MC-CDI-007 */ }
 void runtime_request_vblank(void)       { /* TODO MC-CDI-007 */ }
 
+/* Full-SR write with the 68000 A7<->stack-pointer swap. When the S bit flips,
+ * A7 aliases a different physical stack pointer: save the current A7 to the
+ * outgoing shadow and load the incoming one. See cdi_runtime.h. */
+void m68k_set_sr(uint16_t new_sr) {
+    uint16_t old = g_cpu.SR;
+    g_cpu.SR = new_sr;
+    if ((old ^ new_sr) & SR_S) {
+        if (old & SR_S) {                 /* supervisor -> user */
+            g_cpu.SSP = g_cpu.A[7];
+            g_cpu.A[7] = g_cpu.USP;
+        } else {                          /* user -> supervisor */
+            g_cpu.USP = g_cpu.A[7];
+            g_cpu.A[7] = g_cpu.SSP;
+        }
+    }
+}
+
 /* ---- Privileged / exception semantics ---- */
 void genesis_reset_devices(void) {
     /* RESET instruction: re-initialise MCD212 / CDIC / SLAVE. TODO MC-CDI-008. */
 }
 void genesis_stop_until_interrupt(uint16_t sr_imm) {
-    g_cpu.SR = sr_imm;
+    m68k_set_sr(sr_imm);   /* STOP loads SR (privileged) — swap A7 if S changes */
     g_halted = 1;   /* the top-level trampoline stops here; MC-CDI-007 will
                      * wake on an IRQ above the I-mask and clear this. */
     /* TODO MC-CDI-007: halt until an IRQ above the I-mask; yield to pacing. */
@@ -232,7 +249,8 @@ static uint32_t build_exception_frame(uint8_t vec) {
      * target — CeDImu's GetWord throws AddressError without updating lastAddress). */
     uint32_t tpf = g_last_access_addr;
     uint16_t sr = g_cpu.SR;
-    g_cpu.SR |= SR_S;
+    m68k_set_sr(g_cpu.SR | SR_S);   /* enter supervisor; swap A7 user->SSP if needed
+                                     * so the frame is pushed on the supervisor stack */
 
     if (vec == 2 || vec == 3) {   /* bus error / address error → long (format $F) frame */
         g_cpu.A[7] -= 2; m68k_write16(g_cpu.A[7], 0);            /* internal information */

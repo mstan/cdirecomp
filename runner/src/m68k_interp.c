@@ -888,11 +888,12 @@ static M68kiStatus exec_one(const M68KInstr *ins, uint32_t *next_pc) {
         return M68KI_OK;
     }
     case MN_RTE: {                       /* pop SR, PC, format word (CeDImu RTE) */
-        g_cpu.SR = pop16() & 0xA71Fu;     /* mask to valid SR bits (T,S,I,CCR) */
-        *next_pc = pop32();
-        uint16_t fmt = pop16();           /* format/vector word */
-        if ((fmt & 0xF000u) == 0xF000u)   /* long (bus/address-error) frame */
-            g_cpu.A[7] += 26;             /* discard the remaining internal frame words */
+        uint16_t new_sr = pop16() & 0xA71Fu;  /* frame lives on the supervisor stack; */
+        *next_pc = pop32();                    /* pop the WHOLE frame off A7 first ... */
+        uint16_t fmt = pop16();                /* format/vector word */
+        if ((fmt & 0xF000u) == 0xF000u)        /* long (bus/address-error) frame */
+            g_cpu.A[7] += 26;                  /* discard the remaining internal frame words */
+        m68k_set_sr(new_sr);   /* ... THEN apply SR, swapping A7->USP if returning to user */
         return M68KI_OK;
     }
     case MN_TRAP:                        /* TRAP #n → vector 32+n. Stack the NEXT
@@ -1045,7 +1046,7 @@ static M68kiStatus exec_one(const M68KInstr *ins, uint32_t *next_pc) {
 
     /* ---- MOVE to/from SR / CCR / USP ---- */
     case MN_MOVE_SR:
-        if (!ins->dst_is_ea) g_cpu.SR = (uint16_t)(read_ea(ins, ins->src_ea, M68K_SIZE_W, &er) & 0xA71Fu);
+        if (!ins->dst_is_ea) m68k_set_sr((uint16_t)(read_ea(ins, ins->src_ea, M68K_SIZE_W, &er) & 0xA71Fu));
         else                 write_ea(ins, ins->src_ea, M68K_SIZE_W, &er, g_cpu.SR);
         return M68KI_OK;
     case MN_MOVE_CCR:        /* CCR is 5 bits (0x1F) — clown masks; matches HW */
@@ -1070,11 +1071,11 @@ static M68kiStatus exec_one(const M68KInstr *ins, uint32_t *next_pc) {
 
     /* ---- immediate to SR / CCR (then mask to valid SR bits, like HW) ---- */
     case MN_ORI_TO_CCR:  g_cpu.SR |= (uint16_t)(ins->imm32 & 0xFFu);              g_cpu.SR &= 0xA71Fu; return M68KI_OK;
-    case MN_ORI_TO_SR:   g_cpu.SR |= (uint16_t)(ins->imm32 & 0xFFFFu);            g_cpu.SR &= 0xA71Fu; return M68KI_OK;
+    case MN_ORI_TO_SR:   m68k_set_sr((uint16_t)((g_cpu.SR | (ins->imm32 & 0xFFFFu)) & 0xA71Fu)); return M68KI_OK;
     case MN_ANDI_TO_CCR: g_cpu.SR &= (uint16_t)(0xFF00u | (ins->imm32 & 0xFFu));  g_cpu.SR &= 0xA71Fu; return M68KI_OK;
-    case MN_ANDI_TO_SR:  g_cpu.SR &= (uint16_t)(ins->imm32 & 0xFFFFu);            g_cpu.SR &= 0xA71Fu; return M68KI_OK;
+    case MN_ANDI_TO_SR:  m68k_set_sr((uint16_t)((g_cpu.SR & (ins->imm32 & 0xFFFFu)) & 0xA71Fu)); return M68KI_OK;
     case MN_EORI_TO_CCR: g_cpu.SR ^= (uint16_t)(ins->imm32 & 0xFFu);              g_cpu.SR &= 0xA71Fu; return M68KI_OK;
-    case MN_EORI_TO_SR:  g_cpu.SR ^= (uint16_t)(ins->imm32 & 0xFFFFu);            g_cpu.SR &= 0xA71Fu; return M68KI_OK;
+    case MN_EORI_TO_SR:  m68k_set_sr((uint16_t)((g_cpu.SR ^ (ins->imm32 & 0xFFFFu)) & 0xA71Fu)); return M68KI_OK;
 
     default:
         g_m68ki_bad_pc = ins->addr;
