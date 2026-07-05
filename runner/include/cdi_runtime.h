@@ -294,6 +294,7 @@ extern int g_rte_resume;
  * immediate caller clears to unwind a single level. */
 extern int      g_redirect_pending;
 extern uint32_t g_redirect_addr;
+extern int      g_call_was_hybrid;   /* last dispatch ran hybrid (1) vs flat-call (0) */
 
 /* Set by STOP (genesis_stop_until_interrupt). The top-level trampoline stops
  * following the guest stack once halted; MC-CDI-007 clears it on an IRQ. */

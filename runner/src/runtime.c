@@ -119,6 +119,12 @@ int  g_rte_resume      = 0;   /* recompiled RTE → resume at g_cpu.PC in the tr
  * through them. */
 int      g_redirect_pending = 0;
 uint32_t g_redirect_addr    = 0;
+/* Set by recomp_dispatch_once / recomp_call_func to record whether the LAST
+ * dispatched call ran in the hybrid interpreter (1) or was flat-called as a
+ * recompiled function (0). A JSR site reads it to decide whether to apply its
+ * flat-call JSR-pop: a hybrid callee already advanced the real guest A7/PC, so
+ * the caller must NOT pop again (guest-stack dispatcher, stage 1). */
+int      g_call_was_hybrid  = 0;
 
 /* Set when the CPU executes STOP (shell idle waits here for an interrupt). The
  * top-level trampoline stops following the guest stack once halted; MC-CDI-007
