@@ -342,6 +342,18 @@ void m68k_trap_vector(uint8_t vec) {
      * inline OS9 service-code word, so build_exception_frame stacks that address;
      * the kernel's F$ dispatcher reads the code there and RTEs past it. */
     uint32_t handler = build_exception_frame(vec);
+    /* Exception-processing clock cost, mirroring CeDImu ProcessException
+     * (InstructionSet.cpp:53-69). The recompiled bus-error path (recomp_bus_error)
+     * and the interpreter already tick 158 for vector 2/3; the recompiled odd-JMP
+     * address error reaches vector 3 through HERE and was ticking 0 — a 158-cycle
+     * under-count on the boot's deliberate $40069E address error that seeds the
+     * MCD212 frame-clock drift vs the oracle (MC-CDI-009). TRAP #0 (vec 32-47) is
+     * NOT ticked here: native's MN_TRAP instruction cost already carries CeDImu's
+     * 52-cycle exception cost (CeDImu's TRAP handler returns 0 + ProcessException
+     * 52; native's TRAP returns 52 + this 0 — same total), so ticking again would
+     * double-count. */
+    if (vec == 2 || vec == 3)
+        mcd212_tick(158);
     call_by_address(handler);     /* recompiled handler, or dispatch-miss → RAM-built stub
                                    * needs the hybrid interpreter (MC-CDI-011) */
 }
