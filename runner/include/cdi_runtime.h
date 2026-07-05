@@ -26,10 +26,20 @@ typedef struct {
     uint32_t A[8];   /* A0-A6 address registers, A7 = SSP (supervisor stack) */
     uint16_t SR;     /* Status register: T,S,I2,I1,I0,X,N,Z,V,C */
     uint32_t PC;     /* Program counter (dynamic dispatch / debug) */
-    uint32_t USP;    /* User Stack Pointer (shadow, separate from A7) */
+    uint32_t USP;    /* inactive User Stack Pointer (holds the user A7 while S=1) */
+    uint32_t SSP;    /* inactive Supervisor Stack Pointer (holds the super A7 while S=0) */
 } M68KState;
 
 extern M68KState g_cpu;
+
+/* Write the full 16-bit SR, swapping A7 with the inactive stack pointer when the
+ * S bit changes (68000: A7 aliases SSP when S=1, USP when S=0). EVERY full-SR
+ * write — RTE, MOVE/ANDI/ORI/EORI to SR, STOP, and exception entry — MUST go
+ * through this, or a supervisor->user transition (e.g. OS-9 dispatching a user
+ * task via RTE) leaves A7 pointing at the supervisor stack and the task runs on
+ * the wrong stack (corrupt returns). CCR-only flag updates do NOT use this (they
+ * never touch S). See runtime.c. */
+void m68k_set_sr(uint16_t new_sr);
 
 /* SR flag bits (identical to 68000) */
 #define SR_C   (1u << 0)

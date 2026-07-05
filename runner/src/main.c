@@ -85,7 +85,8 @@ int main(int argc, char *argv[]) {
     runtime_init();                 /* zeroes g_cpu */
     periph_reset();                 /* on-chip peripheral power-on state (UART TxRDY) */
     nvram_reset();                  /* DS1216 SmartWatch: SRAM=$FF, clock=1989-01-01 */
-    g_cpu.A[7] = reset_ssp;         /* supervisor stack pointer */
+    g_cpu.A[7] = reset_ssp;         /* supervisor stack pointer (S=1 → A7 aliases SSP) */
+    g_cpu.SSP  = reset_ssp;         /* SSP shadow (used when a user->super swap restores A7) */
     g_cpu.PC   = reset_pc;
     g_cpu.SR   = 0x2700;            /* 68000 reset: S=1, IPL=7, T=0 */
     g_recomp_initial_ssp = reset_ssp;
