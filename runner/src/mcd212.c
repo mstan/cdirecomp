@@ -72,6 +72,16 @@ static unsigned mcd_retrace_lines(void) {
 static double   mcd_line_time_ns(void)  { return (s_reg[MCD_DCR1] & (1u<<14)) ? 63560.0 : 64000.0; } /* CF */
 
 void mcd212_tick(uint32_t cycles) {
+    /* Advance the IKAT's delayed-response check BEFORE the frame counter may
+     * advance this tick. CeDImu's Mono3::IncrementTime runs CDI::IncrementTime
+     * (→ IKAT::IncrementTime, which fires a 2-frame-delayed response the instant
+     * GetTotalFrameCount() reaches its target) BEFORE m_mcd212.IncrementTime
+     * (which increments the frame). Checking here, ahead of the g_frame_count++
+     * below, fires the disc-status IRQ (set_int → cdi_irq_raise(2)) on the SAME
+     * guest instruction as the oracle — checking after the increment would fire
+     * one instruction early. mcd212_tick is called once per instruction in both
+     * tiers, so this matches CeDImu's per-step IKAT advance. (MC-CDI-007.) */
+    slave_increment_frame();
     s_time_ns += (double)cycles * MCD_CYCLE_DELAY_NS;
     double line_ns = mcd_line_time_ns();
     while (s_time_ns >= line_ns) {

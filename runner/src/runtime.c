@@ -136,7 +136,7 @@ uint32_t g_recomp_initial_ssp = 0;
  * CPU between instructions) is a later milestone (MC-CDI-007/010); recording the
  * pending request lets polling boots proceed without it. */
 uint32_t g_irq_pending = 0;
-void cdi_irq_raise(uint8_t level) { g_irq_pending |= (1u << level); }
+void cdi_irq_raise(uint8_t level) { g_irq_pending |= (1u << level); debug_record_irq_raise(level); }
 
 /* ---- Dispatch-miss monitor ---- */
 uint32_t g_miss_count_any = 0;
@@ -289,6 +289,45 @@ int recomp_bus_error(uint32_t addr) {
     s_pending_fallback_reason = FB_BUS_HANDLER;  /* the handler runs in the interpreter next */
     longjmp(g_recomp_bus_env, 1);
     return 1;                             /* unreachable */
+}
+
+/* ---- Level-triggered external-interrupt delivery (MC-CDI-007) ----
+ * See cdi_runtime.h for the design. The top-level trampoline arms the landing
+ * pad; the per-instruction ENTRY safepoint calls recomp_take_irq(). */
+jmp_buf g_recomp_irq_env;
+int     g_recomp_irq_armed = 0;
+
+int recomp_pending_irq_level(void) {
+    /* Highest set level in the pending bitmask (bit N = level N asserted). */
+    for (int lvl = 7; lvl >= 1; lvl--)
+        if (g_irq_pending & (1u << lvl)) return lvl;
+    return 0;
+}
+
+void recomp_take_irq(void) {
+    int lvl = recomp_pending_irq_level();
+    if (lvl <= 0) return;
+    int ipm = (g_cpu.SR >> 8) & 7;
+    /* CeDImu Interpreter(): an autovector with level != 7 and level <= IPM is
+     * deferred (re-queued), not taken. Level 7 is non-maskable. */
+    if (lvl != 7 && lvl <= ipm) return;
+    if (!g_recomp_irq_armed) return;   /* no landing pad → cannot deliver safely */
+
+    /* Consume the pending edge BEFORE delivering — CeDImu pops the exception off
+     * m_exceptions, and IPM is NOT raised by ProcessException, so a level that
+     * stayed asserted would otherwise re-take at the handler's first instruction.
+     * The device re-raises (re-queues) only on a new interrupt condition. */
+    g_irq_pending &= ~(1u << lvl);
+
+    /* External autovector = 24 + level (vector 26 for the IKAT level-2 line).
+     * build_exception_frame stacks SR, the resume PC (g_cpu.PC — the not-yet-
+     * executed instruction at this boundary), and the vector-offset word, enters
+     * supervisor, and sets g_cpu.PC = read32(vec<<2) = the OS-9 handler. */
+    uint8_t vec = (uint8_t)(24 + lvl);
+    build_exception_frame(vec);
+    mcd212_tick(65);   /* CeDImu ProcessException: autovector = 65 clock periods */
+    s_pending_fallback_reason = FB_EXCEPTION;   /* the ISR runs in the interpreter next */
+    longjmp(g_recomp_irq_env, 1);
 }
 
 void m68k_trap_vector(uint8_t vec) {

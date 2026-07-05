@@ -80,6 +80,10 @@ void debug_ring_capture_frame(void) {
 typedef struct {
     uint64_t  seq;     /* monotonic block index since boot */
     M68KState cpu;     /* full register file AT block entry (PC live) */
+    uint32_t  frame;   /* g_frame_count at block entry — diff display-timing vs
+                          the oracle's GetTotalFrameCount() per seq, so a device-
+                          clock drift (invisible to register alignment during a
+                          spin loop) is localizable. (MC-CDI-007 timing.) */
     uint32_t  a7_top;  /* longword at [A7] (stack top) at block entry. Folded
                           into the realign alignment key so a caller / context-
                           switch split (identical registers but a different
@@ -111,9 +115,23 @@ uint64_t g_stop_seq = 0;
 
 /* Hot path: one per executed block. Kept to a single struct copy. */
 void debug_trace_block(void) {
+    /* IRQ delivery safepoint (MC-CDI-007). This runs at EVERY instruction ENTRY
+     * in both tiers (the recompiled code emits debug_trace_block() after setting
+     * g_cpu.PC; the interpreter calls it at the top of m68k_interp_step) — the
+     * one universal per-instruction boundary with g_cpu.PC = the instruction
+     * about to execute. If an unmasked interrupt is pending, recomp_take_irq()
+     * builds the exception frame (resume PC = g_cpu.PC) and longjmps to the
+     * trampoline WITHOUT returning — so the deferred instruction is neither
+     * traced nor seq-counted here (the handler's first instruction takes this
+     * seq), exactly as the CeDImu oracle jumps straight from the last poll
+     * instruction to the handler. The g_irq_pending gate keeps the common
+     * (no-pending) path a single predictable-not-taken branch. */
+    if (g_irq_pending) recomp_take_irq();
+
     CdiTraceRecord *r = &s_trace_ring[s_trace_seq & CDI_TRACE_MASK];
     r->seq = s_trace_seq;
     r->cpu = g_cpu;
+    r->frame = (uint32_t)g_frame_count;
     r->a7_top = debug_peek_be32(g_cpu.A[7]);
     s_trace_seq++;
     if (g_stop_seq && s_trace_seq >= g_stop_seq) cdi_fault_hold();
@@ -176,6 +194,50 @@ void debug_trace_store(uint32_t addr, uint32_t val, int size) {
     r->val  = val;
     r->size = (uint8_t)size;
     s_store_count++;
+}
+
+/* ====================================================================== */
+/*  IRQ-raise ring (every cdi_irq_raise: seq + PC + level)                 */
+/* ====================================================================== */
+/* Always-on log of device IRQ assertions so the RAISE boundary can be diffed
+ * against the oracle's TAKE boundary (MC-CDI-007). Raises are rare (a handful
+ * per second of boot), so a tiny ring + a remembered first-raise suffices. */
+#define CDI_IRQ_RING_LEN 256u
+typedef struct { uint64_t seq; uint32_t pc; uint8_t level; } CdiIrqRecord;
+static CdiIrqRecord s_irq_ring[CDI_IRQ_RING_LEN];
+static uint64_t     s_irq_count     = 0;
+static uint64_t     s_irq_first_seq = 0;
+static uint32_t     s_irq_first_pc  = 0;
+static uint8_t      s_irq_first_lvl = 0;
+
+void debug_record_irq_raise(uint8_t level) {
+    if (s_irq_count == 0) {
+        s_irq_first_seq = s_trace_seq;
+        s_irq_first_pc  = g_cpu.PC;
+        s_irq_first_lvl = level;
+    }
+    CdiIrqRecord *r = &s_irq_ring[s_irq_count % CDI_IRQ_RING_LEN];
+    r->seq   = s_trace_seq;
+    r->pc    = g_cpu.PC;
+    r->level = level;
+    s_irq_count++;
+}
+
+static void resp_irq_events(char *out, int outlen) {
+    int n = snprintf(out, outlen,
+        "{\"ok\":true,\"count\":%llu,\"first_seq\":%llu,\"first_pc\":%u,\"first_level\":%u,\"events\":[",
+        (unsigned long long)s_irq_count, (unsigned long long)s_irq_first_seq,
+        s_irq_first_pc, s_irq_first_lvl);
+    uint64_t total  = s_irq_count;
+    uint64_t oldest = total > CDI_IRQ_RING_LEN ? total - CDI_IRQ_RING_LEN : 0;
+    int first = 1;
+    for (uint64_t i = oldest; i < total && n < outlen - 80; i++) {
+        const CdiIrqRecord *r = &s_irq_ring[i % CDI_IRQ_RING_LEN];
+        n += snprintf(out + n, outlen - n, "%s{\"seq\":%llu,\"pc\":%u,\"level\":%u}",
+                      first ? "" : ",", (unsigned long long)r->seq, r->pc, r->level);
+        first = 0;
+    }
+    snprintf(out + n, outlen - n, "]}");
 }
 
 /* ====================================================================== */
@@ -347,11 +409,13 @@ static void resp_registers(char *out, int outlen) {
 static void resp_status(char *out, int outlen) {
     snprintf(out, outlen,
         "{\"ok\":true,\"insns\":%llu,\"blocks\":%llu,\"interp\":%llu,\"frame\":%llu,\"pc\":%u,"
-        "\"miss_count\":%u,\"miss_last\":%u,\"irq_pending\":%u}",
+        "\"miss_count\":%u,\"miss_last\":%u,\"irq_pending\":%u,"
+        "\"irq_raises\":%llu,\"irq_first_seq\":%llu}",
         (unsigned long long)g_native_insn_count, (unsigned long long)s_trace_seq,
         (unsigned long long)s_fb_total,
         (unsigned long long)g_frame_count, g_cpu.PC,
-        g_miss_count_any, g_miss_last_addr, g_irq_pending);
+        g_miss_count_any, g_miss_last_addr, g_irq_pending,
+        (unsigned long long)s_irq_count, (unsigned long long)s_irq_first_seq);
 }
 
 static void resp_miss(char *out, int outlen) {
@@ -396,7 +460,7 @@ static void resp_trace(const char *line, char *out, int outlen) {
             (unsigned long long)recs[i].seq, c->PC, c->SR);
         for (int r = 0; r < 8; r++) n += snprintf(out + n, outlen - n, ",\"d%d\":%u", r, c->D[r]);
         for (int r = 0; r < 8; r++) n += snprintf(out + n, outlen - n, ",\"a%d\":%u", r, c->A[r]);
-        n += snprintf(out + n, outlen - n, ",\"a7top\":%u", recs[i].a7_top);
+        n += snprintf(out + n, outlen - n, ",\"a7top\":%u,\"frame\":%u", recs[i].a7_top, recs[i].frame);
         n += snprintf(out + n, outlen - n, "}");
     }
     snprintf(out + n, outlen - n, "]}");
@@ -512,6 +576,7 @@ static int handle_line(const char *line, char *out, int outlen) {
 
     if (!strcmp(cmd, "ping"))               snprintf(out, outlen, "{\"ok\":true,\"pong\":true}");
     else if (!strcmp(cmd, "status"))        resp_status(out, outlen);
+    else if (!strcmp(cmd, "irq_events"))    resp_irq_events(out, outlen);
     else if (!strcmp(cmd, "get_registers")) resp_registers(out, outlen);
     else if (!strcmp(cmd, "read_mem"))      resp_read_mem(line, out, outlen);
     else if (!strcmp(cmd, "trace"))         resp_trace(line, out, outlen);
