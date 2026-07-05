@@ -2136,11 +2136,26 @@ static void emit_instr(FILE *f, const GenesisRom *rom,
          * which re-dispatches at depth ~0 (a recompiled entry, or the hybrid
          * interpreter for an arbitrary PC). Normal returns ([A7] == ret_addr)
          * fall through unchanged. */
-        fprintf(f, "  { uint32_t _ret = m68k_read32(g_cpu.A[7]); g_cpu.A[7] += 4; /* JSR pop */\n");
+        /* Guest-stack dispatcher, stage 1 (flat-call becomes an optimization).
+         * The flat-call JSR-pop below only makes sense for a callee that was
+         * FLAT-CALLED (a recompiled entry): its recompiled RTS is a pure C return
+         * that does NOT touch the guest stack, so THIS site pops the return it
+         * pushed. A callee that ran in the HYBRID interpreter is different — the
+         * interpreter executes the guest RTS (or a register-return like OS-9's
+         * `JMP (An)` to a return address) faithfully against the real guest A7, so
+         * the guest stack + PC are ALREADY authoritative on return. Popping again
+         * here double-pops / reads the callee's frame as a bogus return (the
+         * $43328A `JMP (A5)` -> $5044 crash). g_call_was_hybrid (set by
+         * recomp_dispatch_once / recomp_call_func) tells the two apart: for a
+         * hybrid callee, trust the guest state and fall through to the static
+         * continuation (== the return the hybrid stopped at) with NO pop. */
+        fprintf(f, "  if (!g_call_was_hybrid) {\n");
+        fprintf(f, "    uint32_t _ret = m68k_read32(g_cpu.A[7]); g_cpu.A[7] += 4; /* JSR pop (flat-call callee) */\n");
         fprintf(f, "    if ((_ret & 0xFFFFFFu) != 0x%06Xu) {\n", ret_addr & 0xFFFFFFu);
         emit_cycle_accounting(f, "      ", estimate_cycles(instr));
         fprintf(f, "      g_redirect_addr = _ret & 0xFFFFFFu; g_redirect_pending = 1; return;\n");
-        fprintf(f, "    } }\n");
+        fprintf(f, "    }\n");
+        fprintf(f, "  }\n");
         break;
     }
 
@@ -4434,11 +4449,13 @@ bool codegen_emit(const GenesisRom *rom, const FunctionList *funcs,
         "    for (int i = 0; s_dispatch_table[i].fn; i++) {\n"
         "        if (s_dispatch_table[i].addr == addr) {\n"
         "            s_dispatch_table[i].fn();\n"
+        "            g_call_was_hybrid = 0;   /* flat-called a recompiled entry */\n"
         "            return;\n"
         "        }\n"
         "    }\n"
         "    if (!game_dispatch_override(addr))\n"
         "        genesis_log_dispatch_miss(addr);\n"
+        "    g_call_was_hybrid = 1;   /* ran in the interpreter — guest stack authoritative */\n"
         "}\n\n"
         "static void recomp_drain_tailcalls(RecompTailFrame *frame) {\n"
         "    unsigned guard = 0;\n"
@@ -4456,6 +4473,8 @@ bool codegen_emit(const GenesisRom *rom, const FunctionList *funcs,
         "        }\n"
         "    }\n"
         "}\n\n"
+        "/* A known recompiled function is always flat-called; clear the hybrid flag\n"
+        " * AFTER it (and any nested calls) return so the caller's JSR-pop runs. */\n"
         "void recomp_call_func(RecompFuncPtr fn) {\n"
         "    if (!fn)\n"
         "        return;\n"
@@ -4464,6 +4483,7 @@ bool codegen_emit(const GenesisRom *rom, const FunctionList *funcs,
         "    fn();\n"
         "    recomp_drain_tailcalls(&frame);\n"
         "    g_recomp_tail_frame = frame.prev;\n"
+        "    g_call_was_hybrid = 0;   /* direct recompiled call: caller must do its JSR-pop */\n"
         "}\n\n"
         "void recomp_call_addr(uint32_t addr) {\n"
         "    RecompTailFrame frame = { 0, 0, g_recomp_tail_frame };\n"
