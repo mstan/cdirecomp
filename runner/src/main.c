@@ -11,6 +11,7 @@
 #define _CRT_SECURE_NO_WARNINGS
 #include "cdi_runtime.h"
 #include "debug_server.h"
+#include "cosim_state.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -39,21 +40,30 @@ int main(int argc, char *argv[]) {
     const char *rom_path = NULL;
     int port = 4380;   /* native; oracle (CeDImu) on +1 — see TCP.md */
     int hold = 0;      /* keep the rings queryable after the run ends */
+    /* MC-CDI-016 (COSIM-SPEC.md §5): parsed unconditionally (even when built
+     * with CDI_COSIM off) so the flag always correctly consumes its argument
+     * — otherwise the spec string would fall through to the `argv[i][0] !=
+     * '-'` branch below and get mistaken for rom_path. */
+    const char *cosim_inject_spec = NULL;
 
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--port") && i + 1 < argc) port = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--hold")) hold = 1;
         else if (!strcmp(argv[i], "--fault-hold")) g_hold_on_fault = 1;
         else if (!strcmp(argv[i], "--stop-seq") && i + 1 < argc) g_stop_seq = strtoull(argv[++i], NULL, 0);
+        else if (!strcmp(argv[i], "--cosim-inject") && i + 1 < argc) cosim_inject_spec = argv[++i];
         else if (argv[i][0] != '-') rom_path = argv[i];
     }
 
     printf("CdiRuntime — Philips CD-i (SCC68070) static-recomp runtime\n");
     if (!rom_path) {
-        fprintf(stderr, "usage: CdiRuntime <cdrtos.rom> [--port N] [--hold]\n"
+        fprintf(stderr, "usage: CdiRuntime <cdrtos.rom> [--port N] [--hold] [--stop-seq N]\n"
+                        "                  [--cosim-inject <seq>:<ram|reg>:<idx>:<xorhex>]\n"
                         "  boots the recompiled CD-RTOS system ROM.\n"
                         "  --hold: keep the process (and the debug rings) alive after\n"
-                        "          the run for post-mortem TCP inspection.\n");
+                        "          the run for post-mortem TCP inspection.\n"
+                        "  --cosim-inject: MC-CDI-016 fault injection (see COSIM-SPEC.md\n"
+                        "          §5); also settable via env CDI_COSIM_INJECT.\n");
         return 1;
     }
 
@@ -90,6 +100,16 @@ int main(int argc, char *argv[]) {
     g_cpu.PC   = reset_pc;
     g_cpu.SR   = 0x2700;            /* 68000 reset: S=1, IPL=7, T=0 */
     g_recomp_initial_ssp = reset_ssp;
+
+#ifdef CDI_COSIM
+    /* MC-CDI-016: reset RAM page-hash bookkeeping to all-dirty now that
+     * g_ram0/g_ram1 are in their final reset state (zeroed; ROM load never
+     * touches RAM) and BEFORE the first debug_trace_block() capture. */
+    cdi_cosim_init();
+    /* --cosim-inject wins over the env var when both are given. */
+    if (!cosim_inject_spec) cosim_inject_spec = getenv("CDI_COSIM_INJECT");
+    if (cosim_inject_spec) cdi_cosim_set_inject(cosim_inject_spec);
+#endif
 
     debug_server_init(port);
 

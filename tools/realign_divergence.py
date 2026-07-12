@@ -8,12 +8,24 @@ iterations, then re-converge. Index alignment trips on that jitter and reports i
 as "the divergence", masking the real one downstream.
 
 This tool re-aligns. It compares by FULL register state (pc,sr,d0-7,a0-7) PLUS
-the stack top [A7] (so a context-switch / caller split with identical registers
-but a different pushed return address can't hide behind register alignment), and
-when two records don't match it searches a lookahead window on BOTH sides for the
+the stack top [A7] and the two INACTIVE stack-pointer shadows (usp,ssp — see
+COSIM-SPEC.md §2a; whichever of the pair isn't currently aliased by A7 was
+previously invisible, the SSP-frontier blind spot) (so a context-switch / caller
+split with identical registers but a different pushed return address, OR an
+inactive-stack-pointer split, can't hide behind register alignment), and when
+two records don't match it searches a lookahead window on BOTH sides for the
 nearest re-sync (one side spun extra iterations of a loop). It only declares a
 TRUE divergence when neither side reaches the other's state within the window —
 i.e. a real control-flow / data split, not a spin-count difference.
+
+Once two records ARE register-aligned at the same seq, it also checks the two
+guest-RAM incremental hashes (ram0_h/ram1_h, COSIM-SPEC.md §2b/§4). These are
+NOT folded into the alignment key itself (a spin loop legitimately mutates RAM
+between iterations and must still align on registers alone) — they are a
+divergence CHECK applied once alignment holds, the same way the writing-loop
+heuristic below checks address-register marches after a skip re-syncs. A
+register-identical, ram-hash-different pair is the "same registers, different
+memory" divergence class the register-only tool was blind to.
 
 It also un-masks WRITING-LOOP divergences: a one-sided skip is benign only if it
 is an in-place poll/wait loop (no pointer advances). If the skipped records march
@@ -35,25 +47,41 @@ Tuning:
 """
 import argparse, json, socket, sys
 
-REG_KEYS = ["pc", "sr"] + [f"d{i}" for i in range(8)] + [f"a{i}" for i in range(8)] + ["a7top"]
+REG_KEYS = (["pc", "sr"] + [f"d{i}" for i in range(8)] + [f"a{i}" for i in range(8)]
+            + ["usp", "ssp", "a7top"])
 A_REG_IDX = {n: REG_KEYS.index(f"a{n}") for n in range(8)}   # state-tuple index of An
 A7TOP_IDX = REG_KEYS.index("a7top")
 A7_IDX    = REG_KEYS.index("a7")
-# Non-stack fields: everything except A7 and the [A7] snapshot. Two states are
+USP_IDX   = REG_KEYS.index("usp")
+SSP_IDX   = REG_KEYS.index("ssp")
+# Non-stack fields: everything except A7, a7top, and SSP. Two states are
 # "seam-equal" if they agree on all of these — used to bridge an exception-frame
 # CAPTURE seam (a take where one side's handler-entry record already reflects the
 # pushed frame in A7/a7top and the other's does not yet), which is a 1-record
 # trace artifact, not a divergence. See the seam bridge in the re-align loop.
-NONSTACK_IDX = [k for k in range(len(REG_KEYS)) if k not in (A7_IDX, A7TOP_IDX)]
+# SSP is excluded here (not just A7/a7top) because a "take" seam only exists
+# mid-exception: SR is already required to match exactly (it's IN this set), so
+# both candidate records are already proven to be in supervisor mode (S=1) —
+# and per the canonical form (COSIM-SPEC.md §2a) canonical_ssp == A7 whenever
+# S=1. SSP is therefore A7's alias here, not an independent field: it MUST
+# move by the identical delta, checked explicitly in seam_eq below (never
+# tolerated on its own — a real SSP-only divergence, e.g. the SSP-frontier
+# class, still falls straight through to a TRUE divergence).
+NONSTACK_IDX = [k for k in range(len(REG_KEYS)) if k not in (A7_IDX, A7TOP_IDX, SSP_IDX)]
 
 def seam_eq(a, b):
-    """True if a and b agree on every field except A7 and a7top (an exception-
-    frame capture seam), and A7 differs by a plausible SCC68070 frame size
-    (short = 6 or 8 bytes; long bus/addr-error = 34) — so a genuine stack
-    divergence (arbitrary A7 delta) is NOT masked."""
+    """True if a and b agree on every field except A7, a7top, and SSP (an
+    exception-frame capture seam): A7 must differ by a plausible SCC68070 frame
+    size (short = 6 or 8 bytes; long bus/addr-error = 34), and SSP must differ
+    by that SAME delta (it canonically aliases A7 while supervisor — see the
+    NONSTACK_IDX comment above) — so a genuine stack divergence (an arbitrary
+    A7 delta, or an SSP delta that does not track A7) is NOT masked."""
     if any(a[k] != b[k] for k in NONSTACK_IDX):
         return False
-    return abs(a[A7_IDX] - b[A7_IDX]) in (6, 8, 34)
+    a7_delta = a[A7_IDX] - b[A7_IDX]
+    if abs(a7_delta) not in (6, 8, 34):
+        return False
+    return (a[SSP_IDX] - b[SSP_IDX]) == a7_delta
 
 
 def addr_advances(states, rng):
@@ -83,6 +111,20 @@ def addr_advances(states, rng):
     return None
 
 
+def parse_ram_hash(v):
+    """Parse a ram0_h/ram1_h wire value: a 16-char lowercase hex STRING
+    (COSIM-SPEC.md §4), consumed as int(x, 16). Tolerates absence (missing key
+    -> None from .get) or a literal 0 for backward compat with traces recorded
+    before these fields existed — both parse to 0, which the divergence check
+    below then treats as "no signal from this side" rather than a false split
+    against a real hash."""
+    if not v:
+        return 0
+    if isinstance(v, str):
+        return int(v, 16)
+    return int(v)
+
+
 class Trace:
     """Persistent-connection bulk reader: pulls [start, total) into memory once.
 
@@ -95,6 +137,8 @@ class Trace:
         self.rbuf = b""
         self.seqs = []          # parallel arrays: seq[i] and state tuple[i]
         self.states = []
+        self.ram0h = []         # parsed ram0_h per record (int; 0 = absent/old trace)
+        self.ram1h = []         # parsed ram1_h per record (int; 0 = absent/old trace)
 
     def _rpc(self, obj):
         self.sock.sendall((json.dumps(obj) + "\n").encode())
@@ -122,6 +166,8 @@ class Trace:
                     continue
                 self.seqs.append(r["seq"])
                 self.states.append(tuple(r.get(k, 0) for k in REG_KEYS))
+                self.ram0h.append(parse_ram_hash(r.get("ram0_h")))
+                self.ram1h.append(parse_ram_hash(r.get("ram1_h")))
             cur = recs[-1]["seq"] + 1
             if cur >= stop:
                 break
@@ -133,8 +179,12 @@ class Trace:
         d = dict(zip(REG_KEYS, st))
         ds = " ".join(f"D{k}={d['d'+str(k)]:08X}" for k in range(8))
         as_ = " ".join(f"A{k}={d['a'+str(k)]:08X}" for k in range(8))
+        ram = ""
+        if self.ram0h[i] or self.ram1h[i]:
+            ram = f"\n        ram0_h={self.ram0h[i]:016x} ram1_h={self.ram1h[i]:016x}"
         return (f"seq {self.seqs[i]:>7} PC=${d['pc']:08X} SR=${d['sr']:04X} "
-                f"[A7]=${d['a7top']:08X}\n        {ds}\n        {as_}")
+                f"[A7]=${d['a7top']:08X} USP=${d['usp']:08X} SSP=${d['ssp']:08X}\n"
+                f"        {ds}\n        {as_}{ram}")
 
 
 def first_diff_field(a, b):
@@ -186,6 +236,42 @@ def main():
     max_skew = 0
     while i < len(N.states) and j < len(O.states):
         if N.states[i] == O.states[j]:
+            # Registers (incl. usp/ssp) are aligned at this seq — now check the
+            # signal register-alignment is blind to: the two guest-RAM
+            # incremental hashes (COSIM-SPEC.md §2b/§4). ram*_h is deliberately
+            # NOT part of the state tuple above (a spin loop legitimately
+            # mutates RAM between iterations and must still align on registers
+            # alone) — this is a divergence CHECK applied once alignment holds,
+            # mirroring how addr_advances() below checks writing-loop spans
+            # after a skip re-syncs, rather than folding into the LCS key.
+            # 0 means "absent/old trace on this side" (backward compat) and is
+            # never compared, so it can't produce a false split.
+            ram_split = []
+            if N.ram0h[i] and O.ram0h[j] and N.ram0h[i] != O.ram0h[j]:
+                ram_split.append(("ram0_h", N.ram0h[i], O.ram0h[j]))
+            if N.ram1h[i] and O.ram1h[j] and N.ram1h[i] != O.ram1h[j]:
+                ram_split.append(("ram1_h", N.ram1h[i], O.ram1h[j]))
+            if ram_split:
+                names = ", ".join(b for b, _, _ in ram_split)
+                print(f"\n*** MEMORY DIVERGENCE — native seq {N.seqs[i]} vs oracle seq {O.seqs[j]} "
+                      f"(ram0/ram1 hash differs (same registers)) ***")
+                print(f"  registers (incl. usp/ssp) are byte-identical at this seq, but {names} "
+                      f"differ: a real guest-RAM divergence invisible to the register-only realign "
+                      f"(COSIM-SPEC.md guest-RAM section).")
+                for b, nh, oh in ram_split:
+                    print(f"    {b}: native={nh:016x}  oracle={oh:016x}")
+                print(f"  ({resyncs} benign re-syncs skipped earlier; max spin skew {max_skew}).")
+                print(f"\n  --- native (:{args.native}) ---")
+                for k in range(max(0, i - args.context), min(len(N.states), i + 2)):
+                    print(("  > " if k == i else "    ") + N.fmt(k))
+                print(f"\n  --- oracle (:{args.oracle}) ---")
+                for k in range(max(0, j - args.context), min(len(O.states), j + 2)):
+                    print(("  > " if k == j else "    ") + O.fmt(k))
+                print(f"\n  The instruction that ran at the last row wrote memory differently on each "
+                      f"side even though its own register effects agree. Drill: re-run each side to "
+                      f"--stop-seq {N.seqs[i]}, read_mem the {names.replace('_h', '')} bank region on "
+                      f"both sides, diff bytes.")
+                return 1
             i += 1; j += 1
             continue
         # Search for the nearest re-sync, smallest distance first. Three moves:

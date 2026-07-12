@@ -20,6 +20,7 @@
  */
 #include "cdi_runtime.h"
 #include "debug_server.h"
+#include "cosim_state.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -92,6 +93,10 @@ typedef struct {
                           pushed return address) can't hide behind register
                           alignment — and so fill/copy loops can be told apart
                           from in-place poll loops. */
+    uint64_t  ram0_h;  /* MC-CDI-016: incremental FNV-1a hash of g_ram0 at block
+                          entry (COSIM-SPEC.md §3). Only meaningfully populated
+                          when built with CDI_COSIM (default ON); 0 otherwise. */
+    uint64_t  ram1_h;  /* same, g_ram1. */
 } CdiTraceRecord;
 
 static CdiTraceRecord s_trace_ring[CDI_TRACE_RING_LEN];
@@ -132,10 +137,27 @@ void debug_trace_block(void) {
 
     CdiTraceRecord *r = &s_trace_ring[s_trace_seq & CDI_TRACE_MASK];
     r->seq = s_trace_seq;
+#ifdef CDI_COSIM
+    /* MC-CDI-016 fault injection (COSIM-SPEC.md §5): fire BEFORE this seq's
+     * state is captured below, so a hit at this exact seq is visible in the
+     * very record it targets (registers AND the RAM hash) — never one seq
+     * late. */
+    cdi_cosim_maybe_inject(s_trace_seq);
+#endif
     r->cpu = g_cpu;
     r->frame = (uint32_t)g_frame_count;
     r->total_cyc = g_total_cycles;
     r->a7_top = debug_peek_be32(g_cpu.A[7]);
+#ifdef CDI_COSIM
+    /* MC-CDI-016: incremental page-hash of both RAM banks (COSIM-SPEC.md
+     * §3a) — O(pages dirtied since the last capture), kept off the hot path
+     * when nothing changed. */
+    r->ram0_h = cdi_cosim_ram_hash(0);
+    r->ram1_h = cdi_cosim_ram_hash(1);
+#else
+    r->ram0_h = 0;
+    r->ram1_h = 0;
+#endif
     s_trace_seq++;
     if (g_stop_seq && s_trace_seq >= g_stop_seq) cdi_fault_hold();
 }
@@ -465,6 +487,24 @@ static void resp_trace(const char *line, char *out, int outlen) {
         for (int r = 0; r < 8; r++) n += snprintf(out + n, outlen - n, ",\"a%d\":%u", r, c->A[r]);
         n += snprintf(out + n, outlen - n, ",\"a7top\":%u,\"frame\":%u,\"tcyc\":%llu",
                       recs[i].a7_top, recs[i].frame, (unsigned long long)recs[i].total_cyc);
+        /* MC-CDI-016 (COSIM-SPEC.md §2a/§4): usp/ssp must be emitted in the
+         * CANONICAL form (matching the oracle, which is always canonical via
+         * its A7-alias). The native M68KState stores the INACTIVE shadow in
+         * .USP/.SSP — the ACTIVE role's live value is in .A[7] and the
+         * matching shadow field is stale. Raw-emitting .USP/.SSP would
+         * false-diverge against the oracle throughout supervisor mode.
+         * ram0_h/ram1_h are 64-bit hashes emitted as lowercase 16-char hex
+         * STRINGS (not JSON numbers) to avoid float precision loss; the
+         * coordinator parses them with int(x, 16). */
+        {
+            uint32_t _s = c->SR & 0x2000u;   /* S (supervisor) bit */
+            uint32_t emit_ssp = _s ? c->A[7] : c->SSP;
+            uint32_t emit_usp = _s ? c->USP  : c->A[7];
+            n += snprintf(out + n, outlen - n,
+                          ",\"usp\":%u,\"ssp\":%u,\"ram0_h\":\"%016llx\",\"ram1_h\":\"%016llx\"",
+                          emit_usp, emit_ssp,
+                          (unsigned long long)recs[i].ram0_h, (unsigned long long)recs[i].ram1_h);
+        }
         n += snprintf(out + n, outlen - n, "}");
     }
     snprintf(out + n, outlen - n, "]}");
@@ -573,6 +613,28 @@ static void resp_indirect_targets(char *out, int outlen) {
     snprintf(out + n, outlen - n, "]}");
 }
 
+#ifdef CDI_COSIM
+/* cosim_full_ram_hash (MC-CDI-016, COSIM-SPEC.md §5): recompute BOTH bank
+ * hashes from scratch over live RAM — NOT the incremental page_hash array —
+ * and return them alongside the INCREMENTAL hash (cdi_cosim_ram_hash, dirty-
+ * page refresh + fold) taken at the SAME instant. Gate 4 compares ram*_h vs
+ * ram*_h_inc from this one response, which is immune to the one-instruction
+ * skew between the parked machine state (pre-seq-N) and the last captured
+ * ring record (pre-seq-(N-1)); a mismatch = a missed RAM-write-hook site
+ * (COSIM-SPEC.md §3b). */
+static void resp_cosim_full_ram_hash(char *out, int outlen) {
+    uint64_t r0 = cdi_cosim_full_ram_hash(0);
+    uint64_t r1 = cdi_cosim_full_ram_hash(1);
+    uint64_t r0i = cdi_cosim_ram_hash(0);
+    uint64_t r1i = cdi_cosim_ram_hash(1);
+    snprintf(out, outlen,
+        "{\"ok\":true,\"seq\":%llu,\"ram0_h\":\"%016llx\",\"ram1_h\":\"%016llx\","
+        "\"ram0_h_inc\":\"%016llx\",\"ram1_h_inc\":\"%016llx\"}",
+        (unsigned long long)s_trace_seq, (unsigned long long)r0, (unsigned long long)r1,
+        (unsigned long long)r0i, (unsigned long long)r1i);
+}
+#endif
+
 /* Returns 1 to keep the connection open, 0 to close it (quit). */
 static int handle_line(const char *line, char *out, int outlen) {
     char cmd[32];
@@ -588,6 +650,9 @@ static int handle_line(const char *line, char *out, int outlen) {
     else if (!strcmp(cmd, "interp_report")) resp_interp_report(line, out, outlen);
     else if (!strcmp(cmd, "indirect_targets")) resp_indirect_targets(out, outlen);
     else if (!strcmp(cmd, "dispatch_miss_info")) resp_miss(out, outlen);
+#ifdef CDI_COSIM
+    else if (!strcmp(cmd, "cosim_full_ram_hash")) resp_cosim_full_ram_hash(out, outlen);
+#endif
     else if (!strcmp(cmd, "quit"))        { snprintf(out, outlen, "{\"ok\":true,\"bye\":true}"); return 0; }
     else snprintf(out, outlen, "{\"ok\":false,\"error\":\"unknown cmd '%s'\"}", cmd);
     return 1;
@@ -638,7 +703,11 @@ static void server_loop(void) {
     listen(ls, 1);
     fprintf(stderr, "[dbg] TCP debug server live on 127.0.0.1:%d "
                     "(ping/status/get_registers/read_mem/trace/stores/interp_report/"
-                    "dispatch_miss_info)\n", s_port);
+                    "dispatch_miss_info"
+#ifdef CDI_COSIM
+                    "/cosim_full_ram_hash"
+#endif
+                    ")\n", s_port);
     for (;;) {
         sock_t cs = accept(ls, NULL, NULL);
         if (cs == BAD_SOCK) break;

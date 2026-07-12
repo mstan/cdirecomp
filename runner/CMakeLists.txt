@@ -3,6 +3,12 @@ project(CdiRuntime C)
 
 set(CMAKE_C_STANDARD 11)
 
+# MC-CDI-016: differential co-simulation instrument (RAM/CPU state hashing,
+# fault injection, cosim_full_ram_hash). See docs/COSIM-SPEC.md. Default ON —
+# cosim_state.c is gated behind CDI_COSIM internally and compiles to an empty
+# TU when this is OFF, so it is always safe to list in the source set below.
+option(CDI_COSIM_BUILD "Build the MC-CDI-016 differential co-simulation instrument (RAM/CPU state hashing + fault injection)" ON)
+
 # Generated C is dropped in by the recompiler and compiled in here. It
 # #includes cdi_runtime.h + game_extras.h from runner/include.
 #   - bios/generated/*.c     : the recompiled CD-RTOS system ROM (Phase 1, boots).
@@ -22,6 +28,7 @@ add_executable(CdiRuntime
     src/cdi_nvram.c
     src/cdrtos.c
     src/debug_server.c
+    src/cosim_state.c
     src/m68k_interp.c
     # Clean-room hybrid interpreter (MC-CDI-011) reuses the recompiler's own
     # decoder for parity-by-construction with the static C emitter.
@@ -45,6 +52,8 @@ set_target_properties(CdiRuntime PROPERTIES
 if(MSVC)
     target_compile_options(CdiRuntime PRIVATE /W3 /WX-)
 endif()
+
+target_compile_definitions(CdiRuntime PRIVATE $<$<BOOL:${CDI_COSIM_BUILD}>:CDI_COSIM=1>)
 
 # Debug server (debug_server.c): winsock on Windows, pthreads elsewhere.
 if(WIN32)

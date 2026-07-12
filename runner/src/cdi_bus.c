@@ -13,6 +13,7 @@
  */
 #include "cdi_runtime.h"
 #include "debug_server.h"
+#include "cosim_state.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -141,7 +142,13 @@ void m68k_write8(uint32_t addr, uint8_t val) {
     g_last_access_addr = addr;
     if (!s_store_suppress) debug_trace_store(addr, val, 1);
     uint8_t *p = ram_ptr(addr);
-    if (p) { *p = val; return; }
+    if (p) {
+        *p = val;
+#ifdef CDI_COSIM
+        cdi_cosim_note_ram_write(addr, 1);   /* MC-CDI-016: dirty-page mark for the incremental RAM hash */
+#endif
+        return;
+    }
     switch (classify(addr)) {
         case RGN_ROM:    return;  /* writes to ROM ignored */
         case RGN_MCD212: mcd212_write(addr, val, 1); return;
@@ -157,7 +164,13 @@ void m68k_write16(uint32_t addr, uint16_t val) {
     g_last_access_addr = addr;
     if (!s_store_suppress) debug_trace_store(addr, val, 2);
     uint8_t *p = ram_ptr(addr);
-    if (p) { p[0] = (uint8_t)(val >> 8); p[1] = (uint8_t)val; return; }
+    if (p) {
+        p[0] = (uint8_t)(val >> 8); p[1] = (uint8_t)val;
+#ifdef CDI_COSIM
+        cdi_cosim_note_ram_write(addr, 2);   /* MC-CDI-016: dirty-page mark for the incremental RAM hash */
+#endif
+        return;
+    }
     switch (classify(addr)) {
         case RGN_ROM:    return;
         case RGN_MCD212: mcd212_write(addr, val, 2); return;
