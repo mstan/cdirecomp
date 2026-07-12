@@ -14,9 +14,16 @@
  *
  * The clock is seeded from IRTC::defaultTime = 599616000 (1989-01-01 00:00:00),
  * the same deterministic time the oracle uses; SRAM is seeded to 0xFF (CeDImu's
- * empty-NVRAM default). The clock does not yet advance with emulated time
- * (CeDImu's IncrementClock) — wire that if an RTC read diverges on sub-second
- * fields.
+ * empty-NVRAM default). The clock advances with EMULATED cycle time, exactly as
+ * CeDImu's DS1216::IncrementClock does: nvram_increment_clock(ns) is driven by
+ * mcd212_tick() with ns = cycles * (the SCC68070 cycle period), the same
+ * per-instruction cycle-scaled quantity CeDImu's Interpreter feeds its
+ * CDI::IncrementTime -> DS1216::IncrementClock chain (Interpreter.cpp:76-78,
+ * CDI.cpp:108-112). This is deterministic (derived from the emulated cycle
+ * count, never the host wall clock) so the co-sim stays reproducible; it is NOT
+ * a frozen clock, so an RTC read's sub-second (and, on a long enough boot,
+ * whole-second) fields depend on how many cycles have elapsed since reset —
+ * matching the oracle bit-for-bit requires ticking on the same schedule.
  */
 #define _CRT_SECURE_NO_WARNINGS
 #include "cdi_runtime.h"
@@ -43,7 +50,10 @@ static uint64_t s_pattern;        /* rolling history: bit i = the bit pushed i s
 static uint64_t s_magic;          /* s_match packed: bit i = s_match[i] */
 static int      s_pattern_count;  /* <0 = SRAM mode; 0..63 = serial RTC access index */
 static time_t   s_internal_time;
-static double   s_nsec;           /* sub-10ms accumulator (hundredths source) */
+static double   s_nsec;           /* raw ns accumulator, always < 10'000'000 (CeDImu m_nsec) */
+static uint32_t s_msec;           /* milliseconds within the current second, 0..999 —
+                                    * the Hundredths register is byte_to_pbcd(s_msec/10), matching
+                                    * CeDImu's hh_mm_ss(m_internalClock.time_since_epoch()).subseconds() */
 
 static uint8_t byte_to_pbcd(uint8_t v) { v %= 100; return (uint8_t)(((v / 10) << 4) | (v % 10)); }
 static uint8_t pbcd_to_byte(uint8_t v) { return (uint8_t)((v >> 4) * 10 + (v & 0x0F)); }
@@ -75,7 +85,7 @@ static void clock_to_sram(void) {
     }
 
     int iso = (g->tm_wday == 0) ? 7 : g->tm_wday;       /* weekday ISO: Mon=1..Sun=7 */
-    s_clock[Hundredths] = byte_to_pbcd((uint8_t)(s_nsec / 10000000.0));
+    s_clock[Hundredths] = byte_to_pbcd((uint8_t)(s_msec / 10));
     s_clock[Seconds]    = byte_to_pbcd((uint8_t)g->tm_sec);
     s_clock[Minutes]    = byte_to_pbcd((uint8_t)g->tm_min);
     s_clock[Hour]       = hreg;
@@ -109,7 +119,12 @@ static void sram_to_clock(void) {
         tmv.tm_year = (int)y - 1900;
     }
     s_internal_time = portable_timegm(&tmv);
+    /* CeDImu sets m_nsec (not the internal time_point's subsecond field) to the
+     * written Hundredths value; the pending fractional second is drained back
+     * out — 10ms at a time — by future IncrementClock calls, so the internal
+     * clock itself starts this second at :00 (s_msec=0) and climbs back up. */
     s_nsec = pbcd_to_byte(s_clock[Hundredths]) * 10000000.0;
+    s_msec = 0;
 }
 
 static void push_pattern(int bit) {
@@ -124,6 +139,22 @@ static void increment_clock_access(void) {
     if (++s_pattern_count >= 64) s_pattern_count = -1;
 }
 
+/* Advance the internal clock by `ns` of EMULATED cycle time (CeDImu
+ * DS1216::IncrementClock). Called once per instruction from mcd212_tick() with
+ * ns = cycles * the SCC68070 cycle period — the same deterministic, cycle-
+ * derived quantity CeDImu's Interpreter feeds through CDI::IncrementTime into
+ * this same chain, never host wall-clock time. The OSC bit (Day reg bit 5)
+ * stops the oscillator, exactly as on real hardware / CeDImu. */
+void nvram_increment_clock(double ns) {
+    if (s_clock[Day] & 0x20) return;       /* OSC bit set: clock halted */
+    s_nsec += ns;
+    while (s_nsec >= 10000000.0) {
+        s_nsec -= 10000000.0;
+        s_msec += 10;
+        if (s_msec >= 1000) { s_msec -= 1000; s_internal_time += 1; }
+    }
+}
+
 void nvram_reset(void) {
     memset(s_sram, 0xFF, sizeof s_sram);   /* CeDImu empty-NVRAM default */
     memset(s_clock, 0, sizeof s_clock);
@@ -131,6 +162,7 @@ void nvram_reset(void) {
     s_pattern_count = -1;
     s_internal_time = 599616000;           /* IRTC::defaultTime: 1989-01-01 00:00:00 */
     s_nsec = 0.0;
+    s_msec = 0;
     s_magic = 0;
     for (int i = 0; i < 64; i++) s_magic |= (uint64_t)(s_match[i] & 1) << i;
     clock_to_sram();

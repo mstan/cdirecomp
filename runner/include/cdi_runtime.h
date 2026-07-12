@@ -262,6 +262,11 @@ void     periph_reset(void);             /* power-on state (UART TxRDY, etc.) */
 void    nvram_reset(void);
 uint8_t nvram_get_byte(uint16_t dev);    /* GetByte: SRAM, or one serial RTC bit */
 void    nvram_set_byte(uint16_t dev, uint8_t data);
+/* Advance the DS1216's internal clock by `ns` of emulated (cycle-derived, never
+ * host wall-clock) time — CeDImu DS1216::IncrementClock. Driven by mcd212_tick()
+ * once per instruction so the RTC ticks on the same deterministic schedule the
+ * oracle's Interpreter drives via CDI::IncrementTime. */
+void    nvram_increment_clock(double ns);
 
 /* ====================================================================== */
 /*  ABI globals the generator references (mirrors genesis_runtime.h)      */

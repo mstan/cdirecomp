@@ -82,8 +82,15 @@ void mcd212_tick(uint32_t cycles) {
      * one instruction early. mcd212_tick is called once per instruction in both
      * tiers, so this matches CeDImu's per-step IKAT advance. (MC-CDI-007.) */
     slave_increment_frame();
+    /* CDI::IncrementTime (CDI.cpp:108-112) runs m_slave->IncrementTime(ns) then
+     * m_timekeeper->IncrementClock(ns) BEFORE Mono3::IncrementTime's own
+     * m_mcd212.IncrementTime(ns) — tick the DS1216 here, same ns, same order,
+     * so its internal clock advances on the identical per-instruction schedule
+     * as the oracle's (MC-CDI-022; see cdi_nvram.c nvram_increment_clock). */
+    const double ns = (double)cycles * MCD_CYCLE_DELAY_NS;
+    nvram_increment_clock(ns);
     g_total_cycles += cycles;   /* running SCC68070 clock; diffed per seq vs CeDImu totalCycleCount */
-    s_time_ns += (double)cycles * MCD_CYCLE_DELAY_NS;
+    s_time_ns += ns;
     double line_ns = mcd_line_time_ns();
     while (s_time_ns >= line_ns) {
         s_time_ns -= line_ns;
