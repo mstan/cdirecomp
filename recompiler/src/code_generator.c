@@ -2455,10 +2455,24 @@ static void emit_instr(FILE *f, const GenesisRom *rom,
             fprintf(f, "  %s %s = (%s)(%s);\n", ct, stmp, ct, src_expr);
             snprintf(src_expr, 256, "%s", stmp);
         }
-        emit_ea_store(f, instr, dst_ea, sz, &er_dst, src_expr);
-
-        /* Update N,Z; clear V,C */
+        /* CeDImu computes N/Z (and clears V/C) from the source BEFORE
+         * attempting the destination write (InstructionSet.cpp SCC68070::MOVE:
+         * SetN/SetZ precede SetByte/SetWord/SetLong; V/C textually follow the
+         * store there only because CeDImu's bus-error model queues the fault
+         * and lets the C++ function run to completion — it never aborts
+         * mid-instruction, so the statement order after the store is not
+         * load-bearing for CeDImu itself). Our recompiled/interpreted tiers
+         * DO abort synchronously on a faulting store (recomp_bus_error
+         * longjmps out immediately), so the emit order IS load-bearing here:
+         * a faulting destination store must leave the CCR update already
+         * applied, or build_exception_frame captures stale pre-instruction
+         * flags in the pushed SR (MC-CDI faithfulness bug: $404B96
+         * MOVE.L #$5A5A5A5A,(A2) with A2=$600000 bus-errors on the write;
+         * native pushed Z=1 stale instead of the correct Z=0 from the
+         * nonzero source). Emit the flag update before the store so a
+         * faulting write still leaves architecturally-correct flags. */
         emit_flags_logic(f, src_expr, sz);
+        emit_ea_store(f, instr, dst_ea, sz, &er_dst, src_expr);
         break;
     }
 
@@ -2791,8 +2805,15 @@ static void emit_instr(FILE *f, const GenesisRom *rom,
          * to (A7) without first doing A7-=4 — corrupting the stack). CeDImu's
          * CLR (SetLong(eamode,eareg,...)) applies the EA side-effect and does
          * not separately read, which rmw=0 matches. */
-        emit_ea_store_ex(f, instr, instr->src_ea, sz, &er2, "0", 0);
+        /* CeDImu sets N=0/Z=1/V=C=0 AFTER the SetByte/SetWord/SetLong call
+         * (InstructionSet.cpp SCC68070::CLR), but that ordering is not
+         * load-bearing there — CeDImu's bus-error model queues the fault and
+         * runs the C++ function to completion. Our tiers abort synchronously
+         * on a faulting store, so the flags (which are always the same
+         * constant here, independent of the write) must be applied BEFORE
+         * the store — same faithfulness class as MN_MOVE above. */
         fprintf(f, "  g_cpu.SR = (g_cpu.SR & ~0x0Fu) | (1u<<2);\n");
+        emit_ea_store_ex(f, instr, instr->src_ea, sz, &er2, "0", 0);
         break;
     }
 
