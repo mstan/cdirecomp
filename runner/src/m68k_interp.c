@@ -509,6 +509,19 @@ static void do_addx_subx(const M68KInstr *ins, M68KSize sz, int is_add) {
     else                      store_dn(dst, r, sz);
 }
 
+/* Shared ABCD/SBCD/NBCD flag update (sticky Z; X=C). Must run BEFORE the
+ * destination write in every caller: a faulting write longjmps out
+ * synchronously, and the pushed exception frame's SR must already reflect
+ * this instruction's flags, not stale pre-instruction ones. */
+static void do_bcd_flags(uint8_t r, int carry) {
+    int zold = (g_cpu.SR >> 2) & 1;
+    g_cpu.SR &= ~SR_V;
+    if (r) g_cpu.SR &= ~SR_Z; else if (zold) g_cpu.SR |= SR_Z;
+    g_cpu.SR &= ~(SR_C | SR_X | SR_N);
+    if (r & 0x80u) g_cpu.SR |= SR_N;
+    if (carry) { g_cpu.SR |= SR_C; g_cpu.SR |= SR_X; }
+}
+
 /* ABCD/SBCD/NBCD — packed-BCD, port of code_generator.c. op: 0=ABCD 1=SBCD
  * 2=NBCD. Z is sticky; X=C. Operates byte-wide. */
 static void do_bcd(const M68KInstr *ins, int op) {
@@ -525,9 +538,10 @@ static void do_bcd(const M68KInstr *ins, int op) {
         int adj_hi = (hi < 0) ? 6 : 0;
         int full = (hi & 0xFF) * 16 - adj_hi * 16 + ((lo - adj_lo) & 0xF);
         r = (uint8_t)full; carry = (hi < 0);
+        do_bcd_flags(r, carry);                  /* flags BEFORE the write */
         ExtR er2; er_init(&er2, ins);
         write_ea_ex(ins, ins->src_ea, M68K_SIZE_B, &er2, r, 1);
-        goto flags;
+        return;
     }
     int dst = ins->reg, src = ins->src_ea & 7;
     if (ins->predec_mem_form) {
@@ -551,16 +565,9 @@ static void do_bcd(const M68KInstr *ins, int op) {
         int full = (hi & 0xFF) * 16 - adj_hi * 16 + ((lo - adj_lo) & 0xF);
         r = (uint8_t)full; carry = (hi < 0);
     }
+    do_bcd_flags(r, carry);                       /* flags BEFORE the write */
     if (to_mem) m68k_write8(a_addr, r);
     else        g_cpu.D[dst] = (g_cpu.D[dst] & 0xFFFFFF00u) | r;
-flags: {
-        int zold = (g_cpu.SR >> 2) & 1;
-        g_cpu.SR &= ~SR_V;
-        if (r) g_cpu.SR &= ~SR_Z; else if (zold) g_cpu.SR |= SR_Z;
-        g_cpu.SR &= ~(SR_C | SR_X | SR_N);
-        if (r & 0x80u) g_cpu.SR |= SR_N;
-        if (carry) { g_cpu.SR |= SR_C; g_cpu.SR |= SR_X; }
-    }
 }
 
 /* MOVEM — port of code_generator.c MN_MOVEM. base address resolved from a
@@ -653,10 +660,16 @@ static M68kiStatus exec_one(const M68KInstr *ins, uint32_t *next_pc) {
 
     case MN_MOVE: {
         /* MOVE to An (illegal — would be MOVEA) is caught generically by the
-         * write_ea An guard + the step wrapper's s_illegal_ea check. */
+         * write_ea An guard + the step wrapper's s_illegal_ea check.
+         * Flags (N/Z from source, V=C=0) must be set BEFORE the destination
+         * store: a faulting store longjmps out synchronously (recomp_bus_
+         * error / the interpreter's own bus-error path), and
+         * build_exception_frame must capture the post-flag-update SR, not
+         * stale pre-instruction flags. Mirrors the code_generator.c MN_MOVE
+         * fix (same faithfulness bug, $404B96 MOVE.L #$5A5A5A5A,(A2)). */
         uint32_t v = read_ea(ins, ins->src_ea, sz, &er);
-        write_ea(ins, ins->dst_ea, sz, &er, v);
         flags_logic(v, sz);
+        write_ea(ins, ins->dst_ea, sz, &er, v);
         return M68KI_OK;
     }
     case MN_MOVEA: {
@@ -684,9 +697,13 @@ static M68kiStatus exec_one(const M68KInstr *ins, uint32_t *next_pc) {
         return M68KI_OK;
     }
     case MN_CLR: {
-        /* 68000 quirk: CLR does a (discarded) read before writing 0. */
-        write_ea(ins, ins->src_ea, sz, &er, 0);
+        /* 68000 quirk: CLR does a (discarded) read before writing 0.
+         * Flags are a constant (Z=1, N=V=C=0) independent of the write, so
+         * set them BEFORE the store — a faulting store must not leave stale
+         * pre-instruction flags in the exception frame. Mirrors the
+         * code_generator.c MN_CLR fix. */
         g_cpu.SR = (uint16_t)((g_cpu.SR & ~0x0Fu) | SR_Z);
+        write_ea(ins, ins->src_ea, sz, &er, 0);
         return M68KI_OK;
     }
 
@@ -926,11 +943,17 @@ static M68kiStatus exec_one(const M68KInstr *ins, uint32_t *next_pc) {
             case MN_ROXL: { uint32_t x=(g_cpu.SR>>4)&1u; res=((sv<<1)|x)&0xFFFFu; c=(sv>>15)&1u; break; }
             default:      { uint32_t x=(g_cpu.SR>>4)&1u; res=((sv>>1)|(x<<15))&0xFFFFu; c=sv&1u; break; } /* ROXR */
             }
-            er = save;
-            write_ea_ex(ins, ins->src_ea, M68K_SIZE_W, &er, res, 1);
+            /* Flags before the write: result/carry/overflow are already known
+             * from the read value (RMW — the read fault path correctly leaves
+             * flags untouched; a fault on the WRITE must not leave stale
+             * pre-instruction flags in the exception frame). Matches
+             * code_generator.c emit_mem_shift's order, which was already
+             * correct — this interpreter copy had drifted. */
             if (!touches_x) { g_cpu.SR &= ~0x0Fu; if(!res)g_cpu.SR|=SR_Z; if(res&0x8000u)g_cpu.SR|=SR_N; if(c)g_cpu.SR|=SR_C; }
             else { g_cpu.SR &= ~0x1Fu; if(!res)g_cpu.SR|=SR_Z; if(res&0x8000u)g_cpu.SR|=SR_N;
                    if(c){g_cpu.SR|=SR_C;g_cpu.SR|=SR_X;} if(with_v&&v)g_cpu.SR|=SR_V; }
+            er = save;
+            write_ea_ex(ins, ins->src_ea, M68K_SIZE_W, &er, res, 1);
             return M68KI_OK;
         }
         int reg_count = (ins->src_ea >= 0);
