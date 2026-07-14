@@ -86,6 +86,26 @@ IDs are referenced from code comments (`TODO MC-CDI-NNN`).
   original caller. Trace discovery now grows only for genuinely unknown CFGs;
   broader BIOS navigation coverage remains open.
 
+## Player-quality enhancements (PLAN Phase D; opt-in, persistent)
+
+- **MC-CDI-027 — Captured host mouse.** Add a launcher-exposed, persistent
+  `input.capture_mouse` player preference. While the SDL window is focused,
+  hide/capture the host pointer and feed true relative X/Y plus primary/
+  secondary button transitions through the timed IKAT pointing-device path.
+  Losing focus must immediately release the pointer and restore the host
+  cursor. Off remains the faithful/default path; scripted, headless, co-sim,
+  and baseline profiles keep it disabled. See `ENHANCEMENTS.md` for the packet,
+  focus, and acceptance-test contract.
+- **MC-CDI-028 — One-shot host clock seed.** Add a launcher-exposed, persistent
+  `rtc.sync_host_on_startup` player preference. When enabled, seed the DS1216
+  RTC from host-local civil time once before guest execution; then advance only
+  on emulated cycles and honor all guest writes without re-syncing. NVRAM policy
+  remains independent, and disabled/oracle runs retain the deterministic
+  1989 seed. See `ENHANCEMENTS.md` for cross-platform and test requirements.
+
+These preferences are user/player configuration, not title policy in
+`game.cfg`, and their values must survive closing and reopening the launcher.
+
 ## Phase 3 — the game (Hotel Mario)
 
 **Deferred:** do not begin this phase until BIOS/player-shell navigation,
@@ -122,10 +142,36 @@ Disc insertion/ejection tests in the BIOS phase are not game progress.
   bursts), and non-vsync SDL frame presentation are present.
 - **MC-CDI-015 — TCP debug server + full ring buffer** (frame + reverse-debug
   tiers), per TCP.md. Native 4380 / oracle 4381.
-- **MC-CDI-017 — Convert `external/CeDImu` to a git submodule** at first commit.
+- **MC-CDI-017 — Keep CeDImu behind the local-only oracle boundary.**
+  `external/CeDImu` remains an optional, git-ignored developer checkout used to
+  build `CdiOracle`; neither its source, local modifications, patch set, nor the
+  statically linked oracle binary is committed, pushed, packaged, or required
+  by `CdiRuntime`. Public documentation may identify the expected upstream
+  project/base revision and local setup boundary, but cdirecomp does not carry
+  or distribute a CeDImu fork. Audit any production file described as a "port"
+  so shipped code has independent/specification-based provenance.
 - **MC-CDI-026 — Behavioral oracle for gameplay.** CeDImu's disc/audio devices
   are incomplete, so it is the reference + BIOS-shell oracle; evaluate MAME
   `cdimono` (more complete) as the in-game behavioral oracle.
+- **MC-CDI-029 — Runtime-only release enforcement.** Production packages contain
+  `CdiRuntime` plus explicitly allowlisted redistributable runtime dependencies/
+  assets only—never the recompiler, `CdiOracle`, CeDImu, clown68000, developer
+  tools, ROM/disc images, traces, or build debris. Adapt the author-owned
+  `../segagenesisrecomp/segagenesisrecomp/tools/package_release.py` and
+  `audit_runner_purity.py` patterns into CD-i-specific package/link audits. If an
+  AGPL-linked tool is ever distributed, create a separate tooling repository
+  and satisfy AGPL there; it does not join the player release. The clean-room
+  68000 fallback has already been adapted from the sibling; reuse further
+  author-owned components only with explicit provenance and CD-i validation.
+- **MC-CDI-030 — Production-source provenance audit.** Before a public player
+  release, audit every shipped runtime section described as a CeDImu/clown68000
+  "port," "exact port," or source-level mirror. For each, record an independent
+  hardware specification, author-owned clean-room ancestor, or behavioral test
+  provenance; otherwise rewrite it without consulting the third-party source
+  and revalidate against the oracle. Initial scope includes exception/timing
+  code, SCC68070 peripherals, IKAT, DS1216, CIAP, and the interpreter's DIV
+  path. A clean native link is necessary but does not replace this source-
+  provenance gate.
 
 ## Long-term
 
@@ -133,4 +179,7 @@ Disc insertion/ejection tests in the BIOS phase are not game progress.
   decoder/validator/code-generator/function-finder is copied verbatim into BOTH
   segagenesisrecomp and cdirecomp. Once both stabilise, pull it into a standalone
   module (e.g. `m68krecomp-core`) both consume; neutralise inherited `genesis_*`
-  names and parameterise the flat-image type. *(User-requested long-term goal.)*
+  names and parameterise the flat-image type. The author explicitly permits
+  salvaging their clean-room tooling/interpreter work from
+  `../segagenesisrecomp`; exclude its clownmdemu/clown68000 oracle paths and
+  retain file/commit provenance. *(User-requested long-term goal.)*

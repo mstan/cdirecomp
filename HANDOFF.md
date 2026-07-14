@@ -1,6 +1,6 @@
 # Session Handoff — cdirecomp
 
-**Date:** 2026-07-13
+**Date:** 2026-07-14
 **Goal:** a fully navigable, real-time, LLE-focused BIOS/player shell. Hotel
 Mario is only a real-media fixture; game launch and gameplay are out of scope
 until the BIOS goal is complete.
@@ -106,14 +106,52 @@ until the BIOS goal is complete.
   seq-570000 frame hash remains exact. Player runs are now intentionally
   real-time paced, so boot wall time is no longer a raw throughput benchmark.
 
+## Internal 0.0.1 checkpoint
+
+The Phase-C/player-shell baseline is committed locally as `4f102d7` (`runtime:
+complete real-time CD-i BIOS player shell`); `master` is one commit ahead of
+`origin/master`, and no release tag exists yet. A fresh 2026-07-14 verification
+rebuilt the recompiler, debug runner, oracle, and Release runner; passed both
+runner CTests, all 10 co-sim self-tests, the function-alias regression, every
+20k native/oracle trust gate, the Release shell-idle smoke at 60.00 fps, the
+Mode-2 insertion/ejection smoke, and four-way BIOS navigation with RULE 0a
+clean. This commit is ready for an internal 0.0.1 runtime/binary checkpoint.
+
+MC-CDI-017 deliberately keeps the oracle outside the release boundary. The
+local `external/CeDImu` checkout at `6eb8df4`, its four local modifications, and
+the statically linked `CdiOracle` executable are internal development tools:
+keep them git-ignored and do not commit, push, package, or publish them.
+`CdiRuntime` neither links nor requires CeDImu. Public documentation may
+reference the upstream project/base revision and explain the optional local
+oracle boundary; exact reproduction of the private oracle modifications is not
+a production release requirement. Independently audit any shipped source
+described as a CeDImu "port" so production provenance does not depend merely on
+the link boundary.
+
+Production release policy is runtime-only: package `CdiRuntime` and an explicit
+allowlist of redistributable runtime dependencies/assets, never any recompiler,
+oracle, development tool, user ROM/disc image, trace, or build-tree byproduct.
+MC-CDI-029 will adapt the author-owned `package_release.py` and
+`audit_runner_purity.py` patterns from `../segagenesisrecomp`. If AGPL-linked
+tooling is ever distributed, it must be built and released from a separate
+tooling repository with complete AGPL compliance; it never joins the player
+release. The sibling's clean-room 68000 interpreter is already the ancestor of
+cdirecomp's adapted fallback and may be reused further with explicit provenance;
+its clownmdemu/clown68000 oracle paths may not cross the production boundary.
+Before a public player release, MC-CDI-030 must also resolve every shipped
+source section described as a CeDImu/clown68000 "port" or "exact port" through
+documented independent/author-owned provenance or an independent rewrite. Link
+purity and source provenance are separate gates.
+
 ## Current working tree
 
-Changes are intentionally uncommitted. They include the Phase-C cycle/co-sim
-work, the hybrid return-contract repair, SCC68070 timers and on-chip IRQs,
-persistent STOP, player pacing, IKAT input/media, display/frontend work, smoke
-tests, and documentation. Inspect `git diff`; do not discard user changes.
+The runtime baseline above is committed. Current uncommitted changes are the
+follow-up burndown/documentation additions for persistent captured-mouse and
+one-shot host-clock preferences plus the local-only CeDImu oracle policy in
+`.gitignore`, `PRINCIPLES.md`, `README.md`, `ENHANCEMENTS.md`, `TODO.md`,
+`PLAN.md`, and this handoff. Inspect `git diff`; do not discard user changes.
 
-Key modified/new files this session:
+Key modified/new files in the `4f102d7` baseline commit:
 
 - `recompiler/src/code_generator.c`, `runner/src/runtime.c`: preserve the hybrid
   interpreter/native return contract across re-entry; implement correct
@@ -149,7 +187,11 @@ Key modified/new files this session:
    settings while keeping every input button boundary explicit and RULE 0a clean.
 2. Audit memory/settings UI behavior plus RTC/NVRAM and peripheral behavior
    without activating Play CD-I.
-3. Add the fixed guest-clock RAM/register baseline, SCC68070 instruction-
+3. Add persistent launcher/player preferences for focus-safe host mouse capture
+   through the real IKAT pointer path (MC-CDI-027) and a one-shot host-local RTC
+   seed that never re-syncs after guest execution begins (MC-CDI-028). Both are
+   opt-in and stay off in deterministic validation profiles.
+4. Add the fixed guest-clock RAM/register baseline, SCC68070 instruction-
    coverage audit, and CI. Game
    loading, module recompilation, and gameplay remain deferred.
 
