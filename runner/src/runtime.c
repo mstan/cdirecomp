@@ -11,19 +11,19 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <time.h>
+#endif
 
-/* Generated dispatch-table accessors (bios/generated/cdrtos_dispatch.c). */
-int      game_dispatch_table_size(void);
-uint32_t game_dispatch_table_addr(int i);
+/* Generated dispatch-table lookup (bios/generated/cdrtos_dispatch.c). */
+int      game_dispatch_has_addr(uint32_t addr);
 
 /* Is `addr` the entry of a statically recompiled function? (Used by the hybrid
  * interpreter to know when it has re-entered recompiled territory.) */
 int dispatch_has_addr(uint32_t addr) {
-    addr &= 0xFFFFFFu;
-    int n = game_dispatch_table_size();
-    for (int i = 0; i < n; i++)
-        if (game_dispatch_table_addr(i) == addr) return 1;
-    return 0;
+    return game_dispatch_has_addr(addr & 0xFFFFFFu);
 }
 
 /* ---- Hybrid interpreter handoff (MC-CDI-011) ----
@@ -51,10 +51,19 @@ static int hybrid_enter(uint32_t target, uint32_t ret) {
     s_in_hybrid = 0;
 
     if (st == (M68kiStatus)M68KI_REENTER) {
-        recomp_call_addr(g_cpu.PC);      /* resume native at the recompiled entry */
+        /* This is only an inner native segment boundary: its flat terminal RTS
+         * leaves the current guest return on A7. Preserve recomp_call_addr's
+         * return-contract flag so the original generated dynamic-call site can
+         * pop and validate that slot (including a rewritten OS-9 return). */
+        recomp_call_addr(g_cpu.PC);
         return 1;
     }
-    if (st == M68KI_OK) return 1;        /* interpreted cleanly back to `ret` */
+    if (st == M68KI_OK) {
+        /* The interpreter reached `ret` itself, so its RTS/JMP already made the
+         * guest PC/A7 authoritative and the generated caller must not pop. */
+        g_call_was_hybrid = 1;
+        return 1;
+    }
 
     fprintf(stderr, "[hybrid] interp halt(%d) entering $%06X: opcode $%04X at $%06X\n",
             st, target, g_m68ki_bad_op, g_m68ki_bad_pc);
@@ -71,10 +80,26 @@ static int hybrid_enter(uint32_t target, uint32_t ret) {
  * hybrid callee pops `ret` itself, and a second [A7]-follow would double-pop. */
 void recomp_top_resume(uint32_t addr) {
     addr &= 0xFFFFFFu;
+    /* This is the depth-zero trampoline: every C frame from the previous
+     * dispatch has either returned normally or was abandoned by the bus/IRQ
+     * longjmp landing pad in main.c.  In the latter case hybrid_enter() cannot
+     * run its ordinary cleanup, so its recursion guard would otherwise remain
+     * stale and reject the next legitimate RAM stub (observed after an IKAT
+     * IRQ: TRAP #0 -> $00062C was logged as a dispatch miss).  Re-establish the
+     * depth-zero invariant here.  Do not clear this inside an active generated
+     * call: a genuinely nested miss must still be rejected rather than recurse
+     * through the same interpreter frame blindly. */
+    s_in_hybrid = 0;
     if (dispatch_has_addr(addr)) {
         recomp_call_addr(addr);              /* recompiled entry: flat-call */
         return;
     }
+    /* A generated ROM instruction boundary is covered by the async native
+     * resume map and returned above. Reaching this fallback therefore means the
+     * PC belongs to RAM or to a genuinely undiscovered ROM CFG. Record only
+     * that exact entry, not every instruction the interpreter subsequently
+     * executes. */
+    debug_record_indirect_target(addr);
     /* Attribute this interpreter run: a bus/exception handler dispatched via the
      * trampoline carries a one-shot reason; otherwise it's a plain depth-0 target. */
     g_fallback_reason = s_pending_fallback_reason ? s_pending_fallback_reason : FB_TOP_RESUME;
@@ -142,11 +167,24 @@ uint32_t g_fault_addr = 0;
 uint32_t g_recomp_initial_ssp = 0;
 
 /* ---- Interrupt request state ----
- * Devices assert IRQ lines here. Actual delivery (vectoring into the recompiled
- * CPU between instructions) is a later milestone (MC-CDI-007/010); recording the
- * pending request lets polling boots proceed without it. */
+ * Devices assert external or SCC68070 on-chip inputs here. Delivery occurs at
+ * the universal instruction-entry safepoint and from the persistent STOP loop. */
 uint32_t g_irq_pending = 0;
+static uint32_t s_irq_onchip_pending = 0;
 void cdi_irq_raise(uint8_t level) { g_irq_pending |= (1u << level); debug_record_irq_raise(level); }
+
+void cdi_irq_raise_onchip(uint8_t input) {
+    uint8_t lir = periph_lir();
+    uint8_t level = input == 1 ? (uint8_t)((lir >> 4) & 7) :
+                    input == 2 ? (uint8_t)(lir & 7) : 0;
+    cdi_irq_raise_onchip_level(level);
+}
+
+void cdi_irq_raise_onchip_level(uint8_t level) {
+    if (!level || level > 7) return;
+    s_irq_onchip_pending |= 1u << level;
+    debug_record_irq_raise(level);
+}
 
 /* ---- Dispatch-miss monitor ---- */
 uint32_t g_miss_count_any = 0;
@@ -198,6 +236,14 @@ void recomp_push_return(uint32_t ret_addr) {
 /* ---- Runtime init ---- */
 void runtime_init(void) {
     memset(&g_cpu, 0, sizeof g_cpu);
+    /* CeDImu processes the queued reset exception (43 SCC68070 clocks) and
+     * executes the reset-vector instruction in the same first Run(false).
+     * Native seeds the post-reset registers directly, so carry that exception
+     * time in the first generated instruction's accumulator: seq 0 remains the
+     * common pre-instruction timestamp, while seq 1 observes reset + opcode
+     * time exactly like the behavioral oracle.  This phase matters to every
+     * cycle-driven peripheral, notably the SCC68070 timer. */
+    g_cycle_accumulator = 43;
     /* TODO MC-CDI-001: load CD-RTOS system ROM, run the OS-9 module loader to
      * relocate the boot module (cdi_hotel) into RAM, then seed g_cpu.A[7]/PC
      * from its execution entry. Until then there is no valid start state. */
@@ -212,9 +258,108 @@ void glue_check_vblank(void) {
     mcd212_tick(g_cycle_accumulator);
     g_cycle_accumulator = 0;
 }
+void runtime_defer_exception_cycles(uint32_t cycles) {
+    /* CeDImu executes ProcessException and the handler's first instruction in
+     * one Run(false) quantum. A second exception raised by that first
+     * instruction belongs to the following quantum, so finish any older batch
+     * before replacing it. */
+    if (g_cycle_accumulator) glue_check_vblank();
+    g_cycle_accumulator = cycles;
+    g_audio_cycle_counter += cycles;
+}
 void glue_yield_for_vblank(void)        { /* TODO MC-CDI-007: fiber yield for frame pacing */ }
 void glue_yield_for_interrupt_poll(void){ /* TODO MC-CDI-007 */ }
 void runtime_request_vblank(void)       { /* TODO MC-CDI-007 */ }
+
+/* Player pacing (MC-CDI-007). CeDImu advances a stopped SCC68070 in 25-cycle
+ * quanta, and timer IRQs periodically wake the shell into active execution.
+ * Pace the complete cycle stream rather than only STOP quanta; otherwise those
+ * active bursts make the display/RTC run faster than wall time. The deadline
+ * carries finite debt (PSX frame-pacer doctrine); only a sustained >200 ms host
+ * stall is re-anchored. Fixed-sequence co-sim leaves pacing disabled. Windows
+ * uses a waitable timer, avoiding Sleep(1)'s legacy 15.6-ms granularity. */
+#define CDI_CPU_HZ 15104900.0
+#define CDI_PACE_CHUNK_CYCLES 151049u  /* almost exactly 10 ms */
+
+static int      s_realtime_pacing;
+static uint64_t s_pace_pending_cycles;
+static double   s_pace_deadline;
+
+#ifdef _WIN32
+static double host_seconds(void) {
+    static LARGE_INTEGER freq;
+    LARGE_INTEGER now;
+    if (!freq.QuadPart) QueryPerformanceFrequency(&freq);
+    QueryPerformanceCounter(&now);
+    return (double)now.QuadPart / (double)freq.QuadPart;
+}
+
+static void host_wait_until(double deadline) {
+    static HANDLE timer;
+    if (!timer) {
+#ifndef CREATE_WAITABLE_TIMER_HIGH_RESOLUTION
+#define CREATE_WAITABLE_TIMER_HIGH_RESOLUTION 0x00000002
+#endif
+        timer = CreateWaitableTimerExW(NULL, NULL,
+            CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
+        if (!timer) timer = CreateWaitableTimerW(NULL, TRUE, NULL);
+    }
+    for (;;) {
+        double remaining = deadline - host_seconds();
+        if (remaining <= 0.0) break;
+        if (remaining > 0.0015 && timer) {
+            LARGE_INTEGER due;
+            /* Leave ~0.5 ms for scheduler jitter/yielding; relative timers use
+             * negative 100-ns intervals. */
+            double wait_s = remaining - 0.0005;
+            due.QuadPart = -(LONGLONG)(wait_s * 10000000.0);
+            if (due.QuadPart == 0) due.QuadPart = -1;
+            if (SetWaitableTimer(timer, &due, 0, NULL, NULL, FALSE))
+                WaitForSingleObject(timer, INFINITE);
+            else
+                SwitchToThread();
+        } else {
+            SwitchToThread();
+        }
+    }
+}
+#else
+static double host_seconds(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (double)ts.tv_sec + (double)ts.tv_nsec / 1.0e9;
+}
+
+static void host_wait_until(double deadline) {
+    for (;;) {
+        double remaining = deadline - host_seconds();
+        if (remaining <= 0.0) break;
+        struct timespec ts;
+        ts.tv_sec = (time_t)remaining;
+        ts.tv_nsec = (long)((remaining - (double)ts.tv_sec) * 1.0e9);
+        nanosleep(&ts, NULL);
+    }
+}
+#endif
+
+void runtime_set_realtime_pacing(int enabled) {
+    s_realtime_pacing = enabled != 0;
+    s_pace_pending_cycles = 0;
+    s_pace_deadline = 0.0;
+}
+
+void runtime_pace_cycles(uint32_t cycles) {
+    if (!s_realtime_pacing) return;
+    s_pace_pending_cycles += cycles;
+    if (s_pace_pending_cycles < CDI_PACE_CHUNK_CYCLES) return;
+
+    double now = host_seconds();
+    if (s_pace_deadline == 0.0 || now > s_pace_deadline + 0.200)
+        s_pace_deadline = now;
+    s_pace_deadline += (double)s_pace_pending_cycles / CDI_CPU_HZ;
+    s_pace_pending_cycles = 0;
+    host_wait_until(s_pace_deadline);
+}
 
 /* Full-SR write with the 68000 A7<->stack-pointer swap. When the S bit flips,
  * A7 aliases a different physical stack pointer: save the current A7 to the
@@ -241,7 +386,6 @@ void genesis_stop_until_interrupt(uint16_t sr_imm) {
     m68k_set_sr(sr_imm);   /* STOP loads SR (privileged) — swap A7 if S changes */
     g_halted = 1;   /* the top-level trampoline stops here; MC-CDI-007 will
                      * wake on an IRQ above the I-mask and clear this. */
-    /* TODO MC-CDI-007: halt until an IRQ above the I-mask; yield to pacing. */
 }
 /* SCC68070 exception processing (faithful port of CeDImu ProcessException):
  * enter supervisor, push the exception stack frame, then point PC at the
@@ -313,7 +457,9 @@ int recomp_bus_error(uint32_t addr) {
     g_last_access_addr = tpf;             /* restore TPF (decode read through the bus) */
     g_cpu.PC = post_fetch;                /* stacked PC = post-fetch PC */
     build_exception_frame(2);             /* long frame; sets g_cpu.PC = handler */
-    mcd212_tick(158);                     /* CeDImu ProcessException: BusError = 158 clock periods */
+    /* CeDImu applies exception time together with the handler's first
+     * instruction on the next Run(false). */
+    runtime_defer_exception_cycles(158);
     s_pending_fallback_reason = FB_BUS_HANDLER;  /* the handler runs in the interpreter next */
     longjmp(g_recomp_bus_env, 1);
     return 1;                             /* unreachable */
@@ -328,8 +474,12 @@ int     g_recomp_irq_armed = 0;
 int recomp_pending_irq_level(void) {
     /* Highest set level in the pending bitmask (bit N = level N asserted). */
     for (int lvl = 7; lvl >= 1; lvl--)
-        if (g_irq_pending & (1u << lvl)) return lvl;
+        if ((g_irq_pending | s_irq_onchip_pending) & (1u << lvl)) return lvl;
     return 0;
+}
+
+uint32_t recomp_pending_irq_mask(void) {
+    return g_irq_pending | s_irq_onchip_pending;
 }
 
 void recomp_take_irq(void) {
@@ -345,15 +495,22 @@ void recomp_take_irq(void) {
      * m_exceptions, and IPM is NOT raised by ProcessException, so a level that
      * stayed asserted would otherwise re-take at the handler's first instruction.
      * The device re-raises (re-queues) only on a new interrupt condition. */
-    g_irq_pending &= ~(1u << lvl);
+    int onchip = (s_irq_onchip_pending & (1u << lvl)) != 0;
+    if (onchip) s_irq_onchip_pending &= ~(1u << lvl);
+    else g_irq_pending &= ~(1u << lvl);
+    /* ProcessException clears the SCC68070 STOP latch for any external/on-chip
+     * interrupt. Do this at the same boundary before abandoning the idle loop. */
+    g_halted = 0;
 
     /* External autovector = 24 + level (vector 26 for the IKAT level-2 line).
      * build_exception_frame stacks SR, the resume PC (g_cpu.PC — the not-yet-
      * executed instruction at this boundary), and the vector-offset word, enters
      * supervisor, and sets g_cpu.PC = read32(vec<<2) = the OS-9 handler. */
-    uint8_t vec = (uint8_t)(24 + lvl);
+    uint8_t vec = (uint8_t)((onchip ? 56 : 24) + lvl);
     build_exception_frame(vec);
-    mcd212_tick(65);   /* CeDImu ProcessException: autovector = 65 clock periods */
+    /* Defer the 65-cycle autovector cost into the first ISR instruction, which
+     * is the single device-time quantum CeDImu executes after waking STOP. */
+    runtime_defer_exception_cycles(65);
     s_pending_fallback_reason = FB_EXCEPTION;   /* the ISR runs in the interpreter next */
     longjmp(g_recomp_irq_env, 1);
 }
@@ -366,18 +523,12 @@ void m68k_trap_vector(uint8_t vec) {
      * inline OS9 service-code word, so build_exception_frame stacks that address;
      * the kernel's F$ dispatcher reads the code there and RTEs past it. */
     uint32_t handler = build_exception_frame(vec);
-    /* Exception-processing clock cost, mirroring CeDImu ProcessException
-     * (InstructionSet.cpp:53-69). The recompiled bus-error path (recomp_bus_error)
-     * and the interpreter already tick 158 for vector 2/3; the recompiled odd-JMP
-     * address error reaches vector 3 through HERE and was ticking 0 — a 158-cycle
-     * under-count on the boot's deliberate $40069E address error that seeds the
-     * MCD212 frame-clock drift vs the oracle (MC-CDI-009). TRAP #0 (vec 32-47) is
-     * NOT ticked here: native's MN_TRAP instruction cost already carries CeDImu's
-     * 52-cycle exception cost (CeDImu's TRAP handler returns 0 + ProcessException
-     * 52; native's TRAP returns 52 + this 0 — same total), so ticking again would
-     * double-count. */
+    /* Address/bus errors reaching this common path queue their 158-cycle
+     * ProcessException cost for the handler's first instruction. TRAP #0 does
+     * not add anything here: the generated/interpreted TRAP site already queues
+     * its 52-cycle cost. */
     if (vec == 2 || vec == 3)
-        mcd212_tick(158);
+        runtime_defer_exception_cycles(158);
     call_by_address(handler);     /* recompiled handler, or dispatch-miss → RAM-built stub
                                    * needs the hybrid interpreter (MC-CDI-011) */
 }

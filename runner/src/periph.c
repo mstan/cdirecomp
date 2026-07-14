@@ -13,12 +13,11 @@
  *   - MSR   : read-only (writes ignored)
  *   - everything else: plain register storage (config: PICR1/2, DMA, MMU setup)
  *
- * Timer counting (IncrementTimer) and DMA transfers are reactive subsystems
- * driven by CPU cycles; ported as periph_increment_timer for when the pacing
- * loop drives it (dormant until then). The MMU registers are stored but address
- * translation is NOT yet applied to recompiled accesses (the flat-address risk,
- * MC-CDI-006); revisit if CD-RTOS enables remapping that the recompiled code
- * depends on.
+ * Timer counting (IncrementTimer) is driven by CPU cycles from the same edge
+ * that advances the other devices. DMA transfers remain pending. The MMU
+ * registers are stored but address translation is NOT yet applied to
+ * recompiled accesses (the flat-address risk, MC-CDI-006); revisit if CD-RTOS
+ * enables remapping that the recompiled code depends on.
  *
  * TODO MC-CDI-006.
  */
@@ -36,9 +35,29 @@
 #define R_UTHR  0x80002019u
 #define R_URHR  0x8000201Bu
 #define R_TSR   0x80002020u
+#define R_TCR   0x80002021u
+#define R_RRH   0x80002022u
+#define R_RRL   0x80002023u
+#define R_T0H   0x80002024u
+#define R_T0L   0x80002025u
+#define R_T1H   0x80002026u
+#define R_T1L   0x80002027u
+#define R_T2H   0x80002028u
+#define R_T2L   0x80002029u
+#define R_PICR1 0x80002045u
 #define R_MSR   0x80008000u
 
 static uint8_t s_periph[PERIPH_SIZE];
+
+/* Keep the timer clock in the same domain as CeDImu.  Its SCC68070 stores
+ * m_cycleDelay and m_timerCounter as double nanoseconds, adding one complete
+ * CPU execution quantum at a time.  An exact integer modulo-96 counter is
+ * mathematically cleaner but not behaviorally identical: floating-point
+ * rounding can move an overflow across one STOP quantum after a long run,
+ * which changes the instruction at which OS-9 receives the timer IRQ. */
+static const double s_timer_cycle_delay_ns =
+    (double)((1.0L / 15104900.0L) * 1000000000.0L);
+static double s_timer_counter_ns;
 
 static inline uint32_t off_of(uint32_t addr) { return addr - PERIPH_BASE; }
 
@@ -48,7 +67,75 @@ static inline uint32_t off_of(uint32_t addr) { return addr - PERIPH_BASE; }
  * always ready), so initialise it the same way or the boot spins forever. */
 void periph_reset(void) {
     memset(s_periph, 0, sizeof s_periph);
+    s_timer_counter_ns = 0.0;
     s_periph[off_of(R_USR)] = 0x04;   /* SET_TX_READY */
+}
+
+uint8_t periph_lir(void) {
+    return s_periph[off_of(R_LIR)];
+}
+
+static uint16_t timer_get16(uint32_t high_addr) {
+    return (uint16_t)((uint16_t)s_periph[off_of(high_addr)] << 8 |
+                      s_periph[off_of(high_addr + 1)]);
+}
+
+static void timer_set16(uint32_t high_addr, uint16_t value) {
+    s_periph[off_of(high_addr)] = (uint8_t)(value >> 8);
+    s_periph[off_of(high_addr + 1)] = (uint8_t)value;
+}
+
+/* SCC68070 timer prescaler: CeDImu derives m_timerDelay from its rounded
+ * double m_cycleDelay, then accumulates the double nanoseconds supplied by
+ * each CPU execution quantum. T0 always runs; T1/T2 are gated by their TCR
+ * mode fields. Each overflow queues the PICR1-selected on-chip autovector.
+ * This is intentionally called once for every CPU execution quantum,
+ * including STOP's 25-cycle quanta. */
+void periph_increment_timer(uint32_t cycles) {
+    const double timer_delay_ns = s_timer_cycle_delay_ns * 96.0;
+    s_timer_counter_ns += (double)cycles * s_timer_cycle_delay_ns;
+    while (s_timer_counter_ns >= timer_delay_ns) {
+        s_timer_counter_ns -= timer_delay_ns;
+        uint8_t *tsr = &s_periph[off_of(R_TSR)];
+        uint8_t tcr = s_periph[off_of(R_TCR)];
+        uint8_t priority = s_periph[off_of(R_PICR1)] & 7u;
+        uint16_t t0 = timer_get16(R_T0H);
+
+        if (t0 == 0xFFFFu) {
+            *tsr |= 0x80u;
+            t0 = timer_get16(R_RRH);
+            if (priority) cdi_irq_raise_onchip_level(priority);
+        } else {
+            t0++;
+        }
+        timer_set16(R_T0H, t0);
+
+        if (tcr & 0x30u) {
+            uint16_t t1 = timer_get16(R_T1H);
+            if (t1 == 0xFFFFu) {
+                *tsr |= 0x10u;
+                if (priority) cdi_irq_raise_onchip_level(priority);
+            } else if ((tcr & 0x30u) == 0x30u) {
+                *tsr &= 0xEEu;
+            }
+            t1++;
+            if (t1 == t0) *tsr |= 0x40u;
+            timer_set16(R_T1H, t1);
+        }
+
+        if (tcr & 0x03u) {
+            uint16_t t2 = timer_get16(R_T2H);
+            if (t2 == 0xFFFFu) {
+                *tsr |= 0x02u;
+                if (priority) cdi_irq_raise_onchip_level(priority);
+            } else if ((tcr & 0x03u) == 0x03u) {
+                *tsr &= 0xFCu;
+            }
+            t2++;
+            if (t2 == t0) *tsr |= 0x08u;
+            timer_set16(R_T2H, t2);
+        }
+    }
 }
 
 static uint8_t periph_get(uint32_t addr) {

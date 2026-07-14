@@ -21,6 +21,8 @@
 #include "function_finder.h"
 #include "code_generator.h"
 #include "codegen_diag.h"
+#include "m68k_decoder.h"
+#include "m68k_validator.h"
 #include "annotations.h"
 #include "game_config.h"
 #include "cycle_probe.h"
@@ -41,19 +43,73 @@ static const char *os9_type_name(uint8_t t) {
     }
 }
 
+/* Some CD-RTOS file managers expose each service through a position-
+ * independent glue entry:
+ *
+ *   lea entry(pc),a2
+ *   lea implementation(pc),a0
+ *   bra common_dispatch
+ *
+ * The common dispatcher publishes A0 through an OS table and calls it later,
+ * so ordinary direct-call discovery cannot see the implementation. Accept
+ * only this exact, legal, same-module shape; treating arbitrary LEA targets as
+ * code would turn strings and descriptor data into functions. */
+static bool fmgr_glue_implementation(const GenesisRom *rom,
+                                     uint32_t module_begin,
+                                     uint32_t module_size,
+                                     uint32_t entry,
+                                     uint32_t *implementation) {
+    M68KInstr ins[3];
+    M68KValidatorOptions vopts = {0};
+    uint32_t pc = entry;
+    for (int i = 0; i < 3; i++) {
+        if (!m68k_decode(rom, pc, &ins[i]) ||
+            m68k_validate(&ins[i], &vopts) != M68K_LEGAL)
+            return false;
+        pc += ins[i].byte_length;
+    }
+    const uint8_t pc_disp = (uint8_t)((EA_PCR << 3) | PCR_PC_DISP);
+    if (ins[0].mnemonic != MN_LEA || ins[0].reg != 2 ||
+        ins[0].src_ea != pc_disp || ins[0].word_count < 2 ||
+        ins[1].mnemonic != MN_LEA || ins[1].reg != 0 ||
+        ins[1].src_ea != pc_disp || ins[1].word_count < 2 ||
+        ins[2].mnemonic != MN_BRA || !ins[2].has_target)
+        return false;
+
+    uint32_t self = ins[0].addr + 2u +
+                    (uint32_t)(int32_t)(int16_t)ins[0].words[1];
+    uint32_t target = ins[1].addr + 2u +
+                      (uint32_t)(int32_t)(int16_t)ins[1].words[1];
+    uint64_t module_end = (uint64_t)module_begin + module_size;
+    if (self != entry || target < module_begin || target >= module_end ||
+        (target & 1u))
+        return false;
+
+    M68KInstr first;
+    if (!m68k_decode(rom, target, &first) ||
+        m68k_validate(&first, &vopts) != M68K_LEGAL)
+        return false;
+    *implementation = target;
+    return true;
+}
+
 int main(int argc, char *argv[]) {
     if (argc < 2) {
-        fprintf(stderr, "Usage: CdiRecompBios <bios.rom> [--emit] [--game <cfg>]\n");
+        fprintf(stderr, "Usage: CdiRecompBios <bios.rom> [--emit] [--game <cfg>] "
+                        "[--seeds <file>] [--dump-functions <file>]\n");
         return 1;
     }
     const char *rom_path = argv[1];
     const char *game_path = NULL;
     const char *seeds_path = NULL;   /* flat hex list of extra discovery seeds */
+    const char *dump_functions_path = NULL;
     bool emit = false;
     for (int i = 2; i < argc; i++) {
         if      (!strcmp(argv[i], "--emit"))                  emit = true;
         else if (!strcmp(argv[i], "--game")  && i + 1 < argc) game_path  = argv[++i];
         else if (!strcmp(argv[i], "--seeds") && i + 1 < argc) seeds_path = argv[++i];
+        else if (!strcmp(argv[i], "--dump-functions") && i + 1 < argc)
+            dump_functions_path = argv[++i];
     }
 
     /* ---- load ---- */
@@ -112,14 +168,31 @@ int main(int argc, char *argv[]) {
     GameConfig cfg = {0};
     if (!(game_path && game_config_load(&cfg, game_path)))
         game_config_init_empty(&cfg);
+    /* CD-RTOS contains callable branch-entered suffixes and shared epilogues.
+     * The conservative entry-ownership proof keeps every address dispatchable
+     * while preventing those entries from truncating their canonical host. */
+    cfg.function_aliases = true;
+    /* IRQ/bus-error delivery unwinds generated host frames to a depth-zero
+     * trampoline. The stacked PC may be any emitted instruction boundary, so
+     * keep every such boundary natively resumable without splitting hosts. */
+    cfg.async_resume_entries = true;
+    /* OS-9 encodes every TRAP #0 call as `trap #0; dc.w service`. The kernel
+     * advances the exception-frame PC over that selector, so keep the real
+     * continuation in the caller's canonical CFG instead of manufacturing a
+     * split function when the runtime first returns there. */
+    cfg.trap0_inline_service_word = true;
     if (!cfg.output_prefix[0])
         snprintf(cfg.output_prefix, sizeof cfg.output_prefix, "cdrtos");
 
-    /* Seed discovery from every code module's execution entry. OS-9 modules are
-     * relocatable but ROMmed modules execute in place; M$Exec (offset 0x30 in
-     * the header, per CeDImu's ModuleExtraHeader) is the entry offset relative
-     * to the module start. lang==1 means 68000 object code. The reset vector is
-     * already seeded by the finder; these add the kernel + drivers + shell. */
+    /* Seed discovery from every 68000 module's declared execution entries.
+     * OS-9 program/system-style M$Exec is a direct module-relative code offset.
+     * File-manager and driver M$Exec instead points at their service vector.
+     * The OS-9/68000 I/O ABI uses 13 word offsets relative to the beginning of
+     * a file-manager table, but 7 word offsets relative to the module base for
+     * a driver (the seventh is its optional error handler).
+     * Treating that vector itself as instructions manufactures legal-looking
+     * garbage functions (and hides real service routines). ROMmed modules run
+     * in place, so every table row resolves relative to the module start. */
     #define CDI_SEED_MAX 16384
     static uint32_t seeds[CDI_SEED_MAX];
     int nseeds = 0;
@@ -130,15 +203,38 @@ int main(int argc, char *argv[]) {
         const uint8_t *mh = img + maddr;
         uint32_t m_exec = ((uint32_t)mh[0x30] << 24) | ((uint32_t)mh[0x31] << 16) |
                           ((uint32_t)mh[0x32] << 8)  |  mh[0x33];
-        if (m_exec == 0 || m_exec >= mods[i].size) continue;  /* entry within module */
-        seeds[nseeds++] = maddr + m_exec;
+        if (m_exec == 0 || m_exec >= mods[i].size) continue;
+        if (mods[i].type == 0x0D || mods[i].type == 0x0E) {
+            int entries = mods[i].type == 0x0D ? 13 : 7;
+            for (int e = 0; e < entries && nseeds < CDI_SEED_MAX; e++) {
+                uint32_t row = m_exec + (uint32_t)e * 2u;
+                if (row + 2u > mods[i].size) break;
+                uint16_t off = ((uint16_t)mh[row] << 8) | mh[row + 1];
+                uint32_t target = mods[i].type == 0x0D
+                                ? m_exec + (uint32_t)off
+                                : (uint32_t)off;
+                if (off == 0 || target >= mods[i].size || (target & 1u)) continue;
+                uint32_t entry = maddr + target;
+                seeds[nseeds++] = entry;
+                if (mods[i].type == 0x0D && nseeds < CDI_SEED_MAX) {
+                    uint32_t implementation;
+                    if (fmgr_glue_implementation(&rom, maddr, mods[i].size,
+                                                 entry, &implementation))
+                        seeds[nseeds++] = implementation;
+                }
+            }
+        } else {
+            seeds[nseeds++] = maddr + m_exec;
+        }
     }
     int nmod_seeds = nseeds;
 
     /* Trace-guided discovery seeds: a flat hex list (one address per line, '#'
      * comments) of indirect-call targets the runtime observed the static finder
      * miss — register-indirect JSR (An) through RAM-built dispatch tables that
-     * no static walk can follow. The runtime's `indirect_targets` collection,
+     * no static walk can follow, plus any resume that reveals a CFG not already
+     * represented by the generated async native resume map. The runtime's
+     * `indirect_targets` collection,
      * unioned by tools/collect_seeds.py into bios/cdrtos_discovered.txt, feeds
      * back here; re-seeding + regen recompiles them and exposes the next layer,
      * iterating until the miss set is dry. Explicit --seeds wins; otherwise the
@@ -225,6 +321,8 @@ int main(int argc, char *argv[]) {
     }
 
     AnnotationTable at = {0};
+    if (dump_functions_path)
+        codegen_set_dump_functions_path(dump_functions_path);
     const char *out_full = "bios/generated/cdrtos_full.c";
     const char *out_disp = "bios/generated/cdrtos_dispatch.c";
     bool ok = codegen_emit(&rom, &funcs, out_full, out_disp, &at, &cfg, false);

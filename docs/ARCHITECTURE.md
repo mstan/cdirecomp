@@ -22,7 +22,11 @@ extended for CD-i. Pipeline: `rom_parser`/`disc_parser` → `function_finder`
 `code_generator` (per-instruction C, cycle-probed via clown68000). Output is
 self-compiling C: every function becomes `void func_XXXXXX(void)`, plus a
 dispatch table mapping guest address → function. Unknown opcode → loud failure,
-never a stub. `main_cdi_bios.c` drives the flat-ROM (BIOS) path;
+never a stub. Branch-proven overlapping entries share canonical bodies, while
+the CD-i async resume map routes every emitted instruction PC back to its owner.
+For OS-9, configured `TRAP #0` scanning skips the inline service word and keeps
+the post-RTE continuation in that same caller CFG. `main_cdi_bios.c` drives the
+flat-ROM (BIOS) path;
 `main_cdi.c` the disc/module path.
 
 ## Runner (`runner/`, builds `CdiRuntime`)
@@ -36,11 +40,14 @@ The hand-written CD-i machine the generated C links against. Contract:
 - `runtime.c` — CPU-state ABI, the SCC68070 exception model (faithful CeDImu
   port: frame push + RAM vector-table dispatch), dispatch-miss accounting,
   flat-call trampolines, the per-block hook.
-- `mcd212.c cdic.c slave.c periph.c` — device models (register files present;
-  decoders/behavior are the Phase-C tickets). Each fails loud on an unmodelled
-  register rather than faking a value.
-- `cdrtos.c` — the `TRAP #0` OS-9 gateway (vestigial; the goal is to route every
-  vector through the recompiled kernel, not HLE it).
+- `mcd212.c mcd212_video.c cdic.c slave.c periph.c` — hardware models. MCD212
+  owns line/control timing while its clean-room video module decodes and
+  atomically publishes canonical ARGB frames. Each device fails loud on an
+  unmodelled register rather than faking a value.
+- `cdi_frontend.c` — SDL presentation and physical input. It is a read-only
+  frame consumer and publishes only the transport-neutral IKAT input mask.
+- `cdi_media.c` — synchronized CUE/BIN ownership and sector reads. IKAT observes
+  mount/eject generations on emulated time; CIAP will consume the same sectors.
 - `debug_server.c` — always-on ring buffers + threaded TCP server (below).
 - `main.c` — loads the ROM, seeds SCC68070 reset state, drives execution from
   the reset entry, holds open for inspection with `--hold`.
@@ -60,7 +67,8 @@ Always-on, queried after the fact; never arm-then-run.
 - **Fault trail**: every abort site (`bus_fault`, illegal opcode, movec) dumps
   the ring tail to stderr before dying — the executed path into the crash.
 - **TCP server** (127.0.0.1:4380; oracle +1): threaded, answers while the run
-  executes. `ping status get_registers read_mem trace dispatch_miss_info quit`.
+  executes. `ping status video_state video_frame get_registers read_mem trace
+  emu_ikat_state dispatch_miss_info quit`.
   Client: `tools/cdi_debug.py`. RULE 0a gate: `tools/check_dispatch_misses.py`.
 
 ## Oracle (`oracle/` + `external/CeDImu`)

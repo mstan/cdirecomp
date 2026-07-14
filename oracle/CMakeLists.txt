@@ -22,6 +22,10 @@ add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../external/CeDImu/src/CDI CDIcore)
 
 add_executable(CdiOracle cdi_oracle.cpp cosim_state.cpp)
 target_link_libraries(CdiOracle PRIVATE CeDImu)
+# The literal cdi490 ROM opens pt1driv on IKAT channel A. Keep this oracle-
+# harness correction independent of the expensive RAM-hash instrument so the
+# behavioral UI observer can also be built with CDI_COSIM_BUILD=OFF.
+target_compile_definitions(CeDImu PRIVATE CDI_ORACLE_LITERAL_IKAT=1)
 if(WIN32)
     target_link_libraries(CdiOracle PRIVATE ws2_32)
 endif()

@@ -17,6 +17,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <setjmp.h>
+#include "mcd212_video.h"
 
 /* ====================================================================== */
 /*  CPU state — SCC68070 (68000-compatible programming model)             */
@@ -193,15 +194,12 @@ int  recomp_bus_error(uint32_t addr);
 extern jmp_buf g_recomp_irq_env;
 extern int     g_recomp_irq_armed;
 int  recomp_pending_irq_level(void);   /* highest pending unmasked-agnostic level, or 0 */
+uint32_t recomp_pending_irq_mask(void);
 void recomp_take_irq(void);            /* deliver at an instruction boundary (may longjmp) */
 
 void m68k_illegal_trap(uint32_t pc, uint16_t opcode);
 void genesis_reset_devices(void);                /* RESET instruction */
 void genesis_stop_until_interrupt(uint16_t sr_imm); /* STOP #imm */
-
-/* On CD-i, TRAP #0 is the OS-9 / CD-RTOS system-call gateway. The trap
- * dispatcher routes vector 0x20 here; D0/D1 select F$/I$ service. */
-void cdrtos_syscall(void);
 
 /* MOVEC control-register access (68010/SCC68070). The runtime owns the
  * SCC68070 control-register model; generated code passes the 12-bit control
@@ -218,6 +216,11 @@ void glue_yield_for_vblank(void);
 void glue_yield_for_interrupt_poll(void);
 void runtime_init(void);
 void runtime_request_vblank(void);
+/* Pace player-mode CPU/device advancement against host monotonic time. The
+ * emulated clock remains cycle-derived; fixed-sequence co-sim disables this so
+ * deterministic audits free-run. */
+void runtime_set_realtime_pacing(int enabled);
+void runtime_pace_cycles(uint32_t cycles);
 
 /* ====================================================================== */
 /*  Device layer (replaces the Genesis VDP/Z80/FM interface)              */
@@ -225,7 +228,15 @@ void runtime_request_vblank(void);
 /* MCD212 — Video & System Display controller (two planes, DYUV/RGB/CLUT). */
 void     mcd212_write(uint32_t addr, uint32_t val, int size);
 uint32_t mcd212_read (uint32_t addr, int size);
-void     mcd212_render_frame(uint32_t *framebuf);   /* 384x280 (PAL) ARGB8888 */
+/* Copy the last completed canonical ARGB8888 frame (up to 768x560). */
+void     mcd212_render_frame(uint32_t *framebuf);
+uint32_t mcd212_framebuffer_info(uint16_t *width, uint16_t *height,
+                                 uint64_t *generation);
+uint64_t mcd212_framebuffer_hash(uint16_t *width, uint16_t *height,
+                                 uint64_t *generation);
+void     mcd212_debug_state(uint16_t regs[32], uint8_t *csr1r,
+                            uint8_t *csr2r, uint32_t *vline,
+                            uint16_t *active_line);
 /* Advance MCD212 display timing by `cycles` of CPU time. Drives the vertical
  * line counter and the CSR1R DA (Display Active) bit the boot polls. Called per
  * instruction from both execution tiers (glue_check_vblank + the interpreter). */
@@ -240,12 +251,49 @@ uint32_t cdic_read (uint32_t addr, int size);
  * mode, video standard, disc status). "slave" naming is Mono-1/2 legacy. */
 void     slave_write(uint32_t addr, uint32_t val, int size);
 uint32_t slave_read (uint32_t addr, int size);
-void     slave_increment_frame(void);   /* fire 2-frame-delayed responses (pacing loop) */
+/* Advance the IKAT HLE on the same emulated-time edge as CeDImu. This drives
+ * both its 25 ms maneuvering-device packet cadence and its frame-delayed disc
+ * responses. `ns` is derived from SCC68070 cycles, never host wall-clock. */
+void     slave_increment_time(double ns);
 
-/* A CD-i device asserted a CPU interrupt at `level` (1-7). The interrupt
- * DELIVERY model (vectoring into the recompiled CPU) is a later milestone;
- * for now this records the pending request so polling boots proceed. */
+/* Host pointing-device state, consumed by slave_increment_time(). Bits are
+ * deliberately a transport-neutral runtime ABI: SDL and the TCP debug surface
+ * feed the same IKAT path rather than either one poking guest memory. */
+enum {
+    CDI_INPUT_LEFT  = 1u << 0,
+    CDI_INPUT_UP    = 1u << 1,
+    CDI_INPUT_RIGHT = 1u << 2,
+    CDI_INPUT_DOWN  = 1u << 3,
+    CDI_INPUT_BTN1  = 1u << 4,
+    CDI_INPUT_BTN2  = 1u << 5
+};
+void     cdi_input_set(uint32_t mask);
+uint32_t cdi_input_get(void);
+/* Side-effect-free snapshot for the always-on debug surface. Racy but
+ * monotonic enough for observation; unlike slave_read(), it never consumes a
+ * response byte or clears device state. */
+void     slave_debug_state(uint8_t regs[15], uint8_t out_remaining[4],
+                           double *pointer_time_ns, int *cursor_packets);
+typedef struct {
+    uint64_t seq, trace_seq, frame, cycles;
+    uint32_t pc;
+    uint8_t  type, channel, length, data[8];
+} CdiIkatEvent;
+enum {
+    CDI_IKAT_COMMAND = 1,
+    CDI_IKAT_RESPONSE = 2,
+    CDI_IKAT_MEDIA = 3,
+    CDI_IKAT_IRQ = 4,      /* mask-approved external level-2 assertion */
+    CDI_IKAT_READ = 5      /* guest consumed one output byte */
+};
+int      slave_debug_events(CdiIkatEvent *out, int capacity, uint64_t *total);
+
+/* A CD-i device asserts a CPU interrupt at `level` (1-7). Delivery occurs at
+ * the universal instruction-entry safepoint, or directly from the STOP device
+ * loop, and respects the SR interrupt mask. */
 void     cdi_irq_raise(uint8_t level);
+void     cdi_irq_raise_onchip(uint8_t input);
+void     cdi_irq_raise_onchip_level(uint8_t level);
 extern uint32_t g_irq_pending;           /* bitmask of pending IRQ levels */
 
 /* SCC68070 on-chip peripherals ($80001001..$80008080): I2C, UART, timers,
@@ -253,6 +301,8 @@ extern uint32_t g_irq_pending;           /* bitmask of pending IRQ levels */
 void     periph_write(uint32_t addr, uint32_t val, int size);
 uint32_t periph_read (uint32_t addr, int size);
 void     periph_reset(void);             /* power-on state (UART TxRDY, etc.) */
+uint8_t  periph_lir(void);                /* side-effect-free LIR snapshot */
+void     periph_increment_timer(uint32_t cycles);
 
 /* DS1216 SmartWatch timekeeper + 32 KB NVRAM at $320000 (Mono-IV/Mono3). Faithful
  * port of CeDImu's DS1216 core: NVRAM passthrough until a 64-bit magic pattern
@@ -278,18 +328,21 @@ extern uint32_t g_cycle_accumulator;     /* 68070 cycles since frame start */
 extern uint32_t g_vblank_threshold;
 extern uint32_t g_audio_cycle_counter;
 void glue_check_vblank(void);
+/* Queue one CeDImu ProcessException cost for the handler's first instruction.
+ * If an older exception batch is pending, finish that Run(false) quantum first. */
+void runtime_defer_exception_cycles(uint32_t cycles);
 
 /* RTE / early-return propagation (see genesis_runtime.h rationale). */
 extern int *g_rte_pending_ptr;
 #define g_rte_pending (*g_rte_pending_ptr)
 extern int g_early_return;
 
-/* Set by a recompiled RTE (alongside g_rte_pending): the exception handler has
- * popped SR/PC/format and g_cpu.PC now holds the resume PC. When this unwind
+/* Set by a recompiled RTE/RTR (alongside g_rte_pending): the return instruction
+ * popped its frame and g_cpu.PC now holds the resume PC. When this unwind
  * bottoms out to the top-level trampoline (the exception was entered via
  * m68k_trap_vector -> call_by_address at depth 0, so no JSR site owns it), the
  * trampoline must resume at g_cpu.PC — NOT follow [A7] like a (skip-)RTS, whose
- * g_cpu.PC is stale. Distinguishes a real RTE return from the skip-RTS idiom. */
+ * g_cpu.PC is stale. Distinguishes a real frame return from the skip-RTS idiom. */
 extern int g_rte_resume;
 
 /* Context-switch redirect (MC-CDI-012). Set at a JSR site when the callee

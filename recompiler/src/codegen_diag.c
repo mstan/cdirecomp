@@ -20,6 +20,7 @@ static const char *s_kind_names[CGD_KIND_COUNT] = {
     "BRANCH_WITHOUT_TARGET",
     "INVALID_STORE_EA",
     "MOVE_CCR_DIRECTION_AMBIGUOUS",
+    "MISALIGNED_FUNC_ENTRY",
 };
 
 void codegen_diag_reset(void) {
@@ -44,7 +45,10 @@ void codegen_diag_record(CodegenDiagKind kind, uint32_t addr, uint16_t opcode,
 
 int codegen_diag_total(void) {
     int total = 0;
-    for (int i = 0; i < CGD_KIND_COUNT; i++) total += s_counts[i];
+    for (int i = 0; i < CGD_KIND_COUNT; i++) {
+        if (i == CGD_MISALIGNED_FUNC_ENTRY) continue;
+        total += s_counts[i];
+    }
     return total;
 }
 
@@ -73,9 +77,13 @@ void codegen_diag_print_summary(FILE *out) {
 
     fprintf(out, "[Codegen] Unsupported summary:\n");
     for (int k = 0; k < CGD_KIND_COUNT; k++) {
+        if (k == CGD_MISALIGNED_FUNC_ENTRY) continue;
         fprintf(out, "  %-32s %d\n", s_kind_names[k], s_counts[k]);
     }
     fprintf(out, "  %-32s %d\n", "TOTAL", total);
+    fprintf(out, "[Codegen] Overlapping-decode entry audit: %d warning(s); "
+                 "both canonical streams emitted\n",
+            s_counts[CGD_MISALIGNED_FUNC_ENTRY]);
 
     if (total == 0) return;
 

@@ -75,10 +75,21 @@ M68KValidity m68k_validate(const M68KInstr *instr,
      * register variants, but a residual ss==3 reaching the plain
      * mnemonic means the decoder fell into a pattern that would have
      * been illegal on hardware. */
-    case MN_ADD: case MN_SUB: case MN_AND: case MN_OR: case MN_EOR:
+    case MN_ADD: case MN_SUB: case MN_AND: case MN_OR:
     case MN_CMP:
         if ((int)instr->size > (int)M68K_SIZE_L)
             return M68K_ILLEGAL_RESERVED_SIZE;
+        break;
+
+    /* EOR is Dn -> data-alterable EA. In group $B, mode bits 001 belong
+     * exclusively to CMPM's special encoding and must never survive as an
+     * address-register-direct EOR. Keep this legality guard independent of
+     * decoder precedence so a future overlap regression fails closed. */
+    case MN_EOR:
+        if ((int)instr->size > (int)M68K_SIZE_L)
+            return M68K_ILLEGAL_RESERVED_SIZE;
+        if (!is_data_alterable_dst(instr->src_ea))
+            return M68K_ILLEGAL_DST_EA;
         break;
 
     /* Stores cannot use immediate or PC-relative destinations.

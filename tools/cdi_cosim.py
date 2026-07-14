@@ -39,7 +39,7 @@ Usage:
     python tools/cdi_cosim.py diff 4380 4381
     python tools/cdi_cosim.py gates build/runner/CdiRuntime.exe build/oracle/CdiOracle.exe bios/cdi490a.rom
 """
-import argparse, json, socket, subprocess, sys, time
+import argparse, collections, json, secrets, socket, subprocess, sys, threading, time
 from dataclasses import dataclass, field
 
 # --------------------------------------------------------------------------
@@ -245,32 +245,49 @@ def print_report(out: DiffOutcome, native_port, oracle_port):
 # Thin socket/launch layer. Nothing above this line touches a socket or a
 # subprocess — diff_core is testable without either.
 # --------------------------------------------------------------------------
-def _rpc(port, obj, host="127.0.0.1", timeout=10):
+def _rpc(port, obj, host="127.0.0.1", timeout=10, max_response=1 << 20):
+    deadline = time.monotonic() + timeout
     with socket.create_connection((host, port), timeout=timeout) as s:
+        remain = deadline - time.monotonic()
+        if remain <= 0:
+            raise TimeoutError(f":{port} connect exceeded {timeout}s")
+        s.settimeout(remain)
         s.sendall((json.dumps(obj) + "\n").encode())
         buf = b""
         while b"\n" not in buf:
+            remain = deadline - time.monotonic()
+            if remain <= 0:
+                raise TimeoutError(f":{port} response exceeded {timeout}s")
+            s.settimeout(remain)
             chunk = s.recv(65536)
             if not chunk:
                 break
             buf += chunk
+            if len(buf) > max_response:
+                raise ValueError(f":{port} response exceeded {max_response} bytes")
     line = buf.split(b"\n", 1)[0]
     return json.loads(line.decode()) if line.strip() else {}
 
 
-def wait_for_port(port, timeout=30.0, host="127.0.0.1"):
-    """Poll for the process's listener to bind. This is startup synchronization
+def wait_for_port(port, timeout=30.0, host="127.0.0.1", expected_session=None):
+    """Poll for the CD-i listener to bind and answer its identity ping.
+    A bare TCP connect can hit an unrelated process already holding the port.
+    This is startup synchronization
     for a subprocess WE just launched, not the arm-then-capture observability
     anti-pattern (CLAUDE.md): the ring is always-on from seq 0 inside the
     process regardless of when the TCP listener opens, so no events are lost
     waiting for the socket — we just can't ask for them until it's up."""
-    deadline = time.time() + timeout
-    while time.time() < deadline:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
         try:
-            with socket.create_connection((host, port), timeout=1):
+            remain = max(0.01, min(1.0, deadline - time.monotonic()))
+            reply = _rpc(port, {"cmd": "ping"}, host=host, timeout=remain)
+            if (isinstance(reply, dict) and reply.get("ok") and reply.get("pong")
+                    and reply.get("session") == expected_session):
                 return True
-        except OSError:
-            time.sleep(0.1)
+        except (OSError, ValueError, TypeError, AttributeError):
+            pass
+        time.sleep(0.1)
     return False
 
 
@@ -333,6 +350,18 @@ class TraceClient:
         recs = self.load(seq, seq + 1)
         return recs[0] if recs else None
 
+    def cycle_page(self, start, stop):
+        """Read one compact `cycle_trace` page beginning exactly at start."""
+        resp = self._call({"cmd": "cycle_trace", "from": start, "count": 512})
+        if not resp.get("ok"):
+            raise IOError(f":{self.port} cycle_trace failed: {resp}")
+        recs = [r for r in resp.get("records", []) if r["seq"] < stop]
+        if recs and recs[0]["seq"] != start:
+            raise IOError(
+                f"seq {start} unavailable from :{self.port} cycle_trace "
+                f"(first returned is {recs[0]['seq']})")
+        return recs
+
     def close(self):
         try:
             self.sock.close()
@@ -352,6 +381,259 @@ def _validate_fields(rec, port):
 # --------------------------------------------------------------------------
 # `diff` subcommand — live two-port diff.
 # --------------------------------------------------------------------------
+@dataclass
+class CycleGroup:
+    executions: int = 0
+    mismatches: int = 0
+    contribution: int = 0
+    abs_contribution: int = 0
+    first_seq: int = 0
+    pairs: dict = field(default_factory=dict)
+
+
+@dataclass
+class CycleAudit:
+    transitions: int = 0
+    aligned: int = 0
+    skipped: int = 0
+    mismatches: int = 0
+    contribution: int = 0
+    first: tuple = None
+    groups: dict = field(default_factory=dict)
+    resyncs: int = 0
+    native_skips: int = 0
+    oracle_skips: int = 0
+    filtered_seams: int = 0
+
+
+def _cycle_audit_priced(audit, nrec, orec):
+    audit.transitions += 1
+    audit.aligned += 1
+    if not nrec.get("cost_valid", True) or not orec.get("cost_valid", True):
+        audit.filtered_seams += 1
+        return
+    ncost, ocost = int(nrec["cost"]), int(orec["cost"])
+    key = (int(nrec["pc"]), int(nrec.get("op", 0)))
+    group = audit.groups.setdefault(key, CycleGroup())
+    group.executions += 1
+    if ncost == ocost:
+        return
+    delta = ncost - ocost
+    audit.mismatches += 1
+    audit.contribution += delta
+    group.mismatches += 1
+    group.contribution += delta
+    group.abs_contribution += abs(delta)
+    if group.first_seq == 0:
+        group.first_seq = int(nrec["seq"])
+    pair = (ncost, ocost)
+    group.pairs[pair] = group.pairs.get(pair, 0) + 1
+    if audit.first is None:
+        audit.first = (int(nrec["seq"]), int(orec["seq"]), key[0], key[1], ncost, ocost)
+
+
+def _cycle_audit_add(audit, prev_n, prev_o, cur_n, cur_o):
+    """Consume one N->N+1 transition. Costs belong to the previous record."""
+    audit.transitions += 1
+    consecutive = (cur_n["seq"] == prev_n["seq"] + 1 and
+                   cur_o["seq"] == prev_o["seq"] + 1)
+    same_index = prev_n["seq"] == prev_o["seq"] and cur_n["seq"] == cur_o["seq"]
+    same_instruction = (prev_n["pc"] == prev_o["pc"] and
+                        prev_n.get("op") == prev_o.get("op"))
+    if not (consecutive and same_index and same_instruction):
+        audit.skipped += 1
+        return
+
+    pn = dict(prev_n)
+    po = dict(prev_o)
+    pn["cost"] = int(cur_n["tcyc"]) - int(prev_n["tcyc"])
+    po["cost"] = int(cur_o["tcyc"]) - int(prev_o["tcyc"])
+    _cycle_audit_priced(audit, pn, po)
+    audit.transitions -= 1  # already counted above
+
+
+def _print_cycle_audit(audit, start, stop, top):
+    print(f"cycle audit [{start}, {stop}): transitions={audit.transitions} "
+          f"aligned={audit.aligned} skipped={audit.skipped} resyncs={audit.resyncs} "
+          f"(native-extra={audit.native_skips}, oracle-extra={audit.oracle_skips}) "
+          f"exception-seam-filtered={audit.filtered_seams}")
+    print(f"mismatched costs={audit.mismatches}; cumulative native-oracle "
+          f"contribution={audit.contribution:+d} cycles")
+    if audit.first:
+        nseq, oseq, pc, op, nc, oc = audit.first
+        print(f"first mismatch: native-seq={nseq} oracle-seq={oseq} "
+              f"PC=${pc:06X} op=${op:04X} "
+              f"native={nc} oracle={oc} delta={nc-oc:+d}")
+    if not audit.mismatches:
+        return
+
+    rows = [(key, g) for key, g in audit.groups.items() if g.mismatches]
+    rows.sort(key=lambda item: (-abs(item[1].contribution),
+                                -item[1].abs_contribution,
+                                -item[1].mismatches, item[0]))
+    print(f"\ntop {min(top, len(rows))} PCs/opcodes by |net cycle contribution|:")
+    print("  PC      op    mism/executions  net      abs      first     cost pairs native/oracle x count")
+    for (pc, op), g in rows[:top]:
+        pairs = sorted(g.pairs.items(), key=lambda item: (-item[1], item[0]))
+        pair_text = ", ".join(f"{nc}/{oc}x{count}" for (nc, oc), count in pairs[:6])
+        if len(pairs) > 6:
+            pair_text += f", +{len(pairs)-6} more"
+        print(f"  ${pc:06X} ${op:04X} {g.mismatches:7d}/{g.executions:<9d} "
+              f"{g.contribution:+8d} {g.abs_contribution:8d} {g.first_seq:9d}  {pair_text}")
+
+
+def _priced_cycle_records(client, start, stop):
+    """Yield compact records with the entry PC/opcode's cost attached."""
+    cur, prev = start, None
+    while cur < stop:
+        page = client.cycle_page(cur, stop)
+        if not page:
+            break
+        for rec in page:
+            if prev is not None:
+                priced = dict(prev)
+                priced["cost"] = int(rec["tcyc"]) - int(prev["tcyc"])
+                priced["cost_valid"] = not (prev.get("cycle_seam", 0) or
+                                             rec.get("cycle_seam", 0))
+                yield priced
+            prev = rec
+        cur = page[-1]["seq"] + 1
+
+
+class _CycleBuffer:
+    def __init__(self, records):
+        self.records = iter(records)
+        self.buf = []
+        self.pos = 0
+
+    def peek(self, offset=0):
+        want = self.pos + offset
+        while len(self.buf) <= want:
+            try:
+                self.buf.append(next(self.records))
+            except StopIteration:
+                return None
+        return self.buf[want]
+
+    def pop(self, count=1):
+        self.pos += count
+        if self.pos >= 8192:
+            del self.buf[:self.pos]
+            self.pos = 0
+
+
+def _cycle_key(rec):
+    return (rec["pc"], rec.get("op")) if rec is not None else None
+
+
+def _cycle_confirm(nbuf, noff, obuf, ooff, count):
+    for k in range(count):
+        nr, orr = nbuf.peek(noff + k), obuf.peek(ooff + k)
+        if nr is None or orr is None or _cycle_key(nr) != _cycle_key(orr):
+            return False
+    return True
+
+
+def cmd_cycles(args):
+    try:
+        N, O = TraceClient(args.native_port), TraceClient(args.oracle_port)
+    except OSError as e:
+        print(f"cannot reach a server ({e}). Start both with --stop-seq/--hold first.", file=sys.stderr)
+        return 2
+    audit = CycleAudit()
+    try:
+        nt, ot = N.total(), O.total()
+        stop = min(nt, ot)
+        if args.stop is not None:
+            stop = min(stop, args.stop)
+        if stop <= args.start + 1:
+            raise IOError(f"cycle window [{args.start}, {stop}) has fewer than two records")
+        nb = _CycleBuffer(_priced_cycle_records(N, args.start, stop))
+        ob = _CycleBuffer(_priced_cycle_records(O, args.start, stop))
+        next_progress = args.start + args.progress if args.progress else 0
+        while nb.peek() is not None and ob.peek() is not None:
+            nr, orr = nb.peek(), ob.peek()
+            if _cycle_key(nr) == _cycle_key(orr):
+                _cycle_audit_priced(audit, nr, orr)
+                nb.pop(); ob.pop()
+                if next_progress and max(nr["seq"], orr["seq"]) >= next_progress:
+                    print(f"  aligned through native seq {nr['seq']}, oracle seq {orr['seq']} ...", flush=True)
+                    next_progress += args.progress
+                continue
+
+            hit = None
+            for d in range(1, args.window + 1):
+                if _cycle_confirm(nb, 0, ob, d, args.confirm):
+                    hit = ("oracle", d); break
+                if _cycle_confirm(nb, d, ob, 0, args.confirm):
+                    hit = ("native", d); break
+                if d <= 16 and _cycle_confirm(nb, d, ob, d, args.confirm):
+                    hit = ("both", d); break
+            if hit is None:
+                raise IOError(
+                    f"cannot re-align within {args.window} records at native seq {nr['seq']} "
+                    f"PC=${nr['pc']:06X} op=${nr.get('op', 0):04X} vs oracle seq {orr['seq']} "
+                    f"PC=${orr['pc']:06X} op=${orr.get('op', 0):04X}")
+            side, count = hit
+            audit.resyncs += 1
+            if side in ("native", "both"):
+                audit.native_skips += count
+                audit.skipped += count
+                nb.pop(count)
+            if side in ("oracle", "both"):
+                audit.oracle_skips += count
+                audit.skipped += count
+                ob.pop(count)
+    except (OSError, IOError) as e:
+        print(f"cycle audit failed: {e}", file=sys.stderr)
+        return 2
+    finally:
+        N.close()
+        O.close()
+    # stop is the exclusive RECORD bound; the final record only supplies the
+    # delta endpoint, so the priced instruction interval ends at stop-1.
+    _print_cycle_audit(audit, args.start, stop - 1, args.top)
+    return 0
+
+
+def _wait_for_blocks(port, target, timeout):
+    deadline = time.monotonic() + timeout
+    last = -1
+    while time.monotonic() < deadline:
+        try:
+            remain = max(0.01, min(2.0, deadline - time.monotonic()))
+            last = int(_rpc(port, {"cmd": "status"}, timeout=remain).get("blocks", -1))
+            if last >= target:
+                return last
+        except (OSError, ValueError):
+            pass
+        time.sleep(0.1)
+    raise RuntimeError(f":{port} did not park at {target} records within {timeout}s (last={last})")
+
+
+def cmd_cycle_run(args):
+    """Free-run both sides, park their always-on rings, audit, then clean up."""
+    nproc = oproc = None
+    try:
+        nproc = _run_hold(args.native_exe, args.rom, args.native_port,
+                          args.seq, launch_timeout=args.timeout)
+        oproc = _run_hold(args.oracle_exe, args.rom, args.oracle_port,
+                          args.seq, launch_timeout=args.timeout)
+        nb = _wait_for_blocks(args.native_port, args.seq, args.timeout)
+        ob = _wait_for_blocks(args.oracle_port, args.seq, args.timeout)
+        print(f"parked native={nb} oracle={ob}; auditing ...", flush=True)
+        audit_args = argparse.Namespace(
+            native_port=args.native_port, oracle_port=args.oracle_port,
+            start=args.start, stop=args.seq, top=args.top, progress=args.progress,
+            window=args.window, confirm=args.confirm)
+        return cmd_cycles(audit_args)
+    finally:
+        if oproc is not None:
+            _stop(oproc, args.oracle_port)
+        if nproc is not None:
+            _stop(nproc, args.native_port)
+
+
 def cmd_diff(args):
     try:
         N, O = TraceClient(args.native_port), TraceClient(args.oracle_port)
@@ -394,44 +676,123 @@ def cmd_diff(args):
 # --------------------------------------------------------------------------
 # Gate launch/collect helpers (§7).
 # --------------------------------------------------------------------------
+def _reap_launched(proc, output_thread=None):
+    """Best-effort hard cleanup for every failed/interrupted launch path."""
+    if proc is None:
+        return
+    try:
+        if proc.poll() is None:
+            proc.kill()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            pass
+    finally:
+        if output_thread is not None and output_thread.is_alive():
+            output_thread.join(timeout=1)
+        if proc.stdout is not None and (output_thread is None or not output_thread.is_alive()):
+            try:
+                proc.stdout.close()
+            except OSError:
+                pass
+
+
 def _run_hold(exe, rom, port, stop_seq, extra_args=None, launch_timeout=60.0):
-    args = [exe, rom, "--port", str(port), "--stop-seq", str(stop_seq), "--hold"]
+    session = secrets.token_hex(16)
+    args = [exe, rom, "--port", str(port), "--stop-seq", str(stop_seq), "--hold",
+            "--cosim-session", session]
     if extra_args:
         args += extra_args
+    proc = output_thread = None
     try:
-        proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        # The co-sim's evidence channel is the always-on TCP ring, not child
+        # stdio.  Drain a merged pipe continuously into a bounded in-memory
+        # tail: long oracle captures cannot block on backpressure, routine
+        # console chatter stays quiet, and launch failures retain diagnostics
+        # without creating a log file.
+        proc = subprocess.Popen(args, stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT, bufsize=0)
+        output_tail = collections.deque(maxlen=16)  # 16 fixed 4-KiB chunks
+        output_lock = threading.Lock()
+
+        def drain_output():
+            try:
+                while True:
+                    chunk = proc.stdout.read(4096)
+                    if not chunk:
+                        break
+                    with output_lock:
+                        output_tail.append(chunk)
+            finally:
+                proc.stdout.close()
+
+        output_thread = threading.Thread(target=drain_output,
+                                         name=f"cosim-output-{port}",
+                                         daemon=True)
+        output_thread.start()
+        proc._cosim_output_tail = output_tail
+        proc._cosim_output_lock = output_lock
+        proc._cosim_output_thread = output_thread
     except OSError as e:
-        raise RuntimeError(f"failed to launch {exe}: {e}")
-    if not wait_for_port(port, launch_timeout):
-        proc.kill()
-        try:
-            out, _ = proc.communicate(timeout=5)
-        except subprocess.TimeoutExpired:
-            out = ""
-        raise RuntimeError(f"{exe} did not open :{port} within {launch_timeout}s\n{out or ''}")
+        _reap_launched(proc, output_thread)
+        raise RuntimeError(f"failed to launch {exe}: {e}") from e
+    except BaseException:
+        _reap_launched(proc, output_thread)
+        raise
+
+    try:
+        ready = wait_for_port(port, launch_timeout, expected_session=session)
+    except BaseException as e:
+        if not isinstance(e, Exception):
+            _reap_launched(proc, output_thread)
+            raise
+        ready = False
+        readiness_error = e
+    else:
+        readiness_error = None
+    if not ready:
+        launch_rc = proc.poll()
+        _reap_launched(proc, output_thread)
+        state = f"exit={launch_rc}" if launch_rc is not None else "process still running"
+        with output_lock:
+            diagnostic = b"".join(output_tail).decode(errors="replace").rstrip()
+        if diagnostic:
+            diagnostic = f"\nlast child output:\n{diagnostic}"
+        if readiness_error is not None:
+            diagnostic += f"\nreadiness error: {readiness_error}"
+        raise RuntimeError(
+            f"{exe} did not establish session {session} on :{port} within {launch_timeout}s "
+            f"({state}){diagnostic}")
+    proc._cosim_session = session
     return proc
 
 
 def _stop(proc, port):
     try:
-        _rpc(port, {"cmd": "quit"}, timeout=2)
-    except OSError:
-        pass
-    try:
-        proc.wait(timeout=5)
-    except subprocess.TimeoutExpired:
-        proc.terminate()
+        try:
+            _rpc(port, {"cmd": "quit"}, timeout=2)
+        except (OSError, ValueError, TypeError):
+            pass
         try:
             proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait(timeout=5)
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait(timeout=5)
+    finally:
+        output_thread = getattr(proc, "_cosim_output_thread", None)
+        if output_thread is not None:
+            output_thread.join(timeout=1)
 
 
-def _collect(exe, rom, port, stop_seq, extra_args=None, start=1):
+def _collect(exe, rom, port, stop_seq, extra_args=None, start=1, timeout=180.0):
     """Launch exe --stop-seq stop_seq --hold, pull [start, stop_seq], quit it."""
-    proc = _run_hold(exe, rom, port, stop_seq, extra_args)
+    proc = _run_hold(exe, rom, port, stop_seq, extra_args, launch_timeout=timeout)
     try:
+        _wait_for_blocks(port, stop_seq, timeout)
         tc = TraceClient(port)
         try:
             recs = tc.load(start, stop_seq + 1)
@@ -540,7 +901,7 @@ def cmd_gate3(args):
 # --------------------------------------------------------------------------
 # gate4 — hash-vs-byte audit
 # --------------------------------------------------------------------------
-def _gate4_verify(full):
+def _gate4_verify(full, min_seq=None):
     """§5 gate4 predicate, pure/socket-free: given a parsed `cosim_full_ram_hash`
     response, assert ram0_h == ram0_h_inc and ram1_h == ram1_h_inc FROM THE SAME
     RESPONSE (one TCP round-trip, one instant). This is the off-by-one-immune
@@ -551,6 +912,14 @@ def _gate4_verify(full):
     logic without a live process. Returns (ok, reason)."""
     if not full or not full.get("ok"):
         return False, f"no/invalid response: {full!r}"
+    if min_seq is not None:
+        try:
+            response_seq = int(full.get("seq", -1))
+        except (TypeError, ValueError):
+            response_seq = -1
+        if response_seq < min_seq:
+            return False, (f"response is from seq {response_seq}, before requested checkpoint "
+                           f"{min_seq} — the process was queried while still running")
     missing = [f for f in ("ram0_h", "ram1_h", "ram0_h_inc", "ram1_h_inc") if f not in full]
     if missing:
         return False, (f"response missing {missing} — rebuild against COSIM-SPEC.md §5 "
@@ -569,8 +938,9 @@ def cmd_gate4(args):
     all_ok = True
     for k, cp in enumerate(checkpoints):
         port = args.base_port + k
-        proc = _run_hold(args.exe, args.rom, port, cp)
+        proc = _run_hold(args.exe, args.rom, port, cp, launch_timeout=args.timeout)
         try:
+            _wait_for_blocks(port, cp, args.timeout)
             tc = TraceClient(port)
             try:
                 full = tc.full_ram_hash()
@@ -579,7 +949,7 @@ def cmd_gate4(args):
         finally:
             _stop(proc, port)
 
-        ok, reason = _gate4_verify(full)
+        ok, reason = _gate4_verify(full, min_seq=cp)
         f = full or {}
         print(f"[gate4]   seq {f.get('seq', cp)}: full ram0_h={f.get('ram0_h')} ram1_h={f.get('ram1_h')} "
               f"vs incremental (same response) ram0_h_inc={f.get('ram0_h_inc')} "
@@ -636,7 +1006,8 @@ def cmd_gates(args):
     if rc == 0:
         for label, exe, base in (("native", args.native_exe, 25440), ("oracle", args.oracle_exe, 25450)):
             rc = run(f"gate4 ({label})", cmd_gate4,
-                      argparse.Namespace(exe=exe, rom=args.rom, seq=seq, intervals=4, base_port=base))
+                      argparse.Namespace(exe=exe, rom=args.rom, seq=seq, intervals=4,
+                                         base_port=base, timeout=60.0))
             if rc != 0:
                 break
 
@@ -794,6 +1165,16 @@ def _t_gate4_same_response_check():
     assert not ok4
     ok5, _ = _gate4_verify({"ok": False})
     assert not ok5
+    # A live native server may accept queries before --stop-seq has parked it.
+    # Same-instant hashes from that early state are valid values but not valid
+    # evidence for the requested checkpoint.
+    early = {"ok": True, "seq": 4,
+             "ram0_h": "1", "ram1_h": "2",
+             "ram0_h_inc": "1", "ram1_h_inc": "2"}
+    ok6, reason6 = _gate4_verify(early, min_seq=5)
+    assert not ok6 and "before requested checkpoint" in reason6
+    ok7, reason7 = _gate4_verify(dict(early, seq=5), min_seq=5)
+    assert ok7, reason7
 
 
 def _t_real_divergence_not_masked_by_search():
@@ -810,6 +1191,26 @@ def _t_real_divergence_not_masked_by_search():
     assert out.divergence_seq_native == native[15]["seq"]
 
 
+def _t_cycle_cost_attribution_and_grouping():
+    native = [
+        {"seq": 1, "pc": 0x1000, "op": 0x4E71, "tcyc": 10},
+        {"seq": 2, "pc": 0x1002, "op": 0x7000, "tcyc": 17},
+        {"seq": 3, "pc": 0x1004, "op": 0x4E75, "tcyc": 25},
+    ]
+    oracle = [
+        {"seq": 1, "pc": 0x1000, "op": 0x4E71, "tcyc": 100},
+        {"seq": 2, "pc": 0x1002, "op": 0x7000, "tcyc": 107},
+        {"seq": 3, "pc": 0x1004, "op": 0x4E75, "tcyc": 114},
+    ]
+    audit = CycleAudit()
+    for i in range(1, len(native)):
+        _cycle_audit_add(audit, native[i - 1], oracle[i - 1], native[i], oracle[i])
+    assert audit.transitions == 2 and audit.aligned == 2 and audit.skipped == 0
+    assert audit.mismatches == 1 and audit.contribution == 1
+    assert audit.first == (2, 2, 0x1002, 0x7000, 8, 7)
+    assert audit.groups[(0x1002, 0x7000)].pairs[(8, 7)] == 1
+
+
 def _self_test():
     tests = [
         ("identical streams => no divergence", _t_identical),
@@ -821,6 +1222,7 @@ def _self_test():
         ("ram*_h hex-string vs int representations compare equal", _t_hash_representation_tolerant),
         ("gate4 same-response full-vs-incremental check (§5)", _t_gate4_same_response_check),
         ("a real, non-bridgeable split is never masked by the offset search", _t_real_divergence_not_masked_by_search),
+        ("cycle deltas attribute to record N and aggregate by PC/opcode", _t_cycle_cost_attribution_and_grouping),
     ]
     n_fail = 0
     for name, fn in tests:
@@ -845,6 +1247,39 @@ def main():
     ap.add_argument("--self-test", action="store_true",
                      help="run synthetic self-tests (no sockets/subprocesses) and exit")
     sub = ap.add_subparsers(dest="command")
+
+    p_cyc = sub.add_parser("cycles", help="aggregate aligned per-instruction cycle-cost mismatches")
+    p_cyc.add_argument("native_port", type=int)
+    p_cyc.add_argument("oracle_port", type=int)
+    p_cyc.add_argument("--start", type=int, default=1,
+                       help="first seq to audit (default 1 skips reset seam)")
+    p_cyc.add_argument("--stop", type=int, default=None,
+                       help="exclusive record stop; priced interval ends one seq earlier")
+    p_cyc.add_argument("--top", type=int, default=30,
+                       help="number of PC/opcode groups to report")
+    p_cyc.add_argument("--progress", type=int, default=100000,
+                       help="progress interval in seqs; 0 disables")
+    p_cyc.add_argument("--window", type=int, default=4096,
+                       help="lookahead records for PC/opcode re-alignment")
+    p_cyc.add_argument("--confirm", type=int, default=2,
+                       help="matching instructions required at a re-sync target")
+    p_cyc.set_defaults(func=cmd_cycles)
+
+    p_cr = sub.add_parser("cycle-run", help="free-run, park, and audit both sides")
+    p_cr.add_argument("native_exe")
+    p_cr.add_argument("oracle_exe")
+    p_cr.add_argument("rom")
+    p_cr.add_argument("seq", nargs="?", type=int, default=530001,
+                      help="records to capture; one beyond the final priced instruction")
+    p_cr.add_argument("--start", type=int, default=1)
+    p_cr.add_argument("--top", type=int, default=30)
+    p_cr.add_argument("--progress", type=int, default=100000)
+    p_cr.add_argument("--window", type=int, default=4096)
+    p_cr.add_argument("--confirm", type=int, default=2)
+    p_cr.add_argument("--native-port", type=int, default=25500)
+    p_cr.add_argument("--oracle-port", type=int, default=25501)
+    p_cr.add_argument("--timeout", type=float, default=180.0)
+    p_cr.set_defaults(func=cmd_cycle_run)
 
     p_diff = sub.add_parser("diff", help="align+diff two already-running, held sides")
     p_diff.add_argument("native_port", type=int)
@@ -891,6 +1326,7 @@ def main():
     p_g4.add_argument("seq", nargs="?", type=int, default=20000)
     p_g4.add_argument("--intervals", type=int, default=4)
     p_g4.add_argument("--base-port", type=int, default=25410)
+    p_g4.add_argument("--timeout", type=float, default=60.0)
     p_g4.set_defaults(func=cmd_gate4)
 
     p_gs = sub.add_parser("gates", help="run gate1..gate4 in order, stop on first FAIL")

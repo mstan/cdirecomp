@@ -121,6 +121,19 @@ typedef struct {
      * Manual jump_table directives are always honored regardless of
      * this flag. Default: false. */
     bool           jump_table_autodiscovery;
+    /* Treat branch-proven callable entries inside a larger reachable CFG as
+     * aliases of one canonical emitted body instead of hard split points. */
+    bool           function_aliases;
+    /* Emit a native dispatch route for every instruction boundary in each
+     * canonical body. Platforms that abandon host frames on asynchronous
+     * exceptions need this to resume at the stacked PC without interpreting
+     * an otherwise recompiled ROM suffix. Default: false. */
+    bool           async_resume_entries;
+    /* TRAP #0 is followed by one inline 16-bit OS service selector. The
+     * exception handler advances the stacked PC over that word before RTE,
+     * so static CFG walks must resume at trap_pc + 4 without decoding the
+     * selector as an instruction. Platform opt-in; default: false. */
+    bool           trap0_inline_service_word;
     GameRamLayoutCfg ram_layout;
 } GameConfig;
 

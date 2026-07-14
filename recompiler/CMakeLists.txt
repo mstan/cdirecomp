@@ -82,3 +82,38 @@ set_target_properties(CdiRecompBios PROPERTIES
 if(MSVC)
     target_compile_options(CdiRecompBios PRIVATE /W3 /WX-)
 endif()
+
+# Generic flat-ROM frontend driver used only by synthetic code-discovery and
+# code-generation regression fixtures. It deliberately reuses the preserved
+# Genesis-origin CLI because those fixtures test the shared 68000 frontend,
+# not CD-i disc loading. Excluded from normal builds and runtime artifacts.
+add_executable(CdiRecompFrontendFixture EXCLUDE_FROM_ALL
+    src/main_genesis.c
+    src/rom_parser.c
+    src/m68k_decoder.c
+    src/m68k_validator.c
+    src/function_finder.c
+    src/code_generator.c
+    src/codegen_diag.c
+    src/annotations.c
+    src/game_config.c
+    src/cycle_probe.c
+    src/toml.c
+    "${C68K_DIR}/interpreter/clown68000.c"
+    "${C68K_DIR}/common/opcode.c"
+)
+target_compile_definitions(CdiRecompFrontendFixture PRIVATE
+    CLOWN68000_COVERAGE_LOG_DISABLE
+)
+target_include_directories(CdiRecompFrontendFixture PRIVATE
+    src
+    "${C68K_DIR}/interpreter"
+    "${C68K_DIR}/common"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../external/clowncommon"
+)
+set_target_properties(CdiRecompFrontendFixture PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+if(MSVC)
+    target_compile_options(CdiRecompFrontendFixture PRIVATE /W3 /WX-)
+endif()

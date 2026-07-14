@@ -846,8 +846,11 @@ bool m68k_decode(const GenesisRom *rom, uint32_t addr, M68KInstr *out) {
 
         if (dir) {
             /* bit 8 = 1, ss < 3 */
-            if (ea_mode == EA_An_POST) {
+            if (ea_mode == EA_An) {
                 /* CMPM (Ay)+,(Ax)+
+                 * CMPM uses the otherwise-illegal An-direct mode bits 001 as
+                 * its special encoding; the post-increment behavior is
+                 * implicit in the instruction, not encoded as EA mode 011.
                  *   src_ea = Ay  (postinc, ea_reg)
                  *   reg    = Ax  ((w0 >> 9) & 7) */
                 out->mnemonic = MN_CMPM;

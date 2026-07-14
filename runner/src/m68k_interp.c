@@ -179,7 +179,8 @@ static void mem_write(M68KSize sz, uint32_t a, uint32_t v) {
 }
 
 static uint32_t read_ea_ex(const M68KInstr *ins, int ea, M68KSize sz, ExtR *er, int rmw) {
-    int mode = (ea >> 3) & 7, reg = ea & 7, sb = szbytes(sz);
+    int mode = (ea >> 3) & 7, reg = ea & 7;
+    int sb = (reg == 7 && sz == M68K_SIZE_B) ? 2 : szbytes(sz);
     switch (mode) {
     case 0: return g_cpu.D[reg];
     case 1: return g_cpu.A[reg];
@@ -239,7 +240,8 @@ static uint32_t addr_ea(const M68KInstr *ins, int ea, ExtR *er) {
 }
 
 static void write_ea_ex(const M68KInstr *ins, int ea, M68KSize sz, ExtR *er, uint32_t val, int rmw) {
-    int mode = (ea >> 3) & 7, reg = ea & 7, sb = szbytes(sz);
+    int mode = (ea >> 3) & 7, reg = ea & 7;
+    int sb = (reg == 7 && sz == M68K_SIZE_B) ? 2 : szbytes(sz);
     (void)ins;
     switch (mode) {
     case 0: store_dn(reg, val, sz); break;
@@ -346,9 +348,8 @@ static uint16_t pop16(void)     { uint16_t v = m68k_read16(g_cpu.A[7]); g_cpu.A[
 /* =========================================================================
  * Shift/rotate engine — direct port of code_generator.c's MN_LSL..MN_ROXR
  * (register Dn target). Computes the result + C/V, then applies the SR tail
- * (emit_shift_sr_update / the rotate tails). Returns 0 on success, -1 if it
- * declines (ROXL/ROXR .L: the generated C's `X << 32` is undefined — halt
- * loudly rather than guess). reg_count: count from D[creg]; else imm_count.
+ * (emit_shift_sr_update / the rotate tails). Returns 0 on success, -1 for an
+ * unknown mnemonic. reg_count: count from D[creg]; else imm_count.
  * ========================================================================= */
 static int do_shift(M68KMnemonic mn, int dreg, M68KSize sz,
                     int reg_count, int creg, int imm_count) {
@@ -777,8 +778,10 @@ static M68kiStatus exec_one(const M68KInstr *ins, uint32_t *next_pc) {
     case MN_CMPM: {
         /* CMPM (Ay)+,(Ax)+ : Ax is dest (ins->reg), Ay is src (src_ea&7). */
         int ay = ins->src_ea & 7, ax = ins->reg, sb = szbytes(sz); uint32_t m = szmask(sz);
-        uint32_t b = mem_read(sz, g_cpu.A[ay]) & m; g_cpu.A[ay] += sb;
-        uint32_t a = mem_read(sz, g_cpu.A[ax]) & m; g_cpu.A[ax] += sb;
+        int ay_inc = (ay == 7 && sz == M68K_SIZE_B) ? 2 : sb;
+        int ax_inc = (ax == 7 && sz == M68K_SIZE_B) ? 2 : sb;
+        uint32_t b = mem_read(sz, g_cpu.A[ay]) & m; g_cpu.A[ay] += ay_inc;
+        uint32_t a = mem_read(sz, g_cpu.A[ax]) & m; g_cpu.A[ax] += ax_inc;
         flags_cmp(a, b, a - b, sz);
         return M68KI_OK;
     }
@@ -904,6 +907,17 @@ static M68kiStatus exec_one(const M68KInstr *ins, uint32_t *next_pc) {
         *next_pc = pop32();
         return M68KI_OK;
     }
+    case MN_STOP:
+        /* A STOP reached through RAM/exception fallback has the same contract
+         * as generated STOP: the architectural PC advances past the immediate
+         * word before the core parks, so a waking interrupt stacks/resumes at
+         * the instruction after STOP. */
+        *next_pc = fall;
+        genesis_stop_until_interrupt((uint16_t)ins->imm32);
+        return M68KI_OK;
+    case MN_RESET:
+        genesis_reset_devices();
+        return M68KI_OK;
     case MN_RTE: {                       /* pop SR, PC, format word (CeDImu RTE) */
         uint16_t new_sr = pop16() & 0xA71Fu;  /* frame lives on the supervisor stack; */
         *next_pc = pop32();                    /* pop the WHOLE frame off A7 first ... */
@@ -997,9 +1011,20 @@ static M68kiStatus exec_one(const M68KInstr *ins, uint32_t *next_pc) {
         uint32_t a = read_ea_ex(ins, ins->src_ea, sz, &er, 1) & m;
         uint32_t r;
         if (ins->mnemonic == MN_NOT) { r = (~a) & m; flags_logic(r, sz); }
-        else {
-            uint32_t x = (ins->mnemonic == MN_NEGX) ? ((g_cpu.SR >> 4) & 1u) : 0u;
-            r = (0u - a - x) & m;
+        else if (ins->mnemonic == MN_NEGX) {
+            int bits = szbits(sz);
+            uint32_t sign = (uint32_t)(1u << (bits - 1));
+            uint32_t x = (g_cpu.SR >> 4) & 1u;
+            int zold = (g_cpu.SR >> 2) & 1;
+            uint64_t subtrahend = (uint64_t)a + x;
+            r = (uint32_t)(0u - subtrahend) & m;
+            g_cpu.SR &= ~0x1Fu;
+            if (!r && zold) g_cpu.SR |= SR_Z;
+            if (r & sign) g_cpu.SR |= SR_N;
+            if (subtrahend != 0) g_cpu.SR |= SR_C | SR_X;
+            if (a == sign && !x) g_cpu.SR |= SR_V;
+        } else {
+            r = (0u - a) & m;
             flags_sub(0u, a, r, sz);
         }
         er = save;
@@ -1345,7 +1370,10 @@ M68kiStatus m68k_interp_step(void) {
         s_bus_armed = prev_armed;
         g_cpu.PC = s_fault_pc;
         m68k_raise_exception_frame(2);
-        mcd212_tick(158);   /* CeDImu ProcessException: BusError = 158 clock periods */
+        /* CeDImu batches exception processing with the handler's first
+         * instruction on its next Run(false). Defer instead of advancing
+         * devices at the fault boundary. */
+        runtime_defer_exception_cycles(158);
         return M68KI_OK;
     }
     s_bus_armed = 1;
@@ -1361,10 +1389,20 @@ M68kiStatus m68k_interp_step(void) {
         return M68KI_HALT_UNIMPL;
     }
     g_cpu.PC = next & 0xFFFFFFu;
-    /* Advance MCD212 display timing with this instruction's real SCC68070 cycle
-     * cost, so DA toggles in phase with the oracle while the boot polls it from
-     * interpreted code. The recompiled tier drains its own real cycles. */
-    mcd212_tick(cyc);
+    /* CeDImu's TRAP instruction consumes 0 cycles; the 52-cycle exception is
+     * processed together with the first handler instruction on the next
+     * Run(false). m68k_cycles() returns that exception cost, so retain it as a
+     * deferred batch here. Any older batch belongs to the current Run and is
+     * drained first (relevant if an exception handler itself begins with TRAP).
+     * Normal interpreted instructions consume any exception batch deferred by
+     * either tier, then advance devices once with the combined quantum. */
+    if (ins.mnemonic == MN_TRAP) {
+        runtime_defer_exception_cycles((uint32_t)cyc);
+    } else {
+        uint32_t batch = g_cycle_accumulator + (uint32_t)cyc;
+        g_cycle_accumulator = 0;
+        mcd212_tick(batch);
+    }
     return M68KI_OK;
 }
 
@@ -1377,6 +1415,7 @@ M68kiStatus m68k_interp_run(uint32_t entry_pc, uint32_t stop_pc) {
     while (g_cpu.PC != (stop_pc & 0xFFFFFFu)) {
         M68kiStatus st = m68k_interp_step();
         if (st != M68KI_OK) return st;
+        if (g_halted) return M68KI_OK;
         if (++g_m68ki_insn_count > M68KI_INSN_GUARD) {
             g_m68ki_bad_pc = g_cpu.PC; return M68KI_HALT_GUARD;
         }
@@ -1404,6 +1443,7 @@ M68kiStatus m68k_interp_run_until_known(uint32_t entry_pc, uint32_t stop_pc) {
             return (M68kiStatus)M68KI_REENTER;
         M68kiStatus st = m68k_interp_step();
         if (st != M68KI_OK) return st;
+        if (g_halted) return M68KI_OK;
         if (++g_m68ki_insn_count > M68KI_INSN_GUARD) {
             g_m68ki_bad_pc = g_cpu.PC; return M68KI_HALT_GUARD;
         }

@@ -1,221 +1,189 @@
-# Session Handoff — cdirecomp (Philips CD-i SCC68070 → C static recompiler)
+# Session Handoff — cdirecomp
 
-**Date:** 2026-06-21
-**Phase:** Phase C — boot the recompiled CD-RTOS to the player shell (PLAN.md). Phases A (observability) and B (CeDImu oracle parity) are done.
+**Date:** 2026-07-13
+**Goal:** a fully navigable, real-time, LLE-focused BIOS/player shell. Hotel
+Mario is only a real-media fixture; game launch and gameplay are out of scope
+until the BIOS goal is complete.
 
-> Read this handoff + the `cdi-boot-status` + `architecture-dispatcher-direction` auto-memories + `CLAUDE.md`/`PRINCIPLES.md`/`DEBUG.md`. This handoff is authoritative for the most recent work.
+## Non-negotiable architecture
 
----
-
-## Branch `rom-coverage` (current work, committed locally — NOT yet on `master`/origin)
-
-Three commits ahead of `67e737a` (the last pushed `master`):
-- `ff8555e` — **always-on interpreter-fallback classifier** (`interp_report` TCP cmd + `tools/interp_report.py`; tags every interpreted instr by reason+region). Showed the interpreter ran **40% of boot, 99% uncovered ROM** — a recompiler-coverage smell the old `miss_count=0` monitor was blind to.
-- `74af685` — **trace-guided ROM discovery + codegen boundary fixes** (this is the big one, below).
-- (HANDOFF/classifier docs.)
-
-**Trace-guided discovery result (validated):** the runtime records the indirect-call targets the interpreter hits (`indirect_targets`); `tools/collect_seeds.py` unions the in-ROM ones into `bios/cdrtos_discovered.txt`; `CdiRecompBios --seeds` re-seeds them; iterate to dryness (converged: 36 seeds → 353 functions). **dispatch_miss 157,809 → ~2; interpreted instrs at seq 400000 161,209 → 92,173 (−43%).** Validated **faithful across the FULL `[1,400000)` window from an aligned seq-1 start: 825 benign re-syncs, no true divergence.** Residual interp is `top_resume` (the flat-call RTS-to-interior tax — only the dispatcher migration retires it).
-
-**Codegen fixes (root-caused with the ChatGPT consult):** (1) **reject odd addresses at the boundary-split promotion** — an odd addr is never a legal instruction start; promoting one split its even neighbour into a 1-instruction stub that silently returned (the `func_4006A2` bug that diverged at seq 43163). This was the real fix. (2) **fall-off audit (fail-loud)** — flags any emitted function ending on a non-terminator with no fall-through linkage; surfaced **13 PRE-EXISTING latent cases** in unexercised driver/FM modules (`$417xxx–$435xxx`), not on the boot path. Trace rings bumped `1<<18 → 1<<19` so low-interp builds diff from seq 1 across `[1,400000)`.
-
-`bios/generated/*.c` (353 funcs) is regenerated from the committed seed file (gitignored). **To resume:** rebuild recompiler, `CdiRecompBios … --emit` (auto-loads `cdrtos_discovered.txt`), rebuild runner.
-
-> Earlier pushed state (`master` == `origin/master` == `67e737a`): the `$600000` wall beaten; boot oracle-validated through seq 400000 (`[1,250000)` 773 + `[138000,400000)` 552 re-syncs). Repo is private at `github.com/mstan/cdirecomp` (ROMs/`build/`/generated C/CeDImu gitignored).
-
----
-
-## Headline (pushed milestone — `master`)
-
-The `$600000` memory-sizing-probe wall (the read **from the recompiled tier** at seq **276326** that the old bus path couldn't turn into a faithful vector-2 bus error) is **beaten**. The boot now runs **oracle-validated through seq 400000** with **no true divergence** (realign over both `[1,250000)` and `[138000,400000)`: 773 + 552 benign re-syncs). The run no longer hits a wall — it stops because `--stop-seq` told it to.
-
-All three fixes this session were **runner-side only** — no `code_generator.c` change, so **no BIOS regen** was needed.
-
-The repo is now a **private GitHub repository: `github.com/mstan/cdirecomp`** (SSH, master). ROMs / `build/` / generated C / the GPL `external/CeDImu` clone are gitignored and confirmed absent from the remote; vendored `external/clown68000` source is included.
-
----
-
-## What was done this session
-
-Two commits, both pushed:
-- `5672269` — **boot: trampoline + codegen + tooling** (the prior session's validated milestone, advance to seq 276326 / MC-CDI-012).
-- `67e737a` — **runtime: faithful recompiled-tier `$600000` bus error** (this session's work, boot faithful to seq 400000 / MC-CDI-004).
-
-### 1. Recompiled-tier bus error (the 276326 wall) — MC-CDI-004 extended
-The interpreter already raised a faithful vector-2 bus error by arming `setjmp(s_bus_env)` around `exec_one`. The **recompiled tier reaches memory through plain C we cannot unwind mid-instruction**, so it needed a landing pad one level up:
-- `runner/src/main.c` (top-level trampoline) arms a landing pad: `g_recomp_bus_armed = 1; if (setjmp(g_recomp_bus_env) != 0) { re-arm; g_redirect_addr = g_cpu.PC; g_redirect_pending = 1; }`.
-- `runner/src/cdi_bus.c` (`bus_fault`): after the interpreter path returns 0 (not armed), calls `recomp_bus_error(addr)` before the fail-loud path.
-- `runner/src/runtime.c` `recomp_bus_error(addr)`: if armed, decode the faulting instruction via `m68k_interp_decode_at()` (reuses `busview`, **preserves `g_last_access_addr`** so the TPF survives), set `g_fault_opcode` + `g_cpu.PC = post-fetch PC`, restore the TPF, `build_exception_frame(2)`, `mcd212_tick(158)`, `longjmp(g_recomp_bus_env, 1)`.
-- The landing pad re-dispatches `g_cpu.PC` = the OS-9 bus-error handler (`$000500`). The handler is **RAM-resident** (the recompiler never saw it) so it runs entirely in the hybrid interpreter — handler + RTE + resume to `$404B86` — in one shot, no `g_rte_pending` plumbing needed there.
-
-### 2. Two flat-call/hybrid interop bugs (exposed by getting past the bus error)
-- **Depth-0 `g_rte_pending` hygiene** (`main.c`): the trampoline now clears `g_rte_pending` before **every** depth-0 dispatch. A skip-RTS that bubbles to the top leaves `g_cpu.PC` = the RTS's own stale address (the real target is `[A7]`); a fresh entry inheriting a propagating skip would make its first JSR site wrongly bail. (Fixes the native-293763 `$404714` duplicate → `$500` divergence.)
-- **`recomp_top_resume()` for the `pea/pea/rts` idiom** (`runner/src/runtime.c` + decl in `cdi_runtime.h`): the trampoline's `[A7]`-follow pre-pops assuming flat-call (recompiled RTS is a pure C `return`). A **non-entry** target routes to the hybrid interpreter, whose RTS self-pops the next return; the old ret-stop then stopped there and the loop double-followed `[A7]` (`$40839C` popped +8 → `$480000` vs oracle +4 → `$406A9C`). At depth 0 there is no C caller to return to, so a non-entry target is now interpreted with **no ret-stop** (`m68k_interp_run_until_known(target, 0)`) — flowing through its own returns until it re-enters a recompiled entry. Entry targets still flat-call via `recomp_call_addr`.
-
-### 3. Supporting infra added this session
-- `runner/include/m68k_interp.h` + `runner/src/m68k_interp.c`: `m68k_interp_decode_at(pc, out)` — decode at `pc`, side-effect-free w.r.t. `g_last_access_addr`; returns `byte_length` or 0.
-- `runner/include/cdi_runtime.h`: `#include <setjmp.h>`; `extern jmp_buf g_recomp_bus_env; extern int g_recomp_bus_armed; int recomp_bus_error(uint32_t);`; `void recomp_top_resume(uint32_t);`.
-- `.gitignore`: added `__pycache__/` + `*.pyc`.
-
-### Files modified this session
-```
-runner/include/cdi_runtime.h    (setjmp.h, g_recomp_bus_env/armed, recomp_bus_error, recomp_top_resume)
-runner/include/m68k_interp.h     (m68k_interp_decode_at decl)
-runner/src/m68k_interp.c         (m68k_interp_decode_at)
-runner/src/runtime.c             (recomp_bus_error, recomp_top_resume, g_recomp_bus_env/armed defs)
-runner/src/cdi_bus.c             (bus_fault -> recomp_bus_error fallback)
-runner/src/main.c                (recomp-tier setjmp landing pad; depth-0 g_rte_pending clear; recomp_top_resume)
-.gitignore                       (__pycache__, *.pyc)
-```
-**No `code_generator.c` change → BIOS was NOT regenerated this session.** (348 recompiled functions, unchanged.)
-
----
-
-## Architecture review + interpreter-fallback classifier (this session, UNCOMMITTED)
-
-Conferred with the ChatGPT "recomp" thread (architecture review; see the
-`architecture-dispatcher-direction` and `chatgpt-architecture-consult` memories).
-**Verdict:** flat-call is the wrong *semantic* base for OS-9 — the guest stack is
-a scheduler data structure, not advisory metadata. Target model: a guest-PC/
-guest-stack-driven central dispatcher (RTS pops `[A7]`; blocks return an
-`ExitResult`); flat-call C calls become an *optimization*; interpreter is the
-universal fallback; exceptions/IRQs are dispatcher exits (longjmp only as a local
-escape hatch). 5-stage migration; the trampoline + `g_redirect_pending`
-uncleared-propagation is "a central dispatcher reinvented through the side door."
-
-**User chose the data-driven first step: classify the interpreter fallback before
-deciding sequencing.** Built an always-on classifier (runner + tool only; no
-`code_generator.c`, no BIOS regen):
-- `runner/include/debug_server.h`: `FB_*` reason enum, `extern int g_fallback_reason`, `debug_trace_interp()` decl.
-- `runner/src/debug_server.c`: per-PC open-addressing aggregate (`s_fb_hash`, 64K slots) tagged by reason + region (`fb_region_of`); `interp_report` TCP command (`count`/`reason`/`reset` params); `status` now also reports `interp` (total interpreted insns).
-- `runner/src/m68k_interp.c`: `debug_trace_interp(pc)` hook in `m68k_interp_step` (next to the trace-ring sample) + `#include "debug_server.h"`.
-- `runner/src/runtime.c`: sets `g_fallback_reason` at the three entry points — `hybrid_enter`=`FB_DISPATCH_MISS`, `recomp_top_resume`=`FB_TOP_RESUME` (or a one-shot pending), `recomp_bus_error` sets a one-shot `FB_BUS_HANDLER` consumed by the next `recomp_top_resume`.
-- `tools/interp_report.py`: formats the report (hex PCs, %s, reason/region names).
-
-**Measured result (boot → seq 400000):** interpreter runs **40.3 %** of executed
-instructions (161,209 interp vs 238,754 native), and that fallback is **97.9 %
-`dispatch_miss`, 99 % in ROM** — tight clusters of statically-present ROM
-functions (~`$400B00–$401300`, `$400E00–$400F00`) the recompiler never discovered,
-reached by indirect dispatch (`call_by_address`) that static discovery didn't
-follow. By ChatGPT's own rule of thumb this is a **recompiler-coverage smell, not
-expected OS behavior**. Crucially the existing dispatch-miss monitor (RULE 0a)
-reported **`miss_count=0`** throughout, because `hybrid_enter` resolves these
-misses *successfully* without logging — the coverage loss was invisible until this
-tool. `bus_handler` (0.4 %, the `$500` OS-9 handler) and `top_resume` (1.7 %,
-`pea/pea/rts`) are small and expected.
-
-**Implication:** biggest near-term lever = improve the recompiler's static
-discovery to follow indirect-dispatch targets in ROM and recompile those
-functions (complements — does not replace — the dispatcher migration). Sequencing
-(this coverage win vs. Stage-1 dispatcher migration vs. IRQ delivery) is awaiting
-a user decision.
-
----
+- Recompile and run the whole CD-RTOS/OS-9 ROM. Never replace OS services with
+  hand-written HLE stubs.
+- Keep the clean-room hybrid interpreter for RAM-resident and dispatch-missed
+  guest code. Do not link clown68000/AGPL or CeDImu/GPL into the shipped runtime.
+- CeDImu is the behavioral oracle; Ghidra 68000 mode is the literal oracle.
+- Never edit generated C. Codegen changes require BIOS regeneration.
+- Debug only through the always-on rings/TCP surface. Free-run observers and
+  query their rings; never pause/step two observers into apparent alignment.
+- RULE 0a: resolve dispatch misses before other runtime debugging.
 
 ## Verified state
 
-- **Builds clean** (mingw64 cmake): `CdiRecomp`, `CdiRecompBios`, `CdiRuntime`, `CdiOracle`.
-- **Faithful boot through seq 400000**, no true divergence. Realign was run over two overlapping windows because the native trace ring (262144 entries) can't hold `[1,400000)` at once: `[1,250000)` (773 benign re-syncs) and `[138000,400000)` (552 benign re-syncs).
-- The `$600000` read at recompiled PC `$404B84` now raises a faithful vector-2 bus error; the OS-9 handler at `$000500` runs in the interpreter and resumes to `$404B86`.
-- `dispatch_miss` count = 0 on this path.
-- **Repo pushed & verified clean/private:** `github.com/mstan/cdirecomp`, 96 tracked files, no ROMs / `build/` / generated C / CeDImu clone on the remote; local in sync with `origin/master`.
+- Phase C is complete: native reaches `STOP #$2000` at `$40A3E2`, `SR=$2000`,
+  matching CeDImu, with no `$FFFFFF` continuation and zero dispatch misses.
+- Genesis-style overlapping-entry ownership is active. The trace-guided BIOS
+  set has 3,982 in-ROM entries; codegen emits 6,066 functions (5,852 canonical
+  + 214 aliases), fall-off/dispatch audits are clean, and unsupported events
+  are zero. The two legal `$41246E/$412472` overlapping decode entries are
+  emitted as canonical streams and surfaced by a separate structural audit.
+- Because IRQ/bus-error delivery abandons generated host frames, codegen also
+  emits a sorted native resume map for all 49,171 emitted instruction PCs.
+  Seventeen PCs where legal overlapping streams converge are assigned to the
+  established exact-entry owner (or deterministic lower host). This does not
+  split functions or manufacture callable entries.
+- Async exception resume PCs feed the same coverage loop as missed indirect
+  calls/jumps. Paired PC-indexed `MOVE.W`/`JMP` offset tables now discover
+  backward cross-boundary handlers through the normal boundary-split path; the
+  dispatch audit has 14 offset tables and zero unresolved interiors.
+- Repeated real-media schedules previously exposed stochastic interior resume
+  PCs and drove the seed list upward. The async native resume map fixes that
+  general class: `indirect_targets` now reports only RAM or genuinely unknown
+  ROM CFGs. The same Release stress that previously failed 10 of 30 schedules
+  now passes 30/30 with no new entries. This is still bounded evidence, not a
+  substitute for input-driven navigation coverage.
+- Nested generated RTE/RTR now propagates through every C JSR frame to the
+  depth-zero trampoline; skip-RTS remains a one-frame unwind. The post-STOP
+  service window is full-state identical to CeDImu for 54,773 native
+  instructions (135 benign wait-loop re-syncs, maximum skew 2).
+- Native and CeDImu have identical absolute cycle time from seq 0 onward: the
+  native reset entry now carries the SCC68070 reset exception's 43 cycles. The
+  aligned normal-instruction audit is clean through seq 529999, and the full
+  CPU/RAM realigner reports no true divergence across `[331000,592896)` (484
+  benign one-instruction re-syncs). Co-sim's four trust gates all pass.
+- The SCC68070 timers now mirror CeDImu's 96-cycle prescaler, T0/T1/T2,
+  TCR/TSR/RR/PICR1 behavior and on-chip level delivery. A missing combined-mask
+  check at the universal instruction safepoint was fixed; timer IRQs are raised
+  and accepted on the same guest boundary as CeDImu.
+- STOP is now persistent and faithful: the CPU advances devices in CeDImu's
+  25-cycle stopped quanta and clears STOP only when an eligible IRQ is taken.
+- Player-mode CPU/device time is host-paced at the 15.1049 MHz SCC68070 clock,
+  including the active ISR/shell bursts between STOPs. Fixed-sequence co-sim
+  disables pacing and remains deterministic. The shell smoke measures 60 fps.
+- IKAT has the 25-ms Class::Maneuvering packet cadence on channel A, matching
+  the literal cdi490 `pt1driv` wiring (CeDImu's Mono3 HLE uses incompatible B).
+  Host state enters through the transport-neutral `CDI_INPUT_*` API. TCP
+  `set_input` is development instrumentation only, not the player frontend.
+- At the no-disc shell STOP, IKAT `IMR=$A0`: CD-RTOS enables channels C/D and
+  masks unopened pointing-device channel A. A button event queues four bytes
+  and asserts ISR `$02` but does not bypass the mask or raise level 2.
+- `tools/shell_idle_smoke.py` verifies all of the above end to end, including
+  real-time pacing (60.00 fps in the latest Release run) and proof that a
+  masked channel-A packet does not assert the IKAT level-2 line.
+- The clean-room MCD212 pipeline executes ICA/DCA and publishes complete ARGB
+  frames. Native and CeDImu completed fields are byte-identical throughout
+  `[7,422)`; field 421 is 768x240 with FNV-1a `ddcf263ed1261363`, and both sides
+  executed the same 8,152 ICA/DCA words (FNV-1a `87e67699d73fc5af`). The first
+  two pixel divergences were general renderer bugs: TC=0/8 Always/Never
+  transparency polarity and the color-key mask's OR-mask equation.
+- The SDL2 player frontend presents those completed frames without vsync stalls
+  and feeds keyboard/gamepad input through the same timed IKAT path. CUE/BIN
+  drag-and-drop mounts real media.
+- `tools/disc_insert_smoke.py` mounts a valid Mode-2 image only as a media
+  fixture after shell STOP. It proves insertion and ejection
+  each raise exactly one enabled IKAT channel-D IRQ, dwells in guest frames,
+  requires persistent RULE 0a-clean shell return, and fails on any observed
+  in-ROM entry absent from `bios/cdrtos_discovered.txt`. An untouched ready-media
+  shell does issue `E1 00 02 13` at field 790 and later repeats while detecting
+  media, then polls B0 and remains at STOP; drive reads are not evidence of game
+  launch.
+- Ready media uses `B0 00 02 15`, matching the ROM handler's byte fields. It
+  opens `pt1driv` (`IMR=$A2`). `tools/bios_navigation_smoke.py` decodes and
+  validates signed LEFT/DOWN/UP/RIGHT reports, proves each channel-A IRQ and
+  guest drain, observes hardware-cursor and framebuffer movement, and returns
+  RULE 0a-clean to STOP without a button packet. Five consecutive Release runs
+  pass with a synthetic fixture; no application was launched.
+- The resulting ROM targets `$43FD2E/$43FD54/$440022` exposed a general OS-9
+  CFG hole: each follows `TRAP #0` plus an inline service word. The recompiler
+  now follows those continuations inside their canonical callers. Regeneration
+  emits 6,066 functions (5,852 canonical + 214 aliases) and a 49,171-entry
+  async resume map; the media coverage smoke is dry without new seeds.
+- Debug/co-sim build remains deterministic and all co-sim gates pass at 20k.
+  Gate 4 now waits for and validates every requested checkpoint before sampling;
+  both native and oracle pass at exact seq 5k/10k/15k/20k.
+- Historical unpaced checkpoint: Release with `CDI_COSIM_BUILD=OFF`, full MCD212 pixel
+  output active, reaches the shell STOP in 0.522–0.535 s over three warm runs.
+  The pixel path uses an ICF lookup table and forward-only matte walk; the
+  seq-570000 frame hash remains exact. Player runs are now intentionally
+  real-time paced, so boot wall time is no longer a raw throughput benchmark.
 
----
+## Current working tree
 
-## Current runtime state
+Changes are intentionally uncommitted. They include the Phase-C cycle/co-sim
+work, the hybrid return-contract repair, SCC68070 timers and on-chip IRQs,
+persistent STOP, player pacing, IKAT input/media, display/frontend work, smoke
+tests, and documentation. Inspect `git diff`; do not discard user changes.
 
-- ROM: `bios/cdi490a.rom` (512 KB, Mono-IV / 32 KB NVRAM / NTSC). Reset SSP=$1500, PC=$4004B8, SR=$2700. **Not in the repo** (copyrighted; gitignored). A fresh clone must supply it locally and run `CdiRecompBios … --emit` to regenerate `bios/generated/*.c` before building the runner.
-- Static dispatch table: **348** recompiled functions.
-- Active machinery / workarounds in place:
-  - Flat-call A7 clamp (`recomp_push_return` + `g_recomp_initial_ssp`).
-  - Top-level trampoline (main.c): follows `[A7]` / `g_redirect_pending` when a recompiled RTS bottoms out to main; **recomp-tier bus-error setjmp landing pad**; clears `g_rte_pending` before every depth-0 dispatch; routes non-entry targets through the interpreter with no ret-stop (`recomp_top_resume`).
-  - JSR-site `g_redirect_pending` propagation (code_generator.c) for context switches.
-  - Hybrid interpreter (`m68k_interp.c`, clean-room) runs RAM-resident / dispatch-missed code; `m68k_interp_run_until_known(entry, stop_pc)` interprets until re-entering a recompiled dispatch ENTRY (`M68KI_REENTER`) or `pc == stop_pc`.
-  - `g_halted` set by STOP; **nothing clears it yet** (no IRQ delivery — MC-CDI-007).
-  - `g_irq_pending` recorded by `cdi_irq_raise`; nothing consumes it.
-  - Two duplicated cycle models (interp `m68k_cycles` + recompiler `estimate_cycles_scc68070`) — TODO MC-CDI-009.
+Key modified/new files this session:
 
----
+- `recompiler/src/code_generator.c`, `runner/src/runtime.c`: preserve the hybrid
+  interpreter/native return contract across re-entry; implement correct
+  register-count ROXL/ROXR.L, backward cross-boundary PC-indexed offset-table
+  discovery, and native owner-routed resume at every emitted instruction PC;
+  BIOS was regenerated.
+- `bios/cdrtos_discovered.txt`, `runner/src/runtime.c`,
+  `tools/collect_seeds.py`: dry trace-guided indirect/resume coverage loop.
+- `recompiler/src/codegen_diag.c`, `tools/test_function_aliases.py`: separate
+  supported overlapping decode streams from true unsupported events and cover
+  alias ownership plus nested RTE propagation synthetically.
+- `runner/src/periph.c`, `runner/src/mcd212.c`, `runner/src/debug_server.c`:
+  SCC68070 timers, reset-cycle/device phase, combined external/on-chip IRQ
+  delivery, and high-resolution whole-player cycle pacing.
+- `runner/src/main.c`: persistent STOP/IRQ wake and `--exit-on-stop` diagnostic.
+- `runner/src/slave.c`, `runner/include/cdi_runtime.h`: timed maneuvering-device
+  packets, common input ABI, media-status transitions and IKAT event ring.
+- `runner/src/mcd212.c`, `runner/src/mcd212_video.c`: line/control timing,
+  ICA/DCA, decode/composition, cursor, and canonical framebuffer publication.
+- `runner/src/cdi_frontend.c`, `runner/src/cdi_media.c`: SDL presentation/
+  physical input plus synchronized real CUE/BIN media backing.
+- `runner/src/debug_server.c`, `tools/cdi_debug.py`, `TCP.md`: dev-only input
+  injection, side-effect-free `emu_ikat_state`, and query-triggered immediate
+  pause at the next already-recorded trace entry.
+- `tools/shell_idle_smoke.py`: persistent-shell/pacing/masked-channel-A regression.
+- `tools/disc_insert_smoke.py`: source-specific channel-D media/IRQ regression.
+- `tools/bios_navigation_smoke.py`: ready-media guest-driver/UI navigation regression.
+- `README.md`, `PLAN.md`, `TODO.md`: current milestone and remaining work.
 
-## Outstanding issues
+## Next critical path
 
-1. **Run past seq 400000 to the shell-idle STOP.** The run stops at `--stop-seq`, not a wall — no known divergence ahead. Shell idle is `STOP #$2000 @ $40A3E2` (confirmed by a prior 1M-step oracle run). Keep diffing forward (later `--start`, both sides stopped in the same window) to confirm faithfulness all the way to that STOP.
-2. **IRQ delivery (MC-CDI-007/010).** `g_halted` parks at the shell-idle STOP; nothing wakes it. Needs a timer/display IRQ above the SR I-mask, vectored via `build_exception_frame` (short autovector frame), that clears `g_halted` and resumes from the trampoline. This is what makes the menu live.
-3. **Unmodelled / fail-loud devices** still: CIAP ($300000–$303FFF), Timekeeper/NVRAM ($320000), MCD212 pixel pipeline + display-line IRQ, SCC68070 timer counting / DMA / MMU translation.
-4. **Interpreter runs 40 % of boot — and it's a COVERAGE smell, now measured.** The classifier shows 97.9 % `dispatch_miss`, 99 % ROM: statically-present ROM functions the recompiler missed (reached by indirect dispatch). NOT relocated/generated RAM. Fix = improve static discovery to follow `call_by_address` targets in ROM so they get recompiled. (The old `miss_count` monitor is blind to these — they're "handled" by the hybrid.)
-5. **Tooling debt:** store ring is native-only. If a memory-write divergence needs the oracle's writer value too, add a matching store capture to `oracle/cdi_oracle.cpp` (hook CeDImu bus writes). Realign must diff in windows when the span exceeds ~262144 (trace-ring capacity).
+1. Cover the remaining non-launching player-shell screens and BIOS-visible
+   settings while keeping every input button boundary explicit and RULE 0a clean.
+2. Audit memory/settings UI behavior plus RTC/NVRAM and peripheral behavior
+   without activating Play CD-I.
+3. Add the fixed guest-clock RAM/register baseline, SCC68070 instruction-
+   coverage audit, and CI. Game
+   loading, module recompilation, and gameplay remain deferred.
 
----
-
-## Next steps (priority order)
-
-Sequencing is **awaiting a user decision** among: (A) the ROM-coverage win below,
-(B) Stage-1 of the dispatcher migration (replace `g_redirect_pending` uncleared-
-propagation with structured `ExitResult` returns), (C) IRQ delivery on the current
-model. The classifier now gives the data to choose; the architecture review favors
-(B) before building IRQ on another longjmp/trampoline escape.
-
-0. **Decide what to do with branch `rom-coverage`** — merge to `master` and push (it's validated faithful `[1,400000)`), or keep iterating first. ROM coverage (was the #1 lever) is **DONE & validated**.
-1. **Fix the 13 latent fall-off functions** the audit surfaced: extend the codegen so a fall-through target that's *interior* to another function gets promoted to a function entry (split there) and linked — then the fall-off audit can become **fatal**. Unblocks the boot reaching driver/FM code past the shell.
-2. **Stage-1 dispatcher migration** (per the architecture review): structured
-   `ExitResult` returns replacing `g_redirect_pending` propagation, keeping
-   flat-call working — retires the `top_resume` tax (now the dominant interp reason) and lands IRQ on a dispatcher, not a new escape.
-3. **IRQ delivery (MC-CDI-007):** STOP idle until an IRQ above the SR I-mask;
-   vector via `build_exception_frame`, clear `g_halted`, resume. Wakes the shell.
-4. **Continue diffing past 400000 toward `STOP #$2000 @ $40A3E2`**, confirming no true divergence to the shell-idle STOP.
-
-New tooling on `rom-coverage`: `tools/interp_report.py` (+ `interp_report` TCP cmd, the always-on fallback classifier) and `tools/collect_seeds.py` (+ `indirect_targets` TCP cmd, the trace-guided discovery collector). Loop: run → `collect_seeds.py` → `CdiRecompBios --emit` → rebuild runner → repeat until dry. Validate low-interp builds with `realign_divergence.py --start 1` (rings now hold `[1,400000)`).
-
----
-
-## Hard rules (always repeat)
-
-- **No HLE stubs for OS-9.** Recompile the CD-RTOS system ROM and run it as native C. The clean-room hybrid interpreter (`runner/src/m68k_interp.c`, NOT clown68000 — AGPL) is the correctness floor for RAM-resident / dispatch-missed code. A subsystem is modeled faithfully or fails loud — never a plausible default.
-- **No printf debugging / no log files.** Use the always-on trace ring + store ring + TCP debug server + `realign_divergence.py`. Query rings; never arm-then-run, never pause/step to synchronize observers.
-- **Never edit generated code** (`bios/generated/*.c`, `hotelmario/generated/*.c`). Fix the recompiler (`recompiler/src/`), the runner (`runner/src/`), or `game.cfg`. **Regen the BIOS after any `code_generator.c` change** (none needed this session — fixes were runner-only).
-- **CeDImu** is the behavioral oracle; **Ghidra** (68000 mode) is the literal oracle. State which you're using.
-- **One runtime instance at a time:** `Get-Process CdiRuntime,CdiOracle -ErrorAction SilentlyContinue | Stop-Process -Force` before launching (and before rebuilding the runner — a held `--hold`/`--stop-seq` process locks `CdiRuntime.exe` against the linker).
-- **Build with the PowerShell tool** (bash→powershell.exe hits a gcc `C:\Windows` temp-file bug). Set `$env:TMP`/`$env:TEMP` to `F:\Projects\cdirecomp\build\tmp` and use the mingw64 cmake `C:\msys64\mingw64\bin\cmake.exe`. The oracle (C++) needs `C:\msys64\mingw64\bin` on PATH at runtime for its DLLs.
-- **AGPL/GPL boundary:** clown68000 (AGPL) and CeDImu's core (GPL) stay build-time/oracle-only. Nothing copyleft in the shipped runtime. **CeDImu's working tree must NOT be committed** (gitignored).
-- **ROMs are not redistributable** — `bios/*.rom` and any disc image stay gitignored.
-- **Port note:** a sibling project's `psx-beetle.exe` squats/auto-respawns on TCP 4380 (and was seen flaky-squatting 4390). Run the native on a clean port (recent sessions used **4396**) and diff `--native 4396`; the oracle uses 4381.
-
----
-
-## Build & run commands
+## Rebuild and verification
 
 ```powershell
-# (PowerShell tool) rebuild recompiler -> regen BIOS -> rebuild runner.
-# Regen is REQUIRED after any code_generator.c edit; runner-only edits skip it (this session was runner-only).
-Get-Process CdiRuntime,CdiOracle -ErrorAction SilentlyContinue | Stop-Process -Force
-$env:TMP="F:\Projects\cdirecomp\build\tmp"; $env:TEMP="F:\Projects\cdirecomp\build\tmp"
-$cm="C:\msys64\mingw64\bin\cmake.exe"
+$env:Path = "C:\msys64\mingw64\bin;" + $env:Path
+$env:TMP  = "F:\Projects\cdirecomp\build\tmp"; $env:TEMP = $env:TMP
+$cm = "C:\msys64\mingw64\bin\cmake.exe"
+
+# Recompiler/codegen changes only: rebuild, regenerate BIOS, then runner.
 & $cm --build F:/Projects/cdirecomp/build/recompiler -j
-& F:\Projects\cdirecomp\build\recompiler\CdiRecompBios.exe F:\Projects\cdirecomp\bios\cdi490a.rom --emit   # only after a code_generator.c change
+& F:/Projects/cdirecomp/build/recompiler/CdiRecompBios.exe `
+  F:/Projects/cdirecomp/bios/cdi490a.rom --emit
 & $cm --build F:/Projects/cdirecomp/build/runner -j
-& $cm --build F:/Projects/cdirecomp/build/oracle  -j     # build once
+& $cm --build F:/Projects/cdirecomp/build/oracle -j
 
-# run + diff: oracle FIRST (fills its ring on 4381), then native on 4396 (4380/4390 squatted)
-Get-Process CdiRuntime,CdiOracle -ErrorAction SilentlyContinue | Stop-Process -Force
-$env:PATH = "C:\msys64\mingw64\bin;$env:PATH"
-Start-Process F:\Projects\cdirecomp\build\oracle\CdiOracle.exe  -ArgumentList "F:\Projects\cdirecomp\bios\cdi490a.rom","--steps","400000","--hold" -WindowStyle Hidden
-Start-Process F:\Projects\cdirecomp\build\runner\CdiRuntime.exe -ArgumentList "F:\Projects\cdirecomp\bios\cdi490a.rom","--stop-seq","400000","--port","4396" -WindowStyle Hidden
-# diff in windows (trace ring = 262144 entries; can't span [1,400000) at once):
-python F:\Projects\cdirecomp\tools\realign_divergence.py --native 4396 --oracle 4381 --start 138000 --window 8192 --context 3
+py -3 tools/cdi_cosim.py --self-test
+py -3 tools/cdi_cosim.py gates build/runner/CdiRuntime.exe `
+  build/oracle/CdiOracle.exe bios/cdi490a.rom 20000
+py -3 tools/shell_idle_smoke.py build/runner/CdiRuntime.exe `
+  bios/cdi490a.rom --port 4396
 
-# helpers (TCP debug surface):
-#   tools/cdi_debug.py  --port {4396|4381} status | get_registers | trace --from S --count N | read_mem --addr A --len L
-#   tools/trace_pcs.py  --port P --from S --count N
-#   build/tmp/q.py P ADDR BEFORE COUNT           # query the 'stores' ring (last writers of an address)
-#   CdiRuntime flags: --hold | --fault-hold | --stop-seq N | --port N    CdiOracle flags: --steps N | --hold
-# To find an endpoint, run native standalone (no --hold) and read the last [bus]/fault/halt line:
-#   & F:\Projects\cdirecomp\build\runner\CdiRuntime.exe F:\Projects\cdirecomp\bios\cdi490a.rom 2>&1 | Select-String "bus|fault|halt|returned"
+# Production-speed build/checkpoint.
+& $cm -S F:/Projects/cdirecomp/runner `
+  -B F:/Projects/cdirecomp/build/runner-release -G Ninja `
+  -DCMAKE_BUILD_TYPE=Release -DCDI_COSIM_BUILD=OFF
+& $cm --build F:/Projects/cdirecomp/build/runner-release -j
+& build/runner-release/CdiRuntime.exe bios/cdi490a.rom --exit-on-stop
 ```
 
-`--stop-seq N` freezes the native rings-intact at seq N (deterministic stop for diffing; the boot no longer faults early so it would otherwise run past the window and evict it from the 262144 trace ring). For windows past ~262144, use a later `--start` and stop both sides in the same window.
+Always kill held instances before rebuilding or launching:
 
----
-
-## Scope constraints
-
-- **In scope (Phase C):** make the recompiled OS boot to the player shell, staying bit-exact to CeDImu. Editable: `recompiler/src/*`, `runner/src/*`, `runner/include/*`, the device/HLE device models, `oracle/cdi_oracle.cpp`, `tools/*`, `hotelmario/game.cfg`. Immediate task: continue the diff past 400000 to the shell-idle STOP, then IRQ delivery.
-- **Out of scope:** the game (Hotel Mario) — later phase, not until the shell boots and is interactive. Do NOT add OS-9 HLE stubs. Do NOT model `$600000` as a memory region (raising the bus error IS the faithful behavior). Do NOT link clown68000 / CeDImu's core into the shipped runtime. Do NOT edit generated `*.c`. Do NOT commit ROMs or CeDImu's working tree.
+```powershell
+Get-Process CdiRuntime,CdiOracle -ErrorAction SilentlyContinue |
+  Stop-Process -Force
+```

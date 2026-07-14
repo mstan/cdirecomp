@@ -433,6 +433,17 @@ void function_finder_run(const GenesisRom *rom, FunctionList *list, const GameCo
                 }
             }
 
+            /* OS-9 system calls encode a 16-bit service selector immediately
+             * after TRAP #0. The handler consumes that selector by advancing
+             * the stacked return PC, so the literal fall-through instruction
+             * is at trap_pc + 4. Decoding the selector as an opcode can skip
+             * or corrupt the caller suffix and hide calls after the service. */
+            if (cfg && cfg->trap0_inline_service_word &&
+                instr.mnemonic == MN_TRAP && (instr.words[0] & 0x000Fu) == 0) {
+                pc += instr.byte_length + 2u;
+                continue;
+            }
+
             /* Terminator */
             if (m68k_is_terminator(&instr)) break;
 

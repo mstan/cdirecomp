@@ -8,6 +8,7 @@
 #include "code_generator.h"
 #include "codegen_diag.h"
 #include "m68k_decoder.h"
+#include "m68k_validator.h"
 #include "function_finder.h"
 #include "annotations.h"
 #include "game_config.h"
@@ -71,6 +72,51 @@ static void addrset_sort(AddrSet *s) {
         }
         s->addrs[j + 1] = key;
     }
+}
+
+/* Native re-entry points for platforms whose exception delivery abandons the
+ * current generated C frames. `addr` is an exact emitted instruction boundary;
+ * `owner` is the canonical body that can resume at its corresponding label. */
+typedef struct {
+    uint32_t addr;
+    uint32_t owner;
+} ResumePoint;
+
+typedef struct {
+    ResumePoint *items;
+    int count;
+    int cap;
+} ResumeMap;
+
+static void resume_map_init(ResumeMap *m) {
+    m->items = NULL; m->count = 0; m->cap = 0;
+}
+
+static void resume_map_free(ResumeMap *m) {
+    free(m->items); m->items = NULL; m->count = 0; m->cap = 0;
+}
+
+static bool resume_map_append(ResumeMap *m, uint32_t addr, uint32_t owner) {
+    if (m->count >= m->cap) {
+        int new_cap = m->cap ? m->cap * 2 : 1024;
+        ResumePoint *next = (ResumePoint *)realloc(
+            m->items, (size_t)new_cap * sizeof(ResumePoint));
+        if (!next) return false;
+        m->items = next;
+        m->cap = new_cap;
+    }
+    m->items[m->count++] = (ResumePoint){addr, owner};
+    return true;
+}
+
+static int resume_point_cmp(const void *ap, const void *bp) {
+    const ResumePoint *a = (const ResumePoint *)ap;
+    const ResumePoint *b = (const ResumePoint *)bp;
+    if (a->addr < b->addr) return -1;
+    if (a->addr > b->addr) return 1;
+    if (a->owner < b->owner) return -1;
+    if (a->owner > b->owner) return 1;
+    return 0;
 }
 
 /* =========================================================================
@@ -233,6 +279,11 @@ static bool s_reverse_debug = false;
  * without dragging the whole GameConfig into every emit signature. */
 static const uint32_t *s_extra_seeds      = NULL;
 static int             s_extra_seed_count = 0;
+/* An unbounded CFG that reaches an illegal encoding is not safe evidence that
+ * a later callable entry aliases the same host body. */
+static bool            s_scan_hit_invalid = false;
+static uint32_t        *s_candidate_owners = NULL;
+static int              s_candidate_owner_count = 0;
 /* Set by codegen_emit after boundary splitting so JSR emission can verify
  * that the target is in the function table. Targets not present fall back
  * to recomp_call_addr() to avoid undeclared-identifier build errors. */
@@ -344,7 +395,9 @@ static void emit_ea_load_ex(FILE *f, const M68KInstr *instr, int ea, M68KSize sz
     int reg  = ea & 7;
     const char *ct = size_ctype(sz);
     const char *rf = size_read_fn(sz);
-    int sb = size_bytes(sz);
+    /* MC68000 keeps A7 word-aligned: byte postincrement/predecrement uses a
+     * two-byte step for the stack pointer, while A0..A6 still step by one. */
+    int sb = (reg == 7 && sz == M68K_SIZE_B) ? 2 : size_bytes(sz);
 
     switch (mode) {
     case 0: /* Dn */
@@ -552,7 +605,8 @@ static void emit_ea_store_ex(FILE *f, const M68KInstr *instr, int ea, M68KSize s
     const char *ct  = size_ctype(sz);
     const char *wf  = size_write_fn(sz);
     uint32_t    msk = size_mask(sz);
-    int         sb  = size_bytes(sz);
+    /* MC68000 A7 byte accesses step by two to preserve stack alignment. */
+    int         sb  = (reg == 7 && sz == M68K_SIZE_B) ? 2 : size_bytes(sz);
     (void)instr;
 
     switch (mode) {
@@ -953,6 +1007,21 @@ static void emit_cycle_accounting(FILE *f, const char *indent, int cycles)
                " glue_check_vblank();\n", indent, cycles, cycles);
 }
 
+static void emit_register_shift_cycle_accounting(FILE *f, const char *indent,
+                                                 int count_dreg)
+{
+    /* CeDImu SCC68070: every register-count shift/rotate costs
+     * 13 + 3*(Dn mod 64). Evaluate Dn at instruction entry: the count
+     * register is allowed to be the destination and may be overwritten by
+     * the instruction body. */
+    fprintf(f, "%sg_native_insn_count++;"
+               " g_cycle_accumulator += 13u + 3u * (g_cpu.D[%d] & 63u);"
+               " g_audio_cycle_counter += 13u + 3u * (g_cpu.D[%d] & 63u);"
+               " if (g_cycle_accumulator >= g_vblank_threshold)"
+               " glue_check_vblank();\n",
+            indent, count_dreg, count_dreg);
+}
+
 static void emit_split_tail_call(FILE *f, const char *indent,
                                  uint32_t target_addr, bool carry_sp_adjust,
                                  int cycles_before) {
@@ -1022,6 +1091,59 @@ static bool addr_belongs_to_other_function(uint32_t addr, uint32_t my_start,
     if (best < 0) return false;
     /* If the owning function is not us, this address is in another function */
     return sorted_funcs[best] != my_start;
+}
+
+static bool addr_is_function_entry(uint32_t addr, const uint32_t *sorted_funcs,
+                                   int nfuncs) {
+    int lo = 0, hi = nfuncs - 1;
+    while (lo <= hi) {
+        int mid = (lo + hi) / 2;
+        if (sorted_funcs[mid] == addr) return true;
+        if (sorted_funcs[mid] < addr) lo = mid + 1;
+        else                          hi = mid - 1;
+    }
+    return false;
+}
+
+static int function_entry_index(uint32_t addr, const uint32_t *sorted_funcs,
+                                int nfuncs) {
+    int lo = 0, hi = nfuncs - 1;
+    while (lo <= hi) {
+        int mid = (lo + hi) / 2;
+        if (sorted_funcs[mid] == addr) return mid;
+        if (sorted_funcs[mid] < addr) lo = mid + 1;
+        else                          hi = mid - 1;
+    }
+    return -1;
+}
+
+/* A function entry can fall inside an instruction decoded by another CFG.
+ * Report it, but keep decoding the enclosing stream; address territory is not
+ * an instruction boundary on a variable-length ISA. */
+#define MISALIGNED_REPORT_CAP 1024
+static uint32_t s_misaligned_reported[MISALIGNED_REPORT_CAP];
+static int      s_misaligned_reported_count = 0;
+static void report_misaligned_entries_in_range(uint32_t pc, uint32_t len,
+                                               uint16_t opcode, M68KMnemonic mn,
+                                               uint32_t enclosing_func,
+                                               const uint32_t *sorted_funcs,
+                                               int nfuncs) {
+    for (uint32_t a = pc + 2; a < pc + len; a += 2) {
+        if (!addr_is_function_entry(a, sorted_funcs, nfuncs)) continue;
+        bool seen = false;
+        for (int i = 0; i < s_misaligned_reported_count; i++) {
+            if (s_misaligned_reported[i] == a) { seen = true; break; }
+        }
+        if (seen) continue;
+        if (s_misaligned_reported_count < MISALIGNED_REPORT_CAP)
+            s_misaligned_reported[s_misaligned_reported_count++] = a;
+        codegen_diag_record(CGD_MISALIGNED_FUNC_ENTRY, a, opcode, mn,
+                            NULL, enclosing_func);
+        fprintf(stderr, "[Codegen] WARN: function entry $%06X lands "
+                        "mid-instruction (inside $%06X..$%06X of func $%06X); "
+                        "stream decodes through it\n",
+                a, pc, pc + len - 2, enclosing_func);
+    }
 }
 
 /* =========================================================================
@@ -1187,6 +1309,44 @@ static int probe_offset_table_targets(const GenesisRom *rom,
  *   - The offset-table walk stops on the first entry that's out-of-range
  *     or fails to decode, so it can't "run away" into garbage data.
  * ========================================================================= */
+/* A common compiler dispatch shape first loads a signed table offset into the
+ * same Dn used by the following JMP:
+ *
+ *     move.w table(pc,Dselector.w),Doffset
+ *     jmp    table(pc,Doffset.w)
+ *
+ * CD-RTOS also places the case handlers immediately BEFORE the dispatcher.
+ * Requiring the adjacent load and jump to compute the identical PC-relative
+ * base is strong evidence that the words at that base really are offsets, so
+ * those cross-boundary targets can be discovered safely. */
+static bool has_matching_pc_idx_offset_load(const GenesisRom *rom,
+                                            const M68KInstr *jmp_instr,
+                                            uint32_t jmp_base)
+{
+    if (!rom || !jmp_instr || jmp_instr->word_count < 2) return false;
+    uint16_t jext = jmp_instr->words[1];
+    if (jext & 0x8000u) return false; /* JMP index must be Dn, not An. */
+    int offset_dreg = (jext >> 12) & 7;
+
+    /* Decode backwards and accept only an instruction whose end is exactly
+     * the JMP. Ten bytes covers the relevant 68000 MOVE encodings. */
+    for (uint32_t back = 2; back <= 10 && back <= jmp_instr->addr; back += 2) {
+        M68KInstr load;
+        uint32_t addr = jmp_instr->addr - back;
+        if (!m68k_decode(rom, addr, &load)) continue;
+        if (addr + load.byte_length != jmp_instr->addr) continue;
+        if (load.mnemonic != MN_MOVE || load.size != M68K_SIZE_W) continue;
+        if (load.src_ea != ((EA_PCR << 3) | PCR_PC_IDX)) continue;
+        if (load.dst_ea != ((EA_Dn << 3) | offset_dreg)) continue;
+        if (load.word_count < 2) continue;
+
+        int8_t d8 = (int8_t)(load.words[1] & 0xFF);
+        uint32_t load_base = (uint32_t)(load.addr + 2 + (int32_t)d8);
+        if (load_base == jmp_base) return true;
+    }
+    return false;
+}
+
 static void seed_pc_idx_dispatch_targets(const GenesisRom *rom,
                                          const M68KInstr *jmp_instr,
                                          AddrSet *worklist,
@@ -1242,6 +1402,39 @@ static void seed_pc_idx_dispatch_targets(const GenesisRom *rom,
         if (sorted_funcs[i] > start_addr && sorted_funcs[i] < plausible_end)
             plausible_end = sorted_funcs[i];
     }
+    if (has_matching_pc_idx_offset_load(rom, jmp_instr, base)) {
+        /* The paired load proves the table shape. Walk until the first word
+         * that does not resolve to legal, nearby, word-aligned ROM code. The
+         * symmetric window admits handlers placed before the dispatcher but
+         * prevents a corrupt table from seeding unrelated modules. Targets
+         * belonging to another function are promoted through extern_targets
+         * by scan_function's normal boundary-split path. */
+        uint32_t targets[128];
+        int ntargets = 0;
+        uint32_t target_lo = base > 0x1000u ? base - 0x1000u : 0;
+        uint32_t target_hi = base + 0x1000u;
+        if (target_hi < base || target_hi > rom->rom_size)
+            target_hi = rom->rom_size;
+        M68KValidatorOptions vopts = {0};
+        for (int i = 0; i < (int)(sizeof(targets) / sizeof(targets[0])); i++) {
+            uint32_t a = base + (uint32_t)i * 2u;
+            if (a + 1 >= rom->rom_size) break;
+            int16_t off = (int16_t)(((uint16_t)rom->rom_data[a] << 8)
+                                  | rom->rom_data[a + 1]);
+            uint32_t t = (uint32_t)((int32_t)base + (int32_t)off);
+            if ((t & 1u) || t < target_lo || t >= target_hi) break;
+            M68KInstr probe;
+            if (!m68k_decode(rom, t, &probe)
+                    || m68k_validate(&probe, &vopts) != M68K_LEGAL)
+                break;
+            targets[ntargets++] = t;
+        }
+        if (ntargets >= 2) {
+            for (int i = 0; i < ntargets; i++)
+                addrset_insert(worklist, targets[i]);
+        }
+        return;
+    }
     if (base < start_addr || base >= plausible_end) return;
 
     for (int i = 0; i < 32; i++) {
@@ -1259,12 +1452,17 @@ static void seed_pc_idx_dispatch_targets(const GenesisRom *rom,
 static void scan_function(const GenesisRom *rom, uint32_t start_addr,
                           AddrSet *instrs, AddrSet *labels,
                           const uint32_t *sorted_funcs, int nfuncs,
+                          const uint32_t *all_entries, int nentries,
                           AddrSet *extern_targets,
-                          const uint32_t *extra_seeds, int extra_seed_count) {
+                          const uint32_t *extra_seeds, int extra_seed_count,
+                          const GameConfig *cfg) {
     /* Worklist-based CFG walk */
+    s_scan_hit_invalid = false;
     AddrSet worklist;
     addrset_init(&worklist);
     addrset_insert(&worklist, start_addr);
+    M68KValidatorOptions vopts = {0};
+    vopts.allow_68020_branch = cfg ? cfg->allow_68020_branch : false;
 
     /* Disasm-extracted interior PCs that the CFG walker would otherwise
      * miss — e.g. local labels reached only via `JMP (PC,Dn.W)` (Sonic 2
@@ -1312,13 +1510,23 @@ static void scan_function(const GenesisRom *rom, uint32_t start_addr,
              * at a non-terminator (the boundary-split fall-off bug). Promoting
              * an address that is already an entry is a harmless dedup. */
             if (pc != start_addr &&
-                addr_belongs_to_other_function(pc, start_addr, sorted_funcs, nfuncs)) {
-                if (extern_targets) addrset_insert(extern_targets, pc);
+                addr_is_function_entry(pc, sorted_funcs, nfuncs))
                 break;
-            }
 
             M68KInstr instr;
             if (!m68k_decode(rom, pc, &instr)) break;
+
+            /* The decoder is permissive. Legality proves that speculative
+             * branch/table paths are still code instead of data run-on. */
+            if (m68k_validate(&instr, &vopts) != M68K_LEGAL) {
+                s_scan_hit_invalid = true;
+                break;
+            }
+
+            if (all_entries && nentries > 0)
+                report_misaligned_entries_in_range(pc, instr.byte_length,
+                                                   instr.words[0], instr.mnemonic,
+                                                   start_addr, all_entries, nentries);
 
             addrset_insert(instrs, pc);
 
@@ -1328,7 +1536,25 @@ static void scan_function(const GenesisRom *rom, uint32_t start_addr,
             case MN_RTR:
             case MN_STOP:
             case MN_ILLEGAL:
-                goto next_work; /* terminate this path */
+                goto next_work; /* terminate this static path */
+
+            case MN_TRAP:
+                /* A trap transfers unconditionally, so its continuation is
+                 * normally dynamic. OS-9's configured TRAP #0 ABI is stronger:
+                 * one inline service word follows the opcode and the kernel
+                 * advances the stacked PC over it before RTE. Seed exactly that
+                 * proven successor. Keeping it in this CFG lets async resume
+                 * dispatch return to the canonical caller instead of creating
+                 * a trace-discovered split function for every service call. */
+                if (cfg && cfg->trap0_inline_service_word &&
+                    (instr.words[0] & 0x000Fu) == 0) {
+                    uint32_t continuation = pc + instr.byte_length + 2u;
+                    if (continuation < rom->rom_size) {
+                        addrset_insert(&worklist, continuation);
+                        addrset_insert(labels, continuation);
+                    }
+                }
+                goto next_work;
 
             case MN_BRA:
                 if (instr.has_target && instr.target_addr != pc)
@@ -1401,6 +1627,135 @@ static void scan_function(const GenesisRom *rom, uint32_t start_addr,
     }
 
     addrset_free(&worklist);
+}
+
+/* Callable addresses can be branch-entered suffixes or shared epilogues of a
+ * larger CFG. Cutting the host at every such address loses valid fall-through
+ * paths. Establish a canonical owner only when an unbounded, legal CFG reaches
+ * the candidate through an explicit branch/JMP edge; unrelated adjacent code
+ * remains a hard boundary. */
+static uint32_t *build_entry_owners(const GenesisRom *rom,
+                                    const AddrSet *all_funcs,
+                                    const GameConfig *cfg,
+                                    AddrSet *hard_boundaries,
+                                    bool verbose) {
+    int n = all_funcs->count;
+    uint32_t *owners = (uint32_t *)malloc((size_t)n * sizeof(uint32_t));
+    int *sizes = (int *)calloc((size_t)n, sizeof(int));
+    int *best_sizes = (int *)calloc((size_t)n, sizeof(int));
+    bool *safe = (bool *)calloc((size_t)n, sizeof(bool));
+    if (!owners || !sizes || !best_sizes || !safe) {
+        free(owners); free(sizes); free(best_sizes); free(safe);
+        return NULL;
+    }
+
+    for (int i = 0; i < n; i++) {
+        AddrSet instrs, labels;
+        addrset_init(&instrs); addrset_init(&labels);
+        scan_function(rom, all_funcs->addrs[i], &instrs, &labels,
+                      NULL, 0, NULL, 0, NULL, NULL, 0, cfg);
+        sizes[i] = instrs.count;
+        safe[i] = !s_scan_hit_invalid;
+        best_sizes[i] = instrs.count;
+        owners[i] = all_funcs->addrs[i];
+        addrset_free(&instrs); addrset_free(&labels);
+    }
+
+    for (int i = 0; i < n; i++) {
+        if (!safe[i]) continue;
+        AddrSet instrs, labels;
+        addrset_init(&instrs); addrset_init(&labels);
+        scan_function(rom, all_funcs->addrs[i], &instrs, &labels,
+                      NULL, 0, NULL, 0, NULL, NULL, 0, cfg);
+        for (int k = 0; k < instrs.count; k++) {
+            int j = function_entry_index(instrs.addrs[k], all_funcs->addrs, n);
+            if (j < 0 || j == i) continue;
+            if (!addrset_contains(&labels, instrs.addrs[k])) continue;
+            bool larger = sizes[i] > sizes[j];
+            bool equal_tie = sizes[i] == sizes[j]
+                          && all_funcs->addrs[i] < all_funcs->addrs[j];
+            if (!larger && !equal_tie) continue;
+            if (sizes[i] > best_sizes[j]
+                    || (sizes[i] == best_sizes[j]
+                        && all_funcs->addrs[i] < owners[j])) {
+                owners[j] = all_funcs->addrs[i];
+                best_sizes[j] = sizes[i];
+            }
+        }
+        addrset_free(&instrs); addrset_free(&labels);
+    }
+
+    for (int i = 0; i < n; i++) {
+        uint32_t owner = owners[i];
+        for (int guard = 0; guard < n; guard++) {
+            int oi = function_entry_index(owner, all_funcs->addrs, n);
+            if (oi < 0 || owners[oi] == owner) break;
+            owner = owners[oi];
+        }
+        owners[i] = owner;
+    }
+
+    addrset_init(hard_boundaries);
+    for (int i = 0; i < n; i++) {
+        if (owners[i] == all_funcs->addrs[i])
+            addrset_insert(hard_boundaries, all_funcs->addrs[i]);
+    }
+    addrset_sort(hard_boundaries);
+
+    /* Re-prove each proposal under the final hard-boundary policy. Promoting
+     * one failed proposal can cut another host, so iterate to a fixed point. */
+    for (;;) {
+        bool changed = false;
+        for (int h = 0; h < n; h++) {
+            uint32_t host = all_funcs->addrs[h];
+            if (owners[h] != host) continue;
+            AddrSet instrs, labels;
+            addrset_init(&instrs); addrset_init(&labels);
+            scan_function(rom, host, &instrs, &labels,
+                          hard_boundaries->addrs, hard_boundaries->count,
+                          NULL, 0, NULL, NULL, 0, cfg);
+            for (int j = 0; j < n; j++) {
+                if (owners[j] != host || j == h) continue;
+                if (!addrset_contains(&instrs, all_funcs->addrs[j])) {
+                    owners[j] = all_funcs->addrs[j];
+                    addrset_insert(hard_boundaries, all_funcs->addrs[j]);
+                    changed = true;
+                }
+            }
+            addrset_free(&instrs); addrset_free(&labels);
+        }
+        if (!changed) break;
+        addrset_sort(hard_boundaries);
+    }
+
+    int aliases = n - hard_boundaries->count;
+    bool enabled = cfg && cfg->function_aliases;
+    if (verbose) {
+        free(s_candidate_owners);
+        s_candidate_owners = (uint32_t *)malloc((size_t)n * sizeof(uint32_t));
+        s_candidate_owner_count = s_candidate_owners ? n : 0;
+        if (s_candidate_owners)
+            memcpy(s_candidate_owners, owners, (size_t)n * sizeof(uint32_t));
+    }
+    if (!enabled) {
+        for (int i = 0; i < n; i++) owners[i] = all_funcs->addrs[i];
+        addrset_free(hard_boundaries);
+        addrset_init(hard_boundaries);
+        for (int i = 0; i < n; i++)
+            addrset_insert(hard_boundaries, all_funcs->addrs[i]);
+        addrset_sort(hard_boundaries);
+    }
+    if (verbose) {
+        if (enabled)
+            printf("[Codegen] Entry ownership: %d canonical functions, %d "
+                   "overlapping aliases\n", hard_boundaries->count, aliases);
+        else
+            printf("[Codegen] Entry ownership audit: %d branch-proven alias "
+                   "candidates (disabled)\n", aliases);
+    }
+
+    free(sizes); free(best_sizes); free(safe);
+    return owners;
 }
 
 /* =========================================================================
@@ -1932,6 +2287,20 @@ static void emit_instr(FILE *f, const GenesisRom *rom,
 
     char src_expr[256], dst_expr[256], addr_expr[256];
 
+    /* Static codegen cannot bake a register-count shift's runtime Dn value.
+     * Self-account it now, while the entry-state count is still live, and
+     * suppress the caller's constant 25-cycle fallback. Register-only shifts
+     * cannot fault or touch MMIO; IRQ delivery remains at the next universal
+     * instruction-entry safepoint. */
+    if (!instr->mem_shift && instr->src_ea >= 0 &&
+        (instr->mnemonic == MN_LSL  || instr->mnemonic == MN_LSR  ||
+         instr->mnemonic == MN_ASL  || instr->mnemonic == MN_ASR  ||
+         instr->mnemonic == MN_ROL  || instr->mnemonic == MN_ROR  ||
+         instr->mnemonic == MN_ROXL || instr->mnemonic == MN_ROXR)) {
+        emit_register_shift_cycle_accounting(f, "  ", instr->src_ea);
+        *cycles_self_accounted = true;
+    }
+
     switch (instr->mnemonic) {
 
     /* ------------------------------------------------------------------ */
@@ -2008,11 +2377,15 @@ static void emit_instr(FILE *f, const GenesisRom *rom,
          * the codegen instr set. So we yield and return, matching the
          * prior (comment-only) emission's control-flow shape but adding
          * real SR + yield semantics. */
-        fprintf(f, "  g_cpu.SR = (uint16_t)0x%04Xu;\n",
-                (unsigned)(instr->imm32 & 0xFFFFu));
-        emit_cycle_accounting(f, "  ", estimate_cycles(instr));
+        /* The stopped core's architectural PC is post-STOP. CeDImu keeps the
+         * trace label on the STOP opcode while parked, but an interrupt frame
+         * stacks addr+length; leaving g_cpu.PC at the opcode re-executes STOP
+         * after every wake. */
+        fprintf(f, "  g_cpu.PC = 0x%06Xu; /* post-STOP interrupt resume */\n",
+                instr->addr + instr->byte_length);
         fprintf(f, "  genesis_stop_until_interrupt((uint16_t)0x%04Xu);\n",
                 (unsigned)(instr->imm32 & 0xFFFFu));
+        emit_cycle_accounting(f, "  ", estimate_cycles(instr));
         fprintf(f, "  return; /* STOP — yield+return, see comment above */\n");
         *skip_until_label = true;
         break;
@@ -2025,7 +2398,14 @@ static void emit_instr(FILE *f, const GenesisRom *rom,
          * must point AT that word — the kernel's F$ dispatcher reads the code
          * there and RTEs past it. Advance g_cpu.PC to post-TRAP before vectoring
          * (the per-instruction emit set it to the TRAP's own address). */
-        emit_cycle_accounting(f, "  ", estimate_cycles(instr));
+        /* CeDImu's TRAP instruction returns 0 cycles. Its next Run(false)
+         * processes the queued 52-cycle exception and executes the handler's
+         * first instruction in one device-time batch. Keep the architectural
+         * instruction count here, flush only an older pending batch (the rare
+         * exception-handler-begins-with-TRAP case), then defer this exception
+         * cost so the first handler instruction drains it. */
+        fprintf(f, "  g_native_insn_count++; runtime_defer_exception_cycles(%d);\n",
+                estimate_cycles(instr));
         fprintf(f, "  g_cpu.PC = 0x%06Xu;\n", instr->addr + instr->byte_length);
         fprintf(f, "  m68k_trap_vector(0x%02Xu); return;\n",
                 0x20u + (unsigned)(instr->imm32 & 0xF));
@@ -2044,13 +2424,15 @@ static void emit_instr(FILE *f, const GenesisRom *rom,
     /* ------------------------------------------------------------------ */
     case MN_RTR:
         /* Pop CCR (low byte of pushed word) then PC, like RTE but only
-         * the user-visible CCR bits get restored. Mirrors the RTE
-         * propagation idiom so unwind reaches the original caller. */
+         * the user-visible CCR bits get restored. This is a dynamic frame
+         * return just like RTE: after the generated C frames unwind, the
+         * depth-zero trampoline must resume at the PC popped here, not consume
+         * another longword from the already-advanced guest A7. */
         fprintf(f, "  { uint16_t _ccrw = (uint16_t)m68k_read16(g_cpu.A[7]); g_cpu.A[7] += 2;\n");
         fprintf(f, "    g_cpu.SR = (uint16_t)((g_cpu.SR & 0xFF00u) | (_ccrw & 0x00FFu)); }\n");
         fprintf(f, "  g_cpu.PC = m68k_read32(g_cpu.A[7]); g_cpu.A[7] += 4;\n");
         emit_cycle_accounting(f, "  ", estimate_cycles(instr));
-        fprintf(f, "  g_rte_pending = 1; return; /* RTR */\n");
+        fprintf(f, "  g_rte_pending = 1; g_rte_resume = 1; return; /* RTR */\n");
         *skip_until_label = true;
         break;
 
@@ -2085,6 +2467,13 @@ static void emit_instr(FILE *f, const GenesisRom *rom,
 
         /* Simulate JSR/BSR stack: push return address onto the 68K stack. */
         fprintf(f, "  recomp_push_return(0x%06Xu); /* JSR push */\n", ret_addr);
+        /* The call instruction retires BEFORE the target's first instruction.
+         * Charge it at that architectural boundary, not after the native C
+         * callee returns. Deferring this charge freezes every cycle-driven
+         * device throughout the callee and then lumps JSR/BSR time onto the
+         * caller continuation (MC-CDI-009). */
+        emit_cycle_accounting(f, "  ", estimate_cycles(instr));
+        *cycles_self_accounted = true;
 
         if (instr->has_target) {
             fprintf(f, "  { int _saved_split_sp_popped = g_split_sp_popped; g_split_sp_popped = 0;\n");
@@ -2111,7 +2500,12 @@ static void emit_instr(FILE *f, const GenesisRom *rom,
         }
 
         /* Pop return address from 68K stack.
-         * Check g_rte_pending BEFORE the pop: when the callee used the
+         * RTE/RTR abandons the entire native C call chain: its architectural
+         * resume PC is dynamic and must be dispatched only by the depth-zero
+         * trampoline.  Keep g_rte_pending set while g_rte_resume is set so
+         * every generated JSR frame returns without consuming a guest slot.
+         *
+         * Check the one-level g_rte_pending case BEFORE the pop: when the callee used the
          * `addq.l #4,sp; rts` skip idiom, the game's own addq already
          * adjusted A7 and SJ's rts popped the slot this wrapper pushed.
          * Doing our pop here would double-adjust A7 by +4. Skipping the
@@ -2121,10 +2515,11 @@ static void emit_instr(FILE *f, const GenesisRom *rom,
          * a rewritten return and set g_redirect_pending. Propagate it uncleared
          * up to the top-level trampoline — do NOT pop or continue here; this
          * frame belongs to the outgoing context. */
+        fprintf(f, "  if (g_halted) return; /* STOP unwind: wait for IRQ before caller continuation */\n");
         fprintf(f, "  if (g_redirect_pending) return; /* context-switch unwind */\n");
+        fprintf(f, "  if (g_rte_resume) return; /* RTE/RTR: unwind to depth-zero trampoline */\n");
         fprintf(f, "  if (g_rte_pending) { g_rte_pending = 0;\n");
-        emit_cycle_accounting(f, "    ", estimate_cycles(instr));
-        fprintf(f, "    return; } /* RTE/skip propagation (pre-pop) */\n");
+        fprintf(f, "    return; } /* skip-RTS: one-level propagation (pre-pop) */\n");
         /* Faithful return-address honoring (MC-CDI-012). The flat-call model
          * pops a fixed +4 and falls through to the STATIC continuation, ignoring
          * what is actually on the guest stack. That breaks the OS-9 dispatcher,
@@ -2152,7 +2547,6 @@ static void emit_instr(FILE *f, const GenesisRom *rom,
         fprintf(f, "  if (!g_call_was_hybrid) {\n");
         fprintf(f, "    uint32_t _ret = m68k_read32(g_cpu.A[7]); g_cpu.A[7] += 4; /* JSR pop (flat-call callee) */\n");
         fprintf(f, "    if ((_ret & 0xFFFFFFu) != 0x%06Xu) {\n", ret_addr & 0xFFFFFFu);
-        emit_cycle_accounting(f, "      ", estimate_cycles(instr));
         fprintf(f, "      g_redirect_addr = _ret & 0xFFFFFFu; g_redirect_pending = 1; return;\n");
         fprintf(f, "    }\n");
         fprintf(f, "  }\n");
@@ -2751,22 +3145,26 @@ static void emit_instr(FILE *f, const GenesisRom *rom,
         const char *rf = size_read_fn(sz);
         char res[64];
         snprintf(res, sizeof(res), "_%06Xr", addr);
+        /* Each postincrement happens immediately after its successful read.
+         * Besides preserving the 68000 bus-fault boundary, this ordering is
+         * observable when Ay and Ax name the same register: the destination
+         * must be read from the address following the source. */
         fprintf(f,
             "  { %s _cmpm_s = (%s)%s(g_cpu.A[%d]);\n"
+            "    g_cpu.A[%d] += %d;\n"
             "    %s _cmpm_d = (%s)%s(g_cpu.A[%d]);\n"
+            "    g_cpu.A[%d] += %d;\n"
             "    %s %s = (%s)(_cmpm_d - _cmpm_s);\n",
             ct, ct, rf, ay,
+            ay, ay_inc,
             ct, ct, rf, ax,
+            ax, ax_inc,
             ct, res, ct);
         char da[64], db[64];
         snprintf(da, sizeof(da), "_cmpm_d");
         snprintf(db, sizeof(db), "_cmpm_s");
         emit_flags_cmp(f, da, db, res, sz);
-        fprintf(f,
-            "    g_cpu.A[%d] += %d;\n"
-            "    g_cpu.A[%d] += %d;\n"
-            "  }\n",
-            ay, ay_inc, ax, ax_inc);
+        fprintf(f, "  }\n");
         break;
     }
 
@@ -3134,43 +3532,55 @@ static void emit_instr(FILE *f, const GenesisRom *rom,
     case MN_ROXR: {
         if (instr->mem_shift) { emit_mem_shift(f, instr, addr, &er); break; }
         int dreg  = instr->reg;
-        int count = (int)(instr->imm32 & 63);
+        bool reg_count = (instr->src_ea >= 0);
+        int count = reg_count ? 0 : (int)(instr->imm32 & 63);
         bool left = (instr->mnemonic == MN_ROXL);
         const char *ct = size_ctype(sz);
         int bits = size_bits(sz);
-        int c = count % (bits + 1); /* rotate through X: period = bits+1 */
+        int period = bits + 1; /* rotate through X: period = bits+1 */
+        uint64_t wide_mask = (1ull << period) - 1ull;
+        uint64_t data_mask = (1ull << bits) - 1ull;
         char res[64];
         snprintf(res, sizeof(res), "_%06Xr", addr);
 
         fprintf(f, "  { %s _sv = (%s)g_cpu.D[%d];\n", ct, ct, dreg);
-        fprintf(f, "    uint32_t _x = (g_cpu.SR >> 4) & 1u;\n");
-        /* Build a (bits+1)-wide value with X in the extra bit, then rotate */
+        if (reg_count)
+            fprintf(f, "    uint32_t _raw_cnt = g_cpu.D[%d] & 63u;\n", instr->src_ea);
+        else
+            fprintf(f, "    uint32_t _raw_cnt = %du;\n", count);
+        fprintf(f,
+                "    uint32_t _cnt = _raw_cnt %% %du;\n"
+                "    uint64_t _x = (g_cpu.SR >> 4) & 1u;\n"
+                "    uint64_t _wide = (uint64_t)_sv | (_x << %d);\n",
+                period, bits);
+        /* The long form rotates a 33-bit X:Dn field. A uint32_t temporary made
+         * X<<32 and rot>>32 undefined; keep the entire ring in uint64_t for all
+         * operand sizes. */
         if (left) {
             fprintf(f,
-                "    uint32_t _wide = ((uint32_t)_sv) | (_x << %d);\n"
-                "    uint32_t _rot  = ((_wide << %d) | (_wide >> (%d - %d))) & 0x%08Xu;\n"
-                "    %s %s = (%s)(_rot & 0x%08Xu);\n"
-                "    uint32_t _c = (_rot >> %d) & 1u;\n",
-                bits,
-                c, bits + 1, c, (bits == 32) ? 0xFFFFFFFFu : ((1u << (bits + 1)) - 1u),
-                ct, res, ct, (bits == 32) ? 0xFFFFFFFFu : ((1u << bits) - 1u),
-                bits);
+                "    uint64_t _rot = _cnt ? ((_wide << _cnt) | (_wide >> (%d - _cnt))) : _wide;\n",
+                period);
         } else {
             fprintf(f,
-                "    uint32_t _wide = ((uint32_t)_sv) | (_x << %d);\n"
-                "    uint32_t _rot  = ((_wide >> %d) | (_wide << (%d - %d))) & 0x%08Xu;\n"
-                "    %s %s = (%s)(_rot & 0x%08Xu);\n"
-                "    uint32_t _c = (_rot >> %d) & 1u;\n",
-                bits,
-                c, bits + 1, c, (bits == 32) ? 0xFFFFFFFFu : ((1u << (bits + 1)) - 1u),
-                ct, res, ct, (bits == 32) ? 0xFFFFFFFFu : ((1u << bits) - 1u),
-                bits);
+                "    uint64_t _rot = _cnt ? ((_wide >> _cnt) | (_wide << (%d - _cnt))) : _wide;\n",
+                period);
         }
+        fprintf(f,
+                "    _rot &= 0x%llXull;\n"
+                "    %s %s = (%s)(_rot & 0x%llXull);\n"
+                "    uint32_t _c = (uint32_t)((_rot >> %d) & 1u);\n",
+                (unsigned long long)wide_mask,
+                ct, res, ct, (unsigned long long)data_mask, bits);
         emit_store_dn(f, "    ", dreg, res, sz);
-        fprintf(f, "    g_cpu.SR &= ~(0x1Fu);\n");
+        /* Register count zero preserves X and clears C. Any nonzero count sets
+         * X=C, including a whole-period rotation with unchanged data. */
+        fprintf(f, "    g_cpu.SR &= ~(0x0Fu);\n");
         fprintf(f, "    if (!%s) g_cpu.SR |= (1u<<2);\n", res);
         fprintf(f, "    if ((uint32_t)%s >> %d) g_cpu.SR |= (1u<<3);\n", res, bits - 1);
-        fprintf(f, "    if (_c) { g_cpu.SR |= (1u<<0); g_cpu.SR |= (1u<<4); }\n");
+        fprintf(f, "    if (_raw_cnt) {\n");
+        fprintf(f, "      g_cpu.SR &= ~(1u<<4);\n");
+        fprintf(f, "      if (_c) { g_cpu.SR |= (1u<<0); g_cpu.SR |= (1u<<4); }\n");
+        fprintf(f, "    }\n");
         fprintf(f, "  }\n");
         break;
     }
@@ -3504,16 +3914,32 @@ static void emit_instr(FILE *f, const GenesisRom *rom,
 
     /* ------------------------------------------------------------------ */
     case MN_NEGX: {
-        /* NEGX: result = 0 - ea - X */
+        /* NEGX: result = 0 - ea - X. Z is cumulative across a
+         * multi-precision chain, and the borrow includes X even when
+         * ea+X wraps to zero at the operand width. */
         const char *ct = size_ctype(sz);
+        int bits = size_bits(sz);
+        uint32_t sign_mask = (bits == 32) ? 0x80000000u :
+                             (bits == 16) ? 0x8000u : 0x80u;
         emit_ea_load_ex(f, instr, instr->src_ea, sz, &er, tmp, src_expr, 1);
         char res[64];
         snprintf(res, sizeof(res), "_%06Xr", addr);
         fprintf(f,
             "  { uint32_t _x = (g_cpu.SR >> 4) & 1u;\n"
-            "    %s %s = (%s)(0 - (%s)(%s) - (%s)_x);\n",
-            ct, res, ct, ct, src_expr, ct);
-        emit_flags_sub(f, "0", src_expr, res, sz);
+            "    int _zold = (g_cpu.SR >> 2) & 1;\n"
+            "    uint64_t _subtrahend = (uint64_t)(%s)(%s) + (uint64_t)_x;\n"
+            "    %s %s = (%s)(0u - _subtrahend);\n"
+            "    g_cpu.SR &= ~(0x1Fu);\n"
+            "    if (!%s && _zold)                         g_cpu.SR |= %s;\n"
+            "    if (%s >> %d)                             g_cpu.SR |= %s;\n"
+            "    if (_subtrahend != 0)                     { g_cpu.SR |= %s; g_cpu.SR |= %s; }\n"
+            "    if ((%s)(%s) == (%s)0x%08Xu && !_x) g_cpu.SR |= %s;\n",
+            ct, src_expr,
+            ct, res, ct,
+            res, SR_Z,
+            res, bits - 1, SR_N,
+            SR_C, SR_X,
+            ct, src_expr, ct, sign_mask, SR_V);
         ExtReader er2; er_init(&er2, instr);
         emit_ea_store_ex(f, instr, instr->src_ea, sz, &er2, res, 1);
         fprintf(f, "  }\n");
@@ -3991,11 +4417,15 @@ bool codegen_emit(const GenesisRom *rom, const FunctionList *funcs,
                   const AnnotationTable *at, const GameConfig *cfg,
                   bool reverse_debug) {
     s_reverse_debug = reverse_debug;
+    free(s_candidate_owners);
+    s_candidate_owners = NULL;
+    s_candidate_owner_count = 0;
     s_extra_seeds      = cfg ? cfg->extra_seeds      : NULL;
     s_extra_seed_count = cfg ? cfg->extra_seed_count : 0;
     codegen_diag_reset();
     audit_reset();
     s_falloff_count = 0;
+    s_misaligned_reported_count = 0;
 
     FILE *f_full     = fopen(out_full_path,     "w");
     FILE *f_dispatch = fopen(out_dispatch_path, "w");
@@ -4027,17 +4457,43 @@ bool codegen_emit(const GenesisRom *rom, const FunctionList *funcs,
         AddrSet extern_targets;
         addrset_init(&extern_targets);
 
-        for (int i = 0; i < all_funcs.count; i++) {
+        AddrSet iter_boundaries;
+        uint32_t *iter_owners = NULL;
+        if (cfg && cfg->function_aliases) {
+            iter_owners = build_entry_owners(rom, &all_funcs, cfg,
+                                             &iter_boundaries, false);
+        } else {
+            iter_owners = (uint32_t *)malloc((size_t)all_funcs.count
+                                             * sizeof(uint32_t));
+            addrset_init(&iter_boundaries);
+            if (iter_owners) {
+                for (int i = 0; i < all_funcs.count; i++) {
+                    iter_owners[i] = all_funcs.addrs[i];
+                    addrset_insert(&iter_boundaries, all_funcs.addrs[i]);
+                }
+            }
+        }
+        if (!iter_owners) {
+            addrset_free(&extern_targets);
+            fclose(f_full); fclose(f_dispatch);
+            addrset_free(&all_funcs);
+            return false;
+        }
+
+        for (int i = 0; i < iter_boundaries.count; i++) {
             AddrSet instrs, labels;
             addrset_init(&instrs);
             addrset_init(&labels);
-            scan_function(rom, all_funcs.addrs[i], &instrs, &labels,
+            scan_function(rom, iter_boundaries.addrs[i], &instrs, &labels,
+                          iter_boundaries.addrs, iter_boundaries.count,
                           all_funcs.addrs, all_funcs.count, &extern_targets,
                           cfg ? cfg->extra_seeds : NULL,
-                          cfg ? cfg->extra_seed_count : 0);
+                          cfg ? cfg->extra_seed_count : 0, cfg);
             addrset_free(&instrs);
             addrset_free(&labels);
         }
+        free(iter_owners);
+        addrset_free(&iter_boundaries);
 
         /* Add any external targets that aren't already function entries.
          * Skip blacklisted addresses (game.cfg `blacklist` directive) —
@@ -4093,6 +4549,18 @@ bool codegen_emit(const GenesisRom *rom, const FunctionList *funcs,
 
     printf("[Codegen] Final function count after boundary splitting: %d\n", all_funcs.count);
 
+    AddrSet hard_boundaries;
+    uint32_t *entry_owners = build_entry_owners(rom, &all_funcs, cfg,
+                                                &hard_boundaries, true);
+    if (!entry_owners) {
+        fclose(f_full); fclose(f_dispatch);
+        addrset_free(&all_funcs);
+        return false;
+    }
+    ResumeMap resume_map;
+    resume_map_init(&resume_map);
+    bool async_resume = cfg && cfg->async_resume_entries;
+
     if (s_dump_functions_path) {
         FILE *df = fopen(s_dump_functions_path, "w");
         if (df) {
@@ -4100,6 +4568,20 @@ bool codegen_emit(const GenesisRom *rom, const FunctionList *funcs,
                         "%d entries. One hex address per line.\n", all_funcs.count);
             for (int i = 0; i < all_funcs.count; i++)
                 fprintf(df, "%06X\n", all_funcs.addrs[i]);
+            fprintf(df, "# Branch-proven alias candidates (entry -> host).\n");
+            if (s_candidate_owner_count == all_funcs.count) {
+                for (int i = 0; i < all_funcs.count; i++) {
+                    if (s_candidate_owners[i] != all_funcs.addrs[i])
+                        fprintf(df, "# candidate %06X -> %06X\n",
+                                all_funcs.addrs[i], s_candidate_owners[i]);
+                }
+            }
+            fprintf(df, "# Active aliases (entry -> canonical host).\n");
+            for (int i = 0; i < all_funcs.count; i++) {
+                if (entry_owners[i] != all_funcs.addrs[i])
+                    fprintf(df, "# alias %06X -> %06X\n",
+                            all_funcs.addrs[i], entry_owners[i]);
+            }
             fclose(df);
             printf("[Codegen] Dumped %d function addresses to %s\n",
                    all_funcs.count, s_dump_functions_path);
@@ -4123,6 +4605,14 @@ bool codegen_emit(const GenesisRom *rom, const FunctionList *funcs,
     /* Emit each function body */
     for (int i = 0; i < all_funcs.count; i++) {
         uint32_t func_addr = all_funcs.addrs[i];
+        uint32_t walk_start = entry_owners[i];
+        if (walk_start != func_addr)
+            continue;
+        int group_count = 0;
+        for (int a = 0; a < all_funcs.count; a++) {
+            if (entry_owners[a] == func_addr) group_count++;
+        }
+        bool has_aliases = group_count > 1;
 
         /* Annotation comment */
         const char *name = annotations_get_name(at, func_addr);
@@ -4133,13 +4623,29 @@ bool codegen_emit(const GenesisRom *rom, const FunctionList *funcs,
         AddrSet instrs, labels;
         addrset_init(&instrs);
         addrset_init(&labels);
-        scan_function(rom, func_addr, &instrs, &labels,
+        scan_function(rom, walk_start, &instrs, &labels,
+                      hard_boundaries.addrs, hard_boundaries.count,
                       all_funcs.addrs, all_funcs.count, NULL,
                       cfg ? cfg->extra_seeds : NULL,
-                      cfg ? cfg->extra_seed_count : 0);
+                      cfg ? cfg->extra_seed_count : 0, cfg);
 
         /* Sort instruction addresses */
         addrset_sort(&instrs);
+
+        if (async_resume) {
+            for (int j = 0; j < instrs.count; j++) {
+                if (!resume_map_append(&resume_map, instrs.addrs[j], func_addr)) {
+                    fprintf(stderr, "[Codegen] out of memory building async resume map\n");
+                    addrset_free(&instrs); addrset_free(&labels);
+                    resume_map_free(&resume_map);
+                    free(entry_owners);
+                    addrset_free(&hard_boundaries);
+                    addrset_free(&all_funcs);
+                    fclose(f_full); fclose(f_dispatch);
+                    return false;
+                }
+            }
+        }
 
         /* Interior-dispatch pre-pass: any JMP (d8,PC,Xn) inside this function
          * whose targets land on in-function instructions needs `label_XXXXXX:;`
@@ -4191,10 +4697,30 @@ bool codegen_emit(const GenesisRom *rom, const FunctionList *funcs,
         if (entry_not_first)
             addrset_insert(&labels, func_addr);
 
-        fprintf(f_full, "void func_%06X(void) {\n", func_addr);
+        bool shared_body = has_aliases || async_resume;
+        if (async_resume) {
+            for (int j = 0; j < instrs.count; j++)
+                addrset_insert(&labels, instrs.addrs[j]);
+            fprintf(f_full, "void func_resume_%06X(uint32_t _entry) {\n",
+                    func_addr);
+        } else if (has_aliases) {
+            for (int a = 0; a < all_funcs.count; a++) {
+                if (entry_owners[a] == func_addr && all_funcs.addrs[a] != func_addr)
+                    addrset_insert(&labels, all_funcs.addrs[a]);
+            }
+            fprintf(f_full, "static void func_body_%06X(uint32_t _entry) {\n",
+                    func_addr);
+        } else {
+            fprintf(f_full, "void func_%06X(void) {\n", func_addr);
+        }
         if (s_reverse_debug) {
-            fprintf(f_full, "  g_rdb_current_func = 0x%06Xu;\n", func_addr);
-            fprintf(f_full, "  rdb_on_block(0x%06Xu);\n",        func_addr);
+            if (shared_body) {
+                fprintf(f_full, "  g_rdb_current_func = _entry;\n");
+                fprintf(f_full, "  rdb_on_block(_entry);\n");
+            } else {
+                fprintf(f_full, "  g_rdb_current_func = 0x%06Xu;\n", func_addr);
+                fprintf(f_full, "  rdb_on_block(0x%06Xu);\n",        func_addr);
+            }
         }
 
         /* Pre-scan: check if any instruction is ADDQ/ADDA to A7 (sp).
@@ -4244,10 +4770,10 @@ bool codegen_emit(const GenesisRom *rom, const FunctionList *funcs,
          *      func_003384, and (by inspection) virtually every other
          *      Genesis disasm port. Detecting the shape statically means
          *      we don't need a per-game cfg directive for any future port. */
-        bool yield_via_cfg = (cfg->vblank_yield_addr &&
+        bool yield_via_cfg = (!shared_body && cfg->vblank_yield_addr &&
                               func_addr == cfg->vblank_yield_addr);
         bool yield_via_pattern = false;
-        if (!yield_via_cfg && instrs.count == 4) {
+        if (!shared_body && !yield_via_cfg && instrs.count == 4) {
             M68KInstr di[4];
             bool ok = true;
             for (int k = 0; k < 4 && ok; k++) {
@@ -4282,8 +4808,32 @@ bool codegen_emit(const GenesisRom *rom, const FunctionList *funcs,
             continue;
         }
 
-        if (entry_not_first)
+        if (async_resume) {
+            fprintf(f_full, "  switch (_entry) {\n");
+            for (int j = 0; j < instrs.count; j++) {
+                uint32_t entry = instrs.addrs[j];
+                if (j == 0)
+                    fprintf(f_full, "    case 0x%06Xu: break;\n", entry);
+                else
+                    fprintf(f_full, "    case 0x%06Xu: goto label_%06X;\n",
+                            entry, entry);
+            }
+            fprintf(f_full, "    default: return;\n  }\n");
+        } else if (has_aliases) {
+            fprintf(f_full, "  switch (_entry) {\n");
+            for (int a = 0; a < all_funcs.count; a++) {
+                uint32_t entry = all_funcs.addrs[a];
+                if (entry_owners[a] == func_addr && entry != func_addr)
+                    fprintf(f_full, "    case 0x%06Xu: goto label_%06X;\n",
+                            entry, entry);
+            }
+            if (entry_not_first)
+                fprintf(f_full, "    case 0x%06Xu: goto label_%06X;\n",
+                        func_addr, func_addr);
+            fprintf(f_full, "    default: break;\n  }\n");
+        } else if (entry_not_first) {
             fprintf(f_full, "  goto label_%06X;\n", func_addr);
+        }
 
         bool skip_until_label = false;
 
@@ -4388,6 +4938,7 @@ bool codegen_emit(const GenesisRom *rom, const FunctionList *funcs,
                                       last_instr.mnemonic == MN_RTE     ||
                                       last_instr.mnemonic == MN_RTR     ||
                                       last_instr.mnemonic == MN_STOP    ||
+                                      last_instr.mnemonic == MN_TRAP    ||
                                       last_instr.mnemonic == MN_ILLEGAL ||
                                       last_instr.mnemonic == MN_JMP     ||
                                       last_instr.mnemonic == MN_BRA);
@@ -4416,9 +4967,68 @@ bool codegen_emit(const GenesisRom *rom, const FunctionList *funcs,
 
         fprintf(f_full, "}\n\n");
 
+        if (shared_body) {
+            for (int a = 0; a < all_funcs.count; a++) {
+                uint32_t entry = all_funcs.addrs[a];
+                if (entry_owners[a] != func_addr) continue;
+                const char *alias_name = annotations_get_name(at, entry);
+                if (alias_name)
+                    fprintf(f_full, "/* %s */\n", alias_name);
+                if (async_resume)
+                    fprintf(f_full,
+                            "void func_%06X(void) { func_resume_%06X(0x%06Xu); }\n",
+                            entry, func_addr, entry);
+                else
+                    fprintf(f_full,
+                            "void func_%06X(void) { func_body_%06X(0x%06Xu); }\n",
+                            entry, func_addr, entry);
+            }
+            fprintf(f_full, "\n");
+        }
+
         addrset_free(&instrs);
         addrset_free(&labels);
     }
+
+    if (async_resume && resume_map.count > 1) {
+        qsort(resume_map.items, (size_t)resume_map.count,
+              sizeof(resume_map.items[0]), resume_point_cmp);
+        int out = 0;
+        int convergent_overlaps = 0;
+        for (int i = 0; i < resume_map.count; i++) {
+            if (out > 0 && resume_map.items[i].addr == resume_map.items[out - 1].addr) {
+                if (resume_map.items[i].owner != resume_map.items[out - 1].owner) {
+                    /* Legal overlapping decode streams can converge at a
+                     * later common instruction. Its suffix semantics are the
+                     * same from that exact PC, so select the already-proven
+                     * exact-entry owner when one exists; otherwise use the
+                     * lower host deterministically. */
+                    uint32_t chosen = resume_map.items[out - 1].owner;
+                    int ei = function_entry_index(resume_map.items[i].addr,
+                                                  all_funcs.addrs,
+                                                  all_funcs.count);
+                    if (ei >= 0 &&
+                        (entry_owners[ei] == resume_map.items[out - 1].owner ||
+                         entry_owners[ei] == resume_map.items[i].owner)) {
+                        chosen = entry_owners[ei];
+                    } else if (resume_map.items[i].owner < chosen) {
+                        chosen = resume_map.items[i].owner;
+                    }
+                    resume_map.items[out - 1].owner = chosen;
+                    convergent_overlaps++;
+                }
+                continue;
+            }
+            resume_map.items[out++] = resume_map.items[i];
+        }
+        resume_map.count = out;
+        if (convergent_overlaps)
+            printf("[Codegen] Async resume ownership: %d convergent overlapping PC(s) canonicalized\n",
+                   convergent_overlaps);
+    }
+    if (async_resume)
+        printf("[Codegen] Async native resume map: %d emitted instruction entries\n",
+               resume_map.count);
 
     /* Dispatch table */
     fprintf(f_dispatch, "/* AUTO-GENERATED by CdiRecomp. DO NOT EDIT. */\n");
@@ -4427,22 +5037,70 @@ bool codegen_emit(const GenesisRom *rom, const FunctionList *funcs,
     fprintf(f_dispatch, "#include <stddef.h>\n");
     fprintf(f_dispatch, "#include <stdio.h>\n");
     fprintf(f_dispatch, "#include <stdlib.h>\n\n");
-    fprintf(f_dispatch, "typedef void (*FuncPtr)(void);\n\n");
+    fprintf(f_dispatch,
+        "typedef void (*FuncPtr)(void);\n"
+        "typedef void (*ResumeFunc)(uint32_t);\n\n");
     fprintf(f_dispatch,
         "typedef struct {\n"
         "    uint32_t addr;\n"
         "    FuncPtr  fn;\n"
-        "} DispatchEntry;\n\n");
+        "} DispatchEntry;\n\n"
+        "typedef struct {\n"
+        "    uint32_t   addr;\n"
+        "    ResumeFunc fn;\n"
+        "} ResumeEntry;\n\n");
 
     /* Forward-declare all functions */
     for (int i = 0; i < all_funcs.count; i++)
         fprintf(f_dispatch, "void func_%06X(void);\n", all_funcs.addrs[i]);
+    if (async_resume) {
+        for (int i = 0; i < all_funcs.count; i++) {
+            if (entry_owners[i] == all_funcs.addrs[i])
+                fprintf(f_dispatch, "void func_resume_%06X(uint32_t);\n",
+                        all_funcs.addrs[i]);
+        }
+    }
 
     fprintf(f_dispatch, "\nstatic const DispatchEntry s_dispatch_table[] = {\n");
     for (int i = 0; i < all_funcs.count; i++)
         fprintf(f_dispatch, "    { 0x%06Xu, func_%06X },\n",
                 all_funcs.addrs[i], all_funcs.addrs[i]);
     fprintf(f_dispatch, "    { 0u, NULL }\n};\n\n");
+
+    fprintf(f_dispatch, "static const ResumeEntry s_resume_table[] = {\n");
+    for (int i = 0; i < resume_map.count; i++)
+        fprintf(f_dispatch, "    { 0x%06Xu, func_resume_%06X },\n",
+                resume_map.items[i].addr, resume_map.items[i].owner);
+    fprintf(f_dispatch, "    { 0u, NULL }\n};\n\n");
+
+    fprintf(f_dispatch,
+        "static FuncPtr recomp_find_func(uint32_t addr) {\n"
+        "    int lo = 0, hi = %d;\n"
+        "    while (lo < hi) {\n"
+        "        int mid = lo + (hi - lo) / 2;\n"
+        "        if (s_dispatch_table[mid].addr < addr) lo = mid + 1;\n"
+        "        else hi = mid;\n"
+        "    }\n"
+        "    return (lo < %d && s_dispatch_table[lo].addr == addr)\n"
+        "         ? s_dispatch_table[lo].fn : NULL;\n"
+        "}\n\n",
+        all_funcs.count, all_funcs.count);
+    fprintf(f_dispatch,
+        "static ResumeFunc recomp_find_resume(uint32_t addr) {\n"
+        "    int lo = 0, hi = %d;\n"
+        "    while (lo < hi) {\n"
+        "        int mid = lo + (hi - lo) / 2;\n"
+        "        if (s_resume_table[mid].addr < addr) lo = mid + 1;\n"
+        "        else hi = mid;\n"
+        "    }\n"
+        "    return (lo < %d && s_resume_table[lo].addr == addr)\n"
+        "         ? s_resume_table[lo].fn : NULL;\n"
+        "}\n\n"
+        "int game_dispatch_has_addr(uint32_t addr) {\n"
+        "    addr &= 0xFFFFFFu;\n"
+        "    return recomp_find_func(addr) != NULL || recomp_find_resume(addr) != NULL;\n"
+        "}\n\n",
+        resume_map.count, resume_map.count);
 
     /* Table accessors for interior-label detection in genesis_log_dispatch_miss */
     fprintf(f_dispatch, "int game_dispatch_table_size(void) { return %d; }\n", all_funcs.count);
@@ -4467,16 +5125,24 @@ bool codegen_emit(const GenesisRom *rom, const FunctionList *funcs,
         "    g_recomp_tail_frame->pending = 1;\n"
         "}\n\n"
         "static void recomp_dispatch_once(uint32_t addr) {\n"
-        "    for (int i = 0; s_dispatch_table[i].fn; i++) {\n"
-        "        if (s_dispatch_table[i].addr == addr) {\n"
-        "            s_dispatch_table[i].fn();\n"
-        "            g_call_was_hybrid = 0;   /* flat-called a recompiled entry */\n"
-        "            return;\n"
-        "        }\n"
+        "    FuncPtr fn = recomp_find_func(addr);\n"
+        "    if (fn) {\n"
+        "        fn();\n"
+        "        g_call_was_hybrid = 0;   /* flat-called a recompiled entry */\n"
+        "        return;\n"
         "    }\n"
-        "    if (!game_dispatch_override(addr))\n"
+        "    ResumeFunc resume = recomp_find_resume(addr);\n"
+        "    if (resume) {\n"
+        "        resume(addr);\n"
+        "        g_call_was_hybrid = 0;   /* native interior exception resume */\n"
+        "        return;\n"
+        "    }\n"
+        "    if (!game_dispatch_override(addr)) {\n"
         "        genesis_log_dispatch_miss(addr);\n"
-        "    g_call_was_hybrid = 1;   /* ran in the interpreter — guest stack authoritative */\n"
+        "        g_call_was_hybrid = 1; /* failed/nested hybrid: legacy unwind */\n"
+        "    }\n"
+        "    /* A handled hybrid owns the flag: reaching its outer stop PC makes\n"
+        "     * guest A7 authoritative; early native re-entry remains flat. */\n"
         "}\n\n"
         "static void recomp_drain_tailcalls(RecompTailFrame *frame) {\n"
         "    unsigned guard = 0;\n"
@@ -4703,6 +5369,12 @@ bool codegen_emit(const GenesisRom *rom, const FunctionList *funcs,
                "or linked fall-through).\n");
     }
 
+    free(entry_owners);
+    resume_map_free(&resume_map);
+    free(s_candidate_owners);
+    s_candidate_owners = NULL;
+    s_candidate_owner_count = 0;
+    addrset_free(&hard_boundaries);
     addrset_free(&all_funcs);
     fclose(f_full);
     fclose(f_dispatch);

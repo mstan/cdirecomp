@@ -199,6 +199,10 @@ def main():
     ap.add_argument("--native", type=int, default=4390)
     ap.add_argument("--oracle", type=int, default=4381)
     ap.add_argument("--start", type=int, default=1)
+    ap.add_argument("--native-start", type=int,
+                    help="native-side first seq (defaults to --start)")
+    ap.add_argument("--oracle-start", type=int,
+                    help="oracle-side first seq (defaults to --start)")
     ap.add_argument("--window", type=int, default=4096)
     ap.add_argument("--context", type=int, default=6)
     ap.add_argument("--loop-window", type=int, default=400,
@@ -215,11 +219,18 @@ def main():
     try:
         N, O = Trace(args.native), Trace(args.oracle)
         nt, ot = N.total(), O.total()
-        stop = min(nt, ot)
+        nstart = args.start if args.native_start is None else args.native_start
+        ostart = args.start if args.oracle_start is None else args.oracle_start
+        span = min(nt - nstart, ot - ostart)
+        if span <= 0:
+            raise IOError("requested offset window is empty")
+        nstop = nstart + span
+        ostop = ostart + span
         print(f"native :{args.native} has {nt}; oracle :{args.oracle} has {ot}. "
-              f"loading [{args.start}, {stop}) into memory ...", flush=True)
-        N.load(args.start, stop)
-        O.load(args.start, stop)
+              f"loading native [{nstart}, {nstop}), oracle [{ostart}, {ostop}) "
+              "into memory ...", flush=True)
+        N.load(nstart, nstop)
+        O.load(ostart, ostop)
     except (OSError, IOError) as e:
         print(f"load failed: {e}. Start both held with the window in their rings.", file=sys.stderr)
         return 2
