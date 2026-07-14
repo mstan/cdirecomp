@@ -12,12 +12,29 @@
  * main thread runs the recompiled OS. */
 void debug_server_init(int port);
 
+/* Per-launch identity echoed by ping. The co-sim supplies a random hex token
+ * so an unrelated or stale process already holding the port cannot be
+ * mistaken for the child that was just launched. Call before init. */
+void debug_server_set_session(const char *session);
+
 /* Legacy poll hook (the server is threaded now). Kept as a no-op so existing
  * call sites compile; remove once nothing calls it. */
 void debug_server_poll(void);
 
+/* Deterministic dev-only input playback. The comma-separated specification is
+ * a strictly increasing list of completed-frame transitions (`frame:mask`).
+ * A transition is published immediately after that frame completes, through
+ * the same atomic host state consumed by the timed IKAT path. */
+int  cdi_input_schedule_configure(const char *spec);
+void cdi_input_schedule_advance(uint64_t completed_frame);
+
 /* Capture one frame snapshot into the frame ring (call once per frame). */
 void debug_ring_capture_frame(void);
+
+/* Fold one executed MCD212 ICA/DCA word into the current completed-frame
+ * diagnostic hash. area uses CeDImu's ControlArea order:
+ * ICA1=0, DCA1=1, ICA2=2, DCA2=3. */
+void debug_trace_mcd_event(uint8_t area, uint16_t line, uint32_t word);
 
 /* Capture one execution point (PC + full register file) into the block-trace
  * ring. Called from the per-block hook (glue_check_vblank) — always on. */
@@ -33,6 +50,28 @@ void debug_dump_fault_trail(const char *reason);
  * "last write covering address A before seq S" rather than re-running. Called
  * from the bus write path (cdi_bus.c). `size` is 1/2/4 bytes. */
 void debug_trace_store(uint32_t addr, uint32_t val, int size);
+
+/* Monotonic execution-ring position at the instruction currently in flight.
+ * Device event rings snapshot this value so a hardware access can be joined
+ * back to the full CPU trace without arming a future capture. */
+uint64_t debug_trace_sequence(void);
+
+/* Always-on CIAP access ring.  The CIAP model owns the records because reads
+ * may have device side effects; the debug server only takes a side-effect-free
+ * snapshot for the `ciap_events` TCP query. */
+typedef struct {
+    uint64_t seq;          /* CIAP event sequence */
+    uint64_t trace_seq;    /* execution-ring sequence in flight */
+    uint64_t frame;
+    uint64_t cycles;
+    uint32_t pc;
+    uint32_t offset;
+    uint32_t value;
+    uint8_t  size;
+    uint8_t  write;
+} CdiCiapEvent;
+int cdic_debug_events(CdiCiapEvent *out, int capacity, uint64_t from,
+                      uint64_t *total, uint64_t *oldest);
 
 /* ---- Interpreter-fallback classification (always-on) ----
  * The hybrid interpreter (MC-CDI-011) runs whatever the static recompiler did
@@ -60,15 +99,13 @@ extern int g_fallback_reason;
  * the trace-ring sample. Aggregates by PC + g_fallback_reason + region. */
 void debug_trace_interp(uint32_t pc);
 
-/* ---- Indirect-call target collection (trace-guided discovery) ----
- * Every target passed to call_by_address that the static recompiler did NOT
- * have a function for (i.e. every game_dispatch_override addr) is recorded as a
- * distinct entry here. These are precisely the function entries the recompiler
- * should have discovered but couldn't (reached via register-indirect JSR (An)
- * through dispatch tables the kernel builds at runtime). Dump them via the
- * `indirect_targets` TCP command, union the in-ROM ones into a discovery seed
- * file, and re-seed the recompiler — the general, iterate-until-dry coverage
- * loop. Recording the entry, not every interpreted PC, gives the exact seeds. */
+/* ---- Uncovered-entry collection (trace-guided discovery) ----
+ * Every control-flow entry absent from both the exact function table and async
+ * native resume map is recorded here. That means register-indirect JSR/JMP
+ * targets and only those depth-zero exception resumes that reveal a genuinely
+ * undiscovered CFG; ordinary interior resumes are generated automatically.
+ * Dump via `indirect_targets`, union in-ROM entries into the discovery seed
+ * file, and re-seed until the new-CFG set is dry. */
 void debug_record_indirect_target(uint32_t addr);
 
 /* --fault-hold: freeze at a fatal fault instead of aborting, keeping the rings
@@ -81,3 +118,8 @@ void cdi_fault_hold(void);
  * disabled. Set from --stop-seq N; deterministic stop for diffing a window the
  * (now non-faulting) boot would otherwise run past and evict. */
 extern uint64_t g_stop_seq;
+
+/* Frame-domain counterpart to --stop-seq.  The MCD212 parks immediately after
+ * publishing this completed field, preserving the frame and all rings for a
+ * side-effect-free native/oracle comparison. */
+extern uint64_t g_stop_frame;

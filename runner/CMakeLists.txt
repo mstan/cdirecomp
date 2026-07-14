@@ -22,11 +22,13 @@ add_executable(CdiRuntime
     src/cdi_bus.c
     src/runtime.c
     src/mcd212.c
+    src/mcd212_video.c
+    src/cdi_frontend.c
+    src/cdi_media.c
     src/cdic.c
     src/slave.c
     src/periph.c
     src/cdi_nvram.c
-    src/cdrtos.c
     src/debug_server.c
     src/cosim_state.c
     src/m68k_interp.c
@@ -34,6 +36,7 @@ add_executable(CdiRuntime
     # decoder for parity-by-construction with the static C emitter.
     "${CMAKE_CURRENT_SOURCE_DIR}/../recompiler/src/m68k_decoder.c"
     "${CMAKE_CURRENT_SOURCE_DIR}/../recompiler/src/rom_parser.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../recompiler/src/disc_parser.c"
     ${BIOS_GEN_SRCS}
     ${GAME_GEN_SRCS}
 )
@@ -55,10 +58,29 @@ endif()
 
 target_compile_definitions(CdiRuntime PRIVATE $<$<BOOL:${CDI_COSIM_BUILD}>:CDI_COSIM=1>)
 
+find_package(SDL2 CONFIG REQUIRED)
+target_link_libraries(CdiRuntime PRIVATE SDL2::SDL2)
+if(WIN32)
+    add_custom_command(TARGET CdiRuntime POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_FILE:SDL2::SDL2> $<TARGET_FILE_DIR:CdiRuntime>
+        COMMENT "Copying SDL2 runtime beside CdiRuntime")
+endif()
+
 # Debug server (debug_server.c): winsock on Windows, pthreads elsewhere.
 if(WIN32)
     target_link_libraries(CdiRuntime PRIVATE ws2_32)
 else()
     find_package(Threads REQUIRED)
     target_link_libraries(CdiRuntime PRIVATE Threads::Threads)
+endif()
+
+include(CTest)
+if(BUILD_TESTING)
+    add_executable(Mcd212VideoTest
+        tests/mcd212_video_test.c
+        src/mcd212_video.c
+    )
+    target_include_directories(Mcd212VideoTest PRIVATE include)
+    add_test(NAME mcd212_video COMMAND Mcd212VideoTest)
 endif()

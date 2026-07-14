@@ -46,12 +46,12 @@ The non-negotiable maturity markers, in the order siblings acquired them:
 | Capability                         | psx | genesis | snes | nes | **cdi** |
 |------------------------------------|-----|---------|------|-----|---------|
 | ROM → self-compiling C             | ✅  | ✅      | ✅   | ✅  | ✅      |
-| Runtime boots recompiled code      | ✅  | ✅      | ✅   | ✅  | ✅ (early) |
-| Always-on ring + TCP debug server  | ✅  | ✅      | ✅   | ✅  | ❌ stub |
-| Independent oracle, same surface   | ✅  | ✅      | ~   | ~   | ❌      |
-| Regression smoke harness           | ✅  | ✅      | ✅   | ~   | ❌      |
-| Device models do real work         | ✅  | ✅      | ✅   | ✅  | ❌ stubs |
-| Boots to shell / plays a game      | ✅  | ✅      | ✅   | ✅  | ❌ (boot wall) |
+| Runtime boots recompiled code      | ✅  | ✅      | ✅   | ✅  | ✅ (shell) |
+| Always-on ring + TCP debug server  | ✅  | ✅      | ✅   | ✅  | ✅      |
+| Independent oracle, same surface   | ✅  | ✅      | ~   | ~   | ✅ CeDImu |
+| Regression smoke harness           | ✅  | ✅      | ✅   | ~   | ~ co-sim gates |
+| Device models do real work         | ✅  | ✅      | ✅   | ✅  | ✅ partial |
+| Boots to shell / plays a game      | ✅  | ✅      | ✅   | ✅  | ✅ shell / ❌ game |
 
 cdirecomp is a **working scaffold**: the engine is proven on real CD-RTOS code,
 the runtime executes it, and it fails loud exactly where the hardware model
@@ -112,7 +112,58 @@ bus error at `$FFFFFFFC`.
 - ⏳ Remaining: convert `external/CeDImu` to a submodule (MC-CDI-017); add
   emulator-internal probes (`emu_mcd212_state`, `framebuf_diff`) as devices land.
 
-### Phase C — Boot to the player shell (the milestone) — *in progress*
+### Phase C — Boot to the player shell (the milestone) — *DONE 2026-07-13*
+
+Completion result: native now reaches the CD-RTOS player-shell STOP at
+`$40A3E2` with `SR=$2000` (IPL 0), matching the CeDImu behavioral reference;
+RULE 0a is clean and no `$FFFFFF` continuation occurs. The cycle-model drift
+was closed by the differential cycle audit: recompiled JSR/BSR cycles are
+charged before the native C callee begins, and all register-count shifts/rotates
+use the live
+SCC68070 cost `13 + 3*(Dn mod 64)`. The aligned normal-instruction audit is
+clean through seq 529999. Native also carries CeDImu's 43-cycle reset exception
+into the first instruction's device-time batch, so absolute clocks match from
+seq 0. The SCC68070 timer and combined external/on-chip IRQ safepoint now raise
+and accept level 6 on the same boundary as CeDImu. The full-state realigner is
+clean across `[331000,592896)` and all four co-sim validation gates pass.
+
+The 2026-07-13 coverage pass imported the mature Genesis overlapping-entry
+ownership model and extended trace-guided discovery to asynchronous exception
+resume PCs. The current BIOS set contains 3,982 execution-proven in-ROM
+entries; codegen emits 6,066 functions (5,852 canonical + 214 aliases), with
+clean fall-off/dispatch audits and zero unsupported events. Two legal
+overlapping 68000 decode streams at `$41246E/$412472` are retained as separate
+canonical streams and reported by the structural overlap audit. Paired
+PC-indexed `MOVE.W`/`JMP` tables now discover backward cross-boundary handlers;
+all 14 audited offset tables resolve with zero interior fallback. A nested
+RTE/RTR unwinds every generated JSR frame to the depth-zero trampoline, while
+skip-RTS still unwinds one level. The aligned post-STOP service window remains
+full-state identical to CeDImu for 54,773 native instructions.
+
+CD-i asynchronous delivery can abandon generated C frames and resume at any
+emitted instruction boundary, a constraint Genesis does not have. The BIOS
+codegen therefore emits 49,171 sorted native resume entries mapping exact PCs
+to canonical bodies. Seventeen convergent overlapping PCs are canonicalized
+without creating function splits. Trace seeding is now reserved for genuinely
+unknown CFGs instead of stochastic IRQ landing points.
+
+OS-9 `TRAP #0` callers use an inline 16-bit service selector. The configured
+frontend now skips that data word and follows the post-RTE continuation in the
+same canonical CFG. The ready-media path first exposed `$43FD2E`, `$43FD54`,
+and `$440022`; after the general fix they route to their original caller bodies
+and the media smoke is dry without adding trace seeds.
+
+Phase C means the BIOS boot-to-shell milestone is complete; it does not mean
+all BIOS functionality is complete. Repeated real-media schedules previously
+exposed rare interior ROM resume PCs (13 unique entries across 10 of a 30-run
+sweep); that general class is covered by the native resume map rather than seed
+promotion, and the 30-run Release stress passes 30/30. Four-way directional
+navigation is now proven through the real guest input driver, but broader
+non-launching UI coverage and remaining BIOS-visible device behavior remain
+Phase-D work. Passive ready-media detection itself issues `E1 00 02 13` reads
+while remaining at the shell STOP, so drive reads are not a game-launch signal.
+BIOS-only navigation uses button-free packets and a synthetic fixture; Hotel
+Mario gameplay remains entirely deferred.
 
 First result (2026-06-17): with the oracle harness, the recompiled CD-RTOS is
 **bit-exact to CeDImu for all 43,159 boot instructions** — zero codegen
@@ -155,23 +206,69 @@ region in CeDImu → mirror it → advance. CeDImu reaches a shell-idle loop at
 `$40A3E2` (user mode), the boot-to-shell finish line.
 
 Then drive the remaining MC-CDI device tickets, oracle-diffed, in first-divergence order:
-MMU/memory (MC-CDI-006) → MCD212 register file already present, add decoders
-(MC-CDI-012) → IKAT (MC-CDI-023) → Timekeeper (MC-CDI-022) → interrupt delivery
-+ pacing (MC-CDI-007/010) → hybrid interpreter for RAM-built stubs (MC-CDI-011).
+MMU/memory (MC-CDI-006) → MCD212 display pipeline (MC-CDI-012) → IKAT
+(MC-CDI-023) → Timekeeper (MC-CDI-022) → interrupt delivery + pacing
+(MC-CDI-007/010) → hybrid interpreter for RAM-built stubs (MC-CDI-011).
 Each lands with an oracle diff showing the divergence closed.
 
 ### Phase D — Regression + coverage discipline
 
+- ✅ `tools/shell_idle_smoke.py` (2026-07-13): boots the real recompiled ROM to
+  `$40A3E2`, requires RULE 0a clean, verifies STOP advances devices in the
+  50-70 fps real-time band, and sends a development-only input
+  transition through the timed IKAT packet path. At this boundary CD-RTOS has
+  `IMR=$A0`: channels C/D are enabled and channel A (pointing device) is
+  deliberately masked because `pt1driv` is not open. The source-tagged IKAT
+  ring proves channel A raises ISR
+  but does not assert the external level-2 line, while unrelated enabled
+  channels and faithful recurring level-6 timer IRQs remain allowed.
+- ✅ `tools/disc_insert_smoke.py` (2026-07-13): a valid Mode-2 CUE/BIN mount and
+  eject each publish one channel-D media event, assert exactly one source-tagged
+  enabled IKAT IRQ, dwell for guest frames, return persistently to the shell,
+  and remain RULE 0a clean. It also fails on any observed in-ROM entry absent
+  from `bios/cdrtos_discovered.txt`. Functional behavior passes; repeated-run
+  insert/eject coverage passes 30/30 after native resume mapping. The corrected
+  ready response is `B0 00 02 15`: the ROM consumes byte 2 as drive state and
+  byte 3 as the media/event code, rather than treating the tail as one status.
+- ✅ `tools/bios_navigation_smoke.py` (2026-07-13): boots with valid media only
+  as a fixture, requires `pt1driv` to enable channel A, decodes the signed
+  LEFT/DOWN/UP/RIGHT reports, and proves each enabled level-2 IRQ, guest drain,
+  hardware-cursor move, framebuffer publication, and STOP return. All packets
+  remain button-free and RULE 0a clean; five consecutive Release runs pass with
+  a synthetic fixture. Broader screen/settings coverage remains open before
+  calling every BIOS function navigable.
 - `tools/boot_smoke.py`: snapshot system RAM + regs at a fixed OS-9-call count,
   diff vs committed baseline (baseline updates = same commit as the change).
 - `COVERAGE.md`: 68000 instruction-coverage audit for the SCC68070 (port the
   Genesis COVERAGE.md method; note SCC68070-only opcodes).
 
+Historical unpaced performance checkpoint (2026-07-13): a clean `Release` runner with
+`CDI_COSIM_BUILD=OFF`, the full MCD212 pixel pipeline active, and presentation
+headless reaches the shell STOP in **0.522–0.535 s wall time** (three warm
+runs). Player mode is now intentionally paced against the SCC68070 guest clock;
+fixed-sequence co-sim remains unpaced. The older 0.361 s measurement predated pixel
+decoding/composition and is not a like-for-like checkpoint.
+
 ### Phase E — The game (Hotel Mario)
+
+Deferred until the BIOS/player-shell navigation goal is complete. Mounting the
+disc for BIOS media-state tests is not game work and is not evidence of game
+launch or gameplay progress.
 
 Phase 3 in TODO.md: OS-9 module-loader bridge (MC-CDI-024), recompile
 `cdi_hotel` + streamed level modules (MC-CDI-025), CIAP CD/audio (MC-CDI-013),
 gameplay oracle (MAME `cdimono`, MC-CDI-026).
+
+The MCD212 ICA/DCA + pixel/compositing path, SDL physical controller path, and
+real CUE/BIN mount/eject transition on enabled IKAT channel D are complete. The
+shell wakes, consumes the four-byte status, and returns to `$40A3E2` with zero
+misses. Zero-input tracing shows passive ready-media detection issues
+`E1 00 02 13` at field 790, polls B0, and remains at the shell STOP. The
+BIOS/application boundary is therefore enforced with button-free navigation,
+shell-state assertions, and synthetic fixtures. Continue non-launching
+player-shell screen coverage, settings/memory UI, RTC/NVRAM, and peripheral audits. The TCP
+`set_input` and `mount_disc` commands remain development instrumentation; SDL
+drag-and-drop is the player media path.
 
 ## 5. Scaffolding gaps to close alongside
 

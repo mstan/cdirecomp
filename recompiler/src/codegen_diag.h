@@ -29,6 +29,10 @@ typedef enum {
     CGD_BRANCH_WITHOUT_TARGET,
     CGD_INVALID_STORE_EA,
     CGD_MOVE_CCR_DIRECTION_AMBIGUOUS,
+    /* Structural overlap warning, not an unsupported instruction. 68000 code
+     * may intentionally enter the same bytes on different even boundaries;
+     * codegen emits both canonical streams and audits the overlap separately. */
+    CGD_MISALIGNED_FUNC_ENTRY,
     CGD_KIND_COUNT
 } CodegenDiagKind;
 

@@ -21,8 +21,11 @@
 #include "cdi_runtime.h"
 #include "debug_server.h"
 #include "cosim_state.h"
+#include "cdi_media.h"
+#include "mcd212_video.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdatomic.h>
 #include <string.h>
 
 #ifdef _WIN32
@@ -49,20 +52,52 @@
 /* ====================================================================== */
 #define CDI_FRAME_RING_LEN 36000   /* ~10 min @ 60 Hz, matching NES/Genesis */
 
+static char s_cosim_session[65];
+
+void debug_server_set_session(const char *session) {
+    snprintf(s_cosim_session, sizeof s_cosim_session, "%s", session ? session : "");
+}
+
 typedef struct {
     uint64_t  frame;
     M68KState cpu;
+    uint16_t  width;
+    uint16_t  height;
+    uint64_t  argb_hash;
+    uint32_t  mcd_count;
+    uint64_t  mcd_hash;
     /* TODO MC-CDI-015: MCD212 plane/region regs, CDIC state, IKAT input,
      * a WRAM snapshot, last recomp function name. */
 } CdiFrameRecord;
 
 static CdiFrameRecord s_frame_ring[CDI_FRAME_RING_LEN];
 static uint32_t s_frame_widx = 0;
+static uint32_t s_mcd_count = 0;
+static uint64_t s_mcd_hash = 0x14650FB0739D0383ULL;
+
+void debug_trace_mcd_event(uint8_t area, uint16_t line, uint32_t word) {
+    const uint64_t prime = 0x00000100000001B3ULL;
+    const uint8_t bytes[7] = {
+        area, (uint8_t)line, (uint8_t)(line >> 8),
+        (uint8_t)word, (uint8_t)(word >> 8),
+        (uint8_t)(word >> 16), (uint8_t)(word >> 24)
+    };
+    for (size_t i = 0; i < sizeof bytes; i++) {
+        s_mcd_hash ^= bytes[i];
+        s_mcd_hash *= prime;
+    }
+    s_mcd_count++;
+}
 
 void debug_ring_capture_frame(void) {
     CdiFrameRecord *r = &s_frame_ring[s_frame_widx % CDI_FRAME_RING_LEN];
     r->frame = g_frame_count;
     r->cpu   = g_cpu;
+    r->argb_hash = mcd212_framebuffer_hash(&r->width, &r->height, NULL);
+    r->mcd_count = s_mcd_count;
+    r->mcd_hash = s_mcd_hash;
+    s_mcd_count = 0;
+    s_mcd_hash = 0x14650FB0739D0383ULL;
     s_frame_widx++;
 }
 
@@ -81,6 +116,7 @@ void debug_ring_capture_frame(void) {
 typedef struct {
     uint64_t  seq;     /* monotonic block index since boot */
     M68KState cpu;     /* full register file AT block entry (PC live) */
+    uint16_t  opcode;  /* instruction word at cpu.PC, sampled at entry */
     uint64_t  total_cyc; /* g_total_cycles at block entry — diff vs CeDImu totalCycleCount
                             per seq to localize a sub-frame cycle drift (MC-CDI-009). */
     uint32_t  frame;   /* g_frame_count at block entry — diff display-timing vs
@@ -102,6 +138,10 @@ typedef struct {
 static CdiTraceRecord s_trace_ring[CDI_TRACE_RING_LEN];
 static uint64_t       s_trace_seq = 0;   /* number of blocks captured */
 
+uint64_t debug_trace_sequence(void) {
+    return s_trace_seq;
+}
+
 /* Side-effect-free big-endian longword read of guest memory. debug_peek8 lives
  * in cdi_bus.c and, unlike m68k_read, does NOT touch g_last_access_addr — so
  * sampling [A7] on the hot trace path can't perturb the address-error frame's
@@ -114,11 +154,24 @@ static uint32_t debug_peek_be32(uint32_t addr) {
     return ((uint32_t)b0 << 24) | ((uint32_t)b1 << 16) | ((uint32_t)b2 << 8) | (uint32_t)b3;
 }
 
+static uint16_t debug_peek_be16(uint32_t addr) {
+    uint8_t b0 = 0, b1 = 0;
+    debug_peek8(addr, &b0); debug_peek8(addr + 1, &b1);
+    return ((uint16_t)b0 << 8) | (uint16_t)b1;
+}
+
 /* When non-zero, freeze the run once this many blocks have been traced, leaving
  * the rings intact for diffing — the deterministic analogue of --fault-hold for
  * a boot that no longer faults (the bus error is now handled, so execution runs
  * past the window of interest and would otherwise evict it). Set via --stop-seq. */
 uint64_t g_stop_seq = 0;
+uint64_t g_stop_frame = 0;
+
+/* Immediate debugger freeze requested by the TCP server. Unlike --stop-seq,
+ * this is not an armed future capture: the rings have already been recording,
+ * and `pause` asks the CPU thread to park at its very next traced instruction
+ * so the just-observed history cannot be overwritten while it is queried. */
+static atomic_int s_pause_requested;
 
 /* Hot path: one per executed block. Kept to a single struct copy. */
 void debug_trace_block(void) {
@@ -131,9 +184,10 @@ void debug_trace_block(void) {
      * trampoline WITHOUT returning — so the deferred instruction is neither
      * traced nor seq-counted here (the handler's first instruction takes this
      * seq), exactly as the CeDImu oracle jumps straight from the last poll
-     * instruction to the handler. The g_irq_pending gate keeps the common
-     * (no-pending) path a single predictable-not-taken branch. */
-    if (g_irq_pending) recomp_take_irq();
+     * instruction to the handler. External and SCC68070 on-chip requests live
+     * in separate pending masks, so the fast gate must cover both; otherwise a
+     * timer interrupt can remain queued without reaching the delivery path. */
+    if (recomp_pending_irq_mask()) recomp_take_irq();
 
     CdiTraceRecord *r = &s_trace_ring[s_trace_seq & CDI_TRACE_MASK];
     r->seq = s_trace_seq;
@@ -145,6 +199,7 @@ void debug_trace_block(void) {
     cdi_cosim_maybe_inject(s_trace_seq);
 #endif
     r->cpu = g_cpu;
+    r->opcode = debug_peek_be16(g_cpu.PC);
     r->frame = (uint32_t)g_frame_count;
     r->total_cyc = g_total_cycles;
     r->a7_top = debug_peek_be32(g_cpu.A[7]);
@@ -159,6 +214,8 @@ void debug_trace_block(void) {
     r->ram1_h = 0;
 #endif
     s_trace_seq++;
+    if (atomic_exchange_explicit(&s_pause_requested, 0, memory_order_acq_rel))
+        cdi_fault_hold();
     if (g_stop_seq && s_trace_seq >= g_stop_seq) cdi_fault_hold();
 }
 
@@ -337,10 +394,10 @@ static void fb_reset(void) {
     s_fb_total = 0; s_fb_distinct = 0; s_fb_dropped = 0;
 }
 
-/* ---- Indirect-call target set (trace-guided discovery seeds) ----
- * Distinct addresses passed to call_by_address with no compiled function. Small
- * (a few hundred entries even across a full boot), so a flat array with linear
- * dedup is fine — this is per-dispatch, not per-instruction. */
+/* ---- Uncovered-entry set (trace-guided discovery seeds) ----
+ * Distinct targets absent from both exact dispatch and the async native resume
+ * map. A flat array with linear dedup is fine — this is per-dispatch, not
+ * per-instruction. */
 #define CDI_IT_MAX 16384
 static uint32_t s_it_addr[CDI_IT_MAX];
 static int      s_it_count = 0;
@@ -390,7 +447,18 @@ static int json_str(const char *s, const char *key, char *buf, int buflen) {
     if (*p != '"') return 0;
     p++;
     int i = 0;
-    while (*p && *p != '"' && i < buflen - 1) buf[i++] = *p++;
+    while (*p && *p != '"' && i < buflen - 1) {
+        if (*p == '\\' && p[1]) {
+            p++;
+            if (*p == 'n') buf[i++] = '\n';
+            else if (*p == 'r') buf[i++] = '\r';
+            else if (*p == 't') buf[i++] = '\t';
+            else buf[i++] = *p;
+            p++;
+        } else {
+            buf[i++] = *p++;
+        }
+    }
     buf[i] = 0;
     return 1;
 }
@@ -434,13 +502,253 @@ static void resp_registers(char *out, int outlen) {
 static void resp_status(char *out, int outlen) {
     snprintf(out, outlen,
         "{\"ok\":true,\"insns\":%llu,\"blocks\":%llu,\"interp\":%llu,\"frame\":%llu,\"pc\":%u,"
-        "\"miss_count\":%u,\"miss_last\":%u,\"irq_pending\":%u,"
+        "\"halted\":%d,\"input\":%u,\"miss_count\":%u,\"miss_last\":%u,\"irq_pending\":%u,"
         "\"irq_raises\":%llu,\"irq_first_seq\":%llu}",
         (unsigned long long)g_native_insn_count, (unsigned long long)s_trace_seq,
         (unsigned long long)s_fb_total,
         (unsigned long long)g_frame_count, g_cpu.PC,
-        g_miss_count_any, g_miss_last_addr, g_irq_pending,
+        g_halted, cdi_input_get(), g_miss_count_any, g_miss_last_addr, recomp_pending_irq_mask(),
         (unsigned long long)s_irq_count, (unsigned long long)s_irq_first_seq);
+}
+
+static void resp_pause(char *out, int outlen) {
+    atomic_store_explicit(&s_pause_requested, 1, memory_order_release);
+    snprintf(out, outlen,
+             "{\"ok\":true,\"pause_requested\":true,\"seq\":%llu}",
+             (unsigned long long)s_trace_seq);
+}
+
+static void resp_video_frame(char *out, int outlen) {
+    uint16_t width, height;
+    uint64_t generation;
+    uint64_t hash = mcd212_framebuffer_hash(&width, &height, &generation);
+    snprintf(out, outlen,
+        "{\"ok\":true,\"width\":%u,\"height\":%u,\"generation\":%llu,"
+        "\"argb_fnv1a\":\"%016llx\"}",
+        width, height, (unsigned long long)generation,
+        (unsigned long long)hash);
+}
+
+/* Completed-frame history is the video-domain equivalent of the instruction
+ * trace ring.  It lets a native/oracle framebuffer mismatch be localized to
+ * its first field without repeatedly arming and rerunning either observer. */
+static void resp_frame_hashes(const char *line, char *out, int outlen) {
+    uint64_t from = 0, count = 64;
+    int have_from = json_int(line, "from", &from);
+    json_int(line, "count", &count);
+    if (count > 512) count = 512;
+
+    uint64_t total = s_frame_widx;
+    uint64_t oldest = total > CDI_FRAME_RING_LEN ? total - CDI_FRAME_RING_LEN : 0;
+    uint64_t start = have_from ? oldest : (total > count ? total - count : oldest);
+    int n = snprintf(out, outlen, "{\"ok\":true,\"total\":%llu,\"records\":[",
+                     (unsigned long long)total);
+    uint64_t emitted = 0;
+    for (uint64_t i = start; i < total && emitted < count && n < outlen - 128; i++) {
+        CdiFrameRecord r = s_frame_ring[i % CDI_FRAME_RING_LEN];
+        if (have_from && r.frame < from) continue;
+        n += snprintf(out + n, outlen - n,
+                      "%s{\"frame\":%llu,\"width\":%u,\"height\":%u,"
+                      "\"argb_fnv1a\":\"%016llx\",\"mcd_count\":%u,"
+                      "\"mcd_fnv1a\":\"%016llx\"}",
+                      emitted ? "," : "", (unsigned long long)r.frame,
+                      r.width, r.height, (unsigned long long)r.argb_hash,
+                      r.mcd_count, (unsigned long long)r.mcd_hash);
+        emitted++;
+    }
+    snprintf(out + n, outlen - n, "]}");
+}
+
+/* Read-only framebuffer inspection for UI-path coverage.  A full 768x560
+ * ARGB frame does not fit in the line-oriented debug response buffer, so
+ * expose one canonical scanline at a time.  The copy comes from the same
+ * atomically published front buffer consumed by the SDL frontend; querying it
+ * never advances or mutates the guest. */
+static void resp_video_scanline(const char *line, char *out, int outlen) {
+    static uint32_t frame[MCD212_VIDEO_MAX_WIDTH * MCD212_VIDEO_MAX_HEIGHT];
+    uint16_t width = 0, height = 0;
+    uint64_t generation = 0, raw_y = 0;
+    mcd212_framebuffer_info(&width, &height, &generation);
+    if (!json_int(line, "y", &raw_y) || raw_y >= height) {
+        snprintf(out, outlen,
+                 "{\"ok\":false,\"error\":\"y out of range\",\"width\":%u,\"height\":%u}",
+                 width, height);
+        return;
+    }
+    mcd212_render_frame(frame);
+    int n = snprintf(out, outlen,
+                     "{\"ok\":true,\"width\":%u,\"height\":%u,"
+                     "\"generation\":%llu,\"y\":%llu,\"argb\":\"",
+                     width, height, (unsigned long long)generation,
+                     (unsigned long long)raw_y);
+    const uint32_t *row = frame + (size_t)raw_y * width;
+    for (uint16_t x = 0; x < width && n < outlen - 12; x++)
+        n += snprintf(out + n, outlen - n, "%08X", row[x]);
+    snprintf(out + n, outlen - n, "\"}");
+}
+
+static void resp_video_state(char *out, int outlen) {
+    uint16_t r[32], active;
+    Mcd212VideoCursorState cursor;
+    Mcd212VideoDebugState video;
+    uint8_t csr1r, csr2r;
+    uint32_t vline;
+    mcd212_debug_state(r, &csr1r, &csr2r, &vline, &active);
+    mcd212_video_debug_cursor(&cursor);
+    mcd212_video_debug_state(&video);
+    int n = snprintf(out, outlen,
+        "{\"ok\":true,\"csr1r\":%u,\"csr2r\":%u,\"csr1w\":%u,"
+        "\"csr2w\":%u,\"dcr1\":%u,\"dcr2\":%u,\"ddr1\":%u,"
+        "\"ddr2\":%u,\"vsr1\":%u,\"vsr2\":%u,\"dcp1\":%u,"
+        "\"dcp2\":%u,\"vline\":%u,\"active_line\":%u,"
+        "\"cursor_x\":%u,\"cursor_y\":%u,\"cursor_enabled\":%u,"
+        "\"cursor_color\":%u,\"cursor_double\":%u,"
+        "\"cursor_blink_type\":%u,\"cursor_blink_on\":%u,"
+        "\"cursor_blink_off\":%u,"
+        "\"coding_a\":%u,\"coding_b\":%u,"
+        "\"image_type_a\":%u,\"image_type_b\":%u,"
+        "\"pixel_repeat_a\":%u,\"pixel_repeat_b\":%u,"
+        "\"bpp_a\":%u,\"bpp_b\":%u,"
+        "\"transparency_a\":%u,\"transparency_b\":%u,"
+        "\"mix\":%u,\"plane_b_front\":%u,\"clut_bank\":%u,"
+        "\"backdrop\":%u,\"clut_select_high\":%u,"
+        "\"two_mattes\":%u,\"external_video\":%u,"
+        "\"dyuv_a\":%u,\"dyuv_b\":%u,"
+        "\"transparent_a\":%u,\"transparent_b\":%u,"
+        "\"mask_a\":%u,\"mask_b\":%u,"
+        "\"hold_enabled_a\":%u,\"hold_enabled_b\":%u,"
+        "\"hold_factor_a\":%u,\"hold_factor_b\":%u,"
+        "\"icf_a\":%u,\"icf_b\":%u,\"clut_fnv1a\":\"%016llx\","
+        "\"cursor_pattern\":\"",
+        csr1r, csr2r, r[0x10], r[0x00], r[0x12], r[0x02],
+        r[0x18], r[0x08], r[0x14], r[0x04], r[0x1A], r[0x0A],
+        vline, active, cursor.x, cursor.y, cursor.enabled, cursor.color,
+        cursor.double_resolution, cursor.blink_type, cursor.blink_on,
+        cursor.blink_off, video.coding[0], video.coding[1],
+        video.image_type[0], video.image_type[1],
+        video.pixel_repeat[0], video.pixel_repeat[1],
+        video.bpp[0], video.bpp[1],
+        video.transparency[0], video.transparency[1], video.mix,
+        video.plane_b_front, video.clut_bank, video.backdrop,
+        video.clut_select_high, video.two_mattes, video.external_video,
+        video.dyuv_start[0], video.dyuv_start[1],
+        video.transparent_color[0], video.transparent_color[1],
+        video.mask_color[0], video.mask_color[1],
+        video.hold_enabled[0], video.hold_enabled[1],
+        video.hold_factor[0], video.hold_factor[1],
+        video.icf[0], video.icf[1], (unsigned long long)video.clut_hash);
+    for (int i = 0; i < 16 && n < outlen - 8; i++)
+        n += snprintf(out + n, outlen - n, "%04X", cursor.pattern[i]);
+    snprintf(out + n, outlen - n, "\"}");
+}
+
+/* set_input: permanent deterministic controller surface. `mask` uses the
+ * CDI_INPUT_* ABI; named fields may be supplied instead for human clients.
+ * This only publishes host state. The CPU thread generates a real timed IKAT
+ * channel-A packet and IRQ, so tests exercise the guest input driver. */
+static void resp_set_input(const char *line, char *out, int outlen) {
+    uint64_t raw = 0, value = 0;
+    uint32_t mask = 0;
+    if (json_int(line, "mask", &raw)) {
+        mask = (uint32_t)raw;
+    } else {
+        if (json_int(line, "left",  &value) && value) mask |= CDI_INPUT_LEFT;
+        if (json_int(line, "up",    &value) && value) mask |= CDI_INPUT_UP;
+        if (json_int(line, "right", &value) && value) mask |= CDI_INPUT_RIGHT;
+        if (json_int(line, "down",  &value) && value) mask |= CDI_INPUT_DOWN;
+        if (json_int(line, "btn1",  &value) && value) mask |= CDI_INPUT_BTN1;
+        if (json_int(line, "btn2",  &value) && value) mask |= CDI_INPUT_BTN2;
+    }
+    cdi_input_set(mask);
+    snprintf(out, outlen, "{\"ok\":true,\"input\":%u}", cdi_input_get());
+}
+
+static void resp_ikat_state(char *out, int outlen) {
+    uint8_t regs[15], remaining[4];
+    double pointer_ns;
+    int packets;
+    slave_debug_state(regs, remaining, &pointer_ns, &packets);
+    int n = snprintf(out, outlen,
+        "{\"ok\":true,\"input\":%u,\"pointer_ns\":%.0f,\"cursor_packets\":%d,"
+        "\"out_remaining\":[%u,%u,%u,%u],\"regs\":[",
+        cdi_input_get(), pointer_ns, packets,
+        remaining[0], remaining[1], remaining[2], remaining[3]);
+    for (int i = 0; i < 15 && n < outlen - 16; i++)
+        n += snprintf(out + n, outlen - n, "%s%u", i ? "," : "", regs[i]);
+    snprintf(out + n, outlen - n, "]}");
+}
+
+static void resp_ikat_events(char *out, int outlen) {
+    CdiIkatEvent events[64];
+    uint64_t total;
+    int count = slave_debug_events(events, 64, &total);
+    int n = snprintf(out, outlen, "{\"ok\":true,\"total\":%llu,\"events\":[",
+                     (unsigned long long)total);
+    for (int i = 0; i < count && n < outlen - 128; i++) {
+        CdiIkatEvent *e = &events[i];
+        n += snprintf(out + n, outlen - n,
+            "%s{\"seq\":%llu,\"trace_seq\":%llu,\"pc\":%u,"
+            "\"frame\":%llu,\"cycles\":%llu,\"type\":%u,"
+            "\"channel\":%u,\"data\":\"",
+            i ? "," : "", (unsigned long long)e->seq,
+            (unsigned long long)e->trace_seq, e->pc,
+            (unsigned long long)e->frame, (unsigned long long)e->cycles,
+            e->type, e->channel);
+        for (unsigned j = 0; j < e->length && n < outlen - 8; j++)
+            n += snprintf(out + n, outlen - n, "%02X", e->data[j]);
+        n += snprintf(out + n, outlen - n, "\"}");
+    }
+    snprintf(out + n, outlen - n, "]}");
+}
+
+static void resp_ciap_events(const char *line, char *out, int outlen) {
+    uint64_t from = UINT64_MAX, count = 128;
+    json_int(line, "from", &from);
+    json_int(line, "count", &count);
+    if (count > 256) count = 256;
+
+    CdiCiapEvent events[256];
+    uint64_t total = 0, oldest = 0;
+    int got = cdic_debug_events(events, (int)count, from, &total, &oldest);
+    int n = snprintf(out, outlen,
+        "{\"ok\":true,\"total\":%llu,\"oldest\":%llu,\"events\":[",
+        (unsigned long long)total, (unsigned long long)oldest);
+    for (int i = 0; i < got && n < outlen - 192; i++) {
+        const CdiCiapEvent *e = &events[i];
+        n += snprintf(out + n, outlen - n,
+            "%s{\"seq\":%llu,\"trace_seq\":%llu,\"pc\":%u,"
+            "\"frame\":%llu,\"cycles\":%llu,\"offset\":%u,"
+            "\"size\":%u,\"write\":%u,\"value\":%u}",
+            i ? "," : "", (unsigned long long)e->seq,
+            (unsigned long long)e->trace_seq, e->pc,
+            (unsigned long long)e->frame, (unsigned long long)e->cycles,
+            e->offset, e->size, e->write, e->value);
+    }
+    snprintf(out + n, outlen - n, "]}");
+}
+
+static void resp_disc_state(char *out, int outlen) {
+    snprintf(out, outlen,
+        "{\"ok\":true,\"present\":%d,\"sectors\":%u,\"track_mode\":%d}",
+        cdi_media_present(), cdi_media_sector_count(), cdi_media_track_mode());
+}
+
+static void resp_mount_disc(const char *line, char *out, int outlen) {
+    char path[1024];
+    if (!json_str(line, "path", path, sizeof path)) {
+        snprintf(out, outlen, "{\"ok\":false,\"error\":\"missing path\"}");
+        return;
+    }
+    if (!cdi_media_mount(path)) {
+        snprintf(out, outlen, "{\"ok\":false,\"error\":\"disc mount failed\"}");
+        return;
+    }
+    resp_disc_state(out, outlen);
+}
+
+static void resp_eject_disc(char *out, int outlen) {
+    cdi_media_eject();
+    resp_disc_state(out, outlen);
 }
 
 static void resp_miss(char *out, int outlen) {
@@ -481,8 +789,8 @@ static void resp_trace(const char *line, char *out, int outlen) {
     for (int i = 0; i < got && n < outlen - 400; i++) {
         const M68KState *c = &recs[i].cpu;
         n += snprintf(out + n, outlen - n,
-            "%s{\"seq\":%llu,\"pc\":%u,\"sr\":%u", i ? "," : "",
-            (unsigned long long)recs[i].seq, c->PC, c->SR);
+            "%s{\"seq\":%llu,\"pc\":%u,\"op\":%u,\"sr\":%u", i ? "," : "",
+            (unsigned long long)recs[i].seq, c->PC, recs[i].opcode, c->SR);
         for (int r = 0; r < 8; r++) n += snprintf(out + n, outlen - n, ",\"d%d\":%u", r, c->D[r]);
         for (int r = 0; r < 8; r++) n += snprintf(out + n, outlen - n, ",\"a%d\":%u", r, c->A[r]);
         n += snprintf(out + n, outlen - n, ",\"a7top\":%u,\"frame\":%u,\"tcyc\":%llu",
@@ -506,6 +814,30 @@ static void resp_trace(const char *line, char *out, int outlen) {
                           (unsigned long long)recs[i].ram0_h, (unsigned long long)recs[i].ram1_h);
         }
         n += snprintf(out + n, outlen - n, "}");
+    }
+    snprintf(out + n, outlen - n, "]}");
+}
+
+/* Compact MC-CDI-009 view of the same always-on ring. `tcyc` is sampled at
+ * instruction entry, so record N costs tcyc[N+1]-tcyc[N]. */
+static void resp_cycle_trace(const char *line, char *out, int outlen) {
+    uint64_t count = 16, from = 0;
+    json_int(line, "count", &count);
+    if (count > 512) count = 512;
+    static CdiTraceRecord recs[512];
+    int got;
+    uint64_t first = 0;
+    int have_from = json_int(line, "from", &from);
+    if (have_from) got = trace_range(recs, from, (int)count, &first);
+    else           got = trace_tail(recs, (int)count);
+    int n = snprintf(out, outlen, "{\"ok\":true,\"total\":%llu,\"records\":[",
+                     (unsigned long long)s_trace_seq);
+    for (int i = 0; i < got && n < outlen - 128; i++) {
+        n += snprintf(out + n, outlen - n,
+                      "%s{\"seq\":%llu,\"pc\":%u,\"op\":%u,\"cycle_seam\":0,\"tcyc\":%llu}",
+                      i ? "," : "", (unsigned long long)recs[i].seq,
+                      recs[i].cpu.PC, recs[i].opcode,
+                      (unsigned long long)recs[i].total_cyc);
     }
     snprintf(out + n, outlen - n, "]}");
 }
@@ -603,9 +935,9 @@ static void resp_interp_report(const char *line, char *out, int outlen) {
     if (reset) fb_reset();
 }
 
-/* indirect_targets: the distinct call_by_address targets with no compiled
- * function (trace-guided discovery seeds). Emitted unsorted; the collector
- * sorts + filters in-ROM. Capped by the 64K response buffer (count is small). */
+/* indirect_targets: distinct genuinely uncovered control-flow entries. Emitted
+ * unsorted; the collector sorts + filters in-ROM. Capped by the 64K response
+ * buffer (count is small). */
 static void resp_indirect_targets(char *out, int outlen) {
     int n = snprintf(out, outlen, "{\"ok\":true,\"count\":%d,\"targets\":[", s_it_count);
     for (int i = 0; i < s_it_count && n < outlen - 16; i++)
@@ -640,12 +972,25 @@ static int handle_line(const char *line, char *out, int outlen) {
     char cmd[32];
     parse_cmd(line, cmd, sizeof cmd);
 
-    if (!strcmp(cmd, "ping"))               snprintf(out, outlen, "{\"ok\":true,\"pong\":true}");
+    if (!strcmp(cmd, "ping"))               snprintf(out, outlen, "{\"ok\":true,\"pong\":true,\"session\":\"%s\"}", s_cosim_session);
     else if (!strcmp(cmd, "status"))        resp_status(out, outlen);
+    else if (!strcmp(cmd, "pause"))         resp_pause(out, outlen);
+    else if (!strcmp(cmd, "set_input"))     resp_set_input(line, out, outlen);
+    else if (!strcmp(cmd, "emu_ikat_state")) resp_ikat_state(out, outlen);
+    else if (!strcmp(cmd, "ikat_events"))    resp_ikat_events(out, outlen);
+    else if (!strcmp(cmd, "ciap_events"))    resp_ciap_events(line, out, outlen);
+    else if (!strcmp(cmd, "video_frame"))    resp_video_frame(out, outlen);
+    else if (!strcmp(cmd, "frame_hashes"))   resp_frame_hashes(line, out, outlen);
+    else if (!strcmp(cmd, "video_scanline")) resp_video_scanline(line, out, outlen);
+    else if (!strcmp(cmd, "video_state"))    resp_video_state(out, outlen);
+    else if (!strcmp(cmd, "disc_state"))     resp_disc_state(out, outlen);
+    else if (!strcmp(cmd, "mount_disc"))     resp_mount_disc(line, out, outlen);
+    else if (!strcmp(cmd, "eject_disc"))     resp_eject_disc(out, outlen);
     else if (!strcmp(cmd, "irq_events"))    resp_irq_events(out, outlen);
     else if (!strcmp(cmd, "get_registers")) resp_registers(out, outlen);
     else if (!strcmp(cmd, "read_mem"))      resp_read_mem(line, out, outlen);
     else if (!strcmp(cmd, "trace"))         resp_trace(line, out, outlen);
+    else if (!strcmp(cmd, "cycle_trace"))   resp_cycle_trace(line, out, outlen);
     else if (!strcmp(cmd, "stores"))        resp_stores(line, out, outlen);
     else if (!strcmp(cmd, "interp_report")) resp_interp_report(line, out, outlen);
     else if (!strcmp(cmd, "indirect_targets")) resp_indirect_targets(out, outlen);
@@ -702,7 +1047,9 @@ static void server_loop(void) {
     }
     listen(ls, 1);
     fprintf(stderr, "[dbg] TCP debug server live on 127.0.0.1:%d "
-                    "(ping/status/get_registers/read_mem/trace/stores/interp_report/"
+                    "(ping/status/pause/set_input/emu_ikat_state/ikat_events/video_frame/video_scanline/video_state/"
+                    "ciap_events/disc_state/mount_disc/eject_disc/get_registers/read_mem/"
+                    "trace/cycle_trace/stores/interp_report/"
                     "dispatch_miss_info"
 #ifdef CDI_COSIM
                     "/cosim_full_ram_hash"

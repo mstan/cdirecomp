@@ -2,8 +2,9 @@
 
 **Strategy (decided 2026-05-28): recompile the entire OS first — the game comes later.**
 BIOS-first, mirroring psxrecomp v4. We statically recompile the whole CD-RTOS /
-OS-9 system ROM and get it booting to the player shell **before any Hotel Mario
-work begins** (the game is Phase 3 and does not start until Phase 1 boots).
+OS-9 system ROM and make the player shell fully navigable and real-time **before
+any Hotel Mario game work begins**. The Hotel Mario image may be mounted only
+as a real-media BIOS fixture; game launch and gameplay remain deferred.
 CD-i runs CD-RTOS / OS-9 from a player **system ROM** (the "BIOS"). We do NOT
 hand-write HLE stubs for OS-9 — psxrecomp learned the hard way that stubbing the
 BIOS (faking syscall outputs, mirroring kernel state in C) causes silent drift
@@ -49,22 +50,47 @@ IDs are referenced from code comments (`TODO MC-CDI-NNN`).
 
 ## Phase 2 — hardware enough to boot the shell
 
-- **MC-CDI-012 — MCD212 video.** Register file + DYUV/RGB555/CLUT/RL7/mosaic
-  decoders + plane A/B compositing → ARGB8888. Port from CeDImu (best-supported
-  CeDImu device). Needed for the shell to show anything.
+- ✅ **MC-CDI-012 — MCD212 video.** Clean-room register/timing and ICA/DCA
+  sequencer plus DYUV/RGB555/CLUT/RL7/RL3/mosaic decoders, transparency,
+  matte/ICF/mixing, pixel hold and cursor composition → double-buffered
+  ARGB8888. Completed fields `[7,422)` are byte-identical to CeDImu, including
+  identical ICA/DCA event streams; field 421 hashes to `ddcf263ed1261363`.
+  Semantics were checked against the Motorola MCD212 manual; CeDImu remains the
+  behavioral output oracle.
 - **MC-CDI-022 — Timekeeper (RTC + NVRAM)** at $320000. Required for boot;
   Mono-4 uses 8 KB or 32 KB NVRAM depending on model.
 - **MC-CDI-023 — IKAT** (Mono-3/4 input/serial gate; replaces the Mono-2 SLAVE).
-  CeDImu HLEs IKAT — mirror that.
+  CeDImu HLEs IKAT — mirror that. Command/response channels plus the timed
+  25-ms Class::Maneuvering channel-A packet generator and physical SDL keyboard/
+  game-controller mapping are present. At the no-disc shell STOP, CD-RTOS uses
+  `IMR=$A0` (channels C/D enabled) and keeps unopened channel A masked, so queued
+  input correctly does not assert level 2. With ready media, `pt1driv` enables
+  channel A (`IMR=$A2`); the navigation smoke proves IRQ, guest drain, visible
+  four-way BIOS movement, framebuffer publication, STOP return, and RULE 0a.
+  The ready B0 field layout is `B0 00 02 15`. Passive ready-media detection may
+  issue `E1 00 02 13`; the BIOS-only boundary is button-free pointer packets and
+  persistent shell execution, not the absence of drive reads.
 - **MC-CDI-006 — SCC68070 on-chip peripherals + MMU** ($80001001..): I2C, UART,
-  timers, DMA, MMU translation. CD-RTOS programs these during boot.
+  timers, DMA, MMU translation. UART reset/TX state and T0/T1/T2 with the
+  96-cycle prescaler, TCR/TSR/RR/PICR1 and on-chip IRQ delivery are present;
+  I2C, DMA and MMU coverage remain.
 - **MC-CDI-010 — exception/trap vectors** beyond OS-9 `TRAP #0`.
-- **MC-CDI-011 — hybrid interpreter fallback** for dispatch misses + self-
-  modifying code (CD-RTOS writes vectors/stubs into RAM at boot — psxrecomp's
-  dirty-RAM interpreter pattern; candidate engine: clown68000 or CeDImu's
-  SCC68070 interpreter).
+- ✅ **MC-CDI-011 — hybrid interpreter fallback.** The clean-room shared-
+  decoder interpreter remains the correctness floor for RAM-built vectors and
+  stubs. Trace-guided discovery currently contains 3,982 in-ROM entries and
+  emits 6,066 functions (5,852 canonical + 214 aliases) with RULE 0a, fall-off,
+  unsupported-dispatch, and interior-offset-table audits clean. A separate
+  49,171-entry map resumes asynchronous exceptions at every emitted instruction
+  PC without splitting canonical functions. Configured OS-9 `TRAP #0` scanning
+  skips its inline service word and owns the post-RTE continuation in the
+  original caller. Trace discovery now grows only for genuinely unknown CFGs;
+  broader BIOS navigation coverage remains open.
 
 ## Phase 3 — the game (Hotel Mario)
+
+**Deferred:** do not begin this phase until BIOS/player-shell navigation,
+real-time performance, and native coverage are closed.
+Disc insertion/ejection tests in the BIOS phase are not game progress.
 
 - **MC-CDI-024 — OS-9 module loader bridge.** The recompiled CD-RTOS `F$Load`
   relocates a module into RAM; we register that module's *statically recompiled*
@@ -74,9 +100,12 @@ IDs are referenced from code comments (`TODO MC-CDI-NNN`).
 - **MC-CDI-025 — Recompile the game modules.** `cdi_hotel` (boot/main) first,
   then the streamed `L*_s*_sub.o` level modules. Feeds on the disc parser (done)
   + MC-CDI-024.
-- **MC-CDI-013 — CD interface (MCD221 CIAP on Mono-4).** Sector DMA off the disc
-  + CD-i ADPCM audio (levels A/B/C) + interrupts. Reuse the `disc_parser` sector
-  model. (Note: was scaffolded as "CDIC"; Mono-4 uses CIAP — reconcile.)
+- **MC-CDI-013 — CD interface (MCD221 CIAP on Mono-4).** Real CUE/BIN-backed
+  media mount/eject and the enabled IKAT channel-D shell IRQ are present and
+  regression-tested. The shell's passive `E1 00 02 13` detection read is visible
+  in the IKAT ring, but feeding application content through CIAP sector
+  buffers/DMA and CD-i ADPCM audio (levels A/B/C) remains deferred with Phase 3.
+  The legacy `cdic_*` entry-point names still route the Mono-4 CIAP region.
 
 ## Cross-cutting
 
@@ -87,8 +116,10 @@ IDs are referenced from code comments (`TODO MC-CDI-NNN`).
   module load bases). Mostly resolved by the BIOS-first approach.
 - **MC-CDI-005 — SCC68070 cycle timing** refinement (68070 ≠ base 68000 + CD-i
   wait states).
-- **MC-CDI-007 — frame pacing / interrupts** (MCD212 display-line IRQ; fiber
-  model like the Genesis runner).
+- ✅ **MC-CDI-007 — frame pacing / interrupts.** External and SCC68070 on-chip
+  IRQ delivery, faithful STOP wake semantics, MCD212 display/control-program
+  interrupts, whole-player wall-clock pacing (including active timer-ISR
+  bursts), and non-vsync SDL frame presentation are present.
 - **MC-CDI-015 — TCP debug server + full ring buffer** (frame + reverse-debug
   tiers), per TCP.md. Native 4380 / oracle 4381.
 - **MC-CDI-017 — Convert `external/CeDImu` to a git submodule** at first commit.

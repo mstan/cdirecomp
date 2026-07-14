@@ -1,7 +1,7 @@
 # cdirecomp — Philips CD-i static recompiler
 
 A static recompiler for the **Philips CD-i**: it lifts the console's
-**Motorola 68000-family** machine code (CPU: **SCC68070** @ 15.5 MHz) into
+**Motorola 68000-family** machine code (CPU: **SCC68070** @ 15.1049 MHz) into
 portable C, then links that generated C against a hand-written runtime that
 re-creates the rest of the machine (the **MCD212** video decoder, **CDIC**
 CD/ADPCM-audio controller, the **SLAVE** input MCU) and the **CD-RTOS / OS-9**
@@ -9,7 +9,7 @@ operating system the games run on. Same spirit and two-tier structure as the
 sibling projects: `nesrecomp`, `snesrecomp`, `segagenesisrecomp`, `psxrecomp`,
 `virtualboyrecomp`.
 
-**Game #1: Hotel Mario (USA).**
+**Future game #1: Hotel Mario (USA). Current development scope: BIOS only.**
 
 ## Why CD-i is different from the Genesis (read this first)
 
@@ -18,10 +18,10 @@ is a Green Book **Mode-2 CD** whose data track holds a CD-i/ISO-9660 file
 system; the program is a set of **OS-9/68000 relocatable modules** (sync word
 `0x4AFC`) that **CD-RTOS** (a real-time OS based on Microware OS-9/68K v2.4)
 loads and relocates into RAM at run time, reaching the system through
-`TRAP #0` OS-9 system calls. So this project is a **hybrid**: the bare-metal
-68000 recompiler (shared with the Genesis) **plus a CD-RTOS HLE layer** — much
-closer in shape to `xbox-hle` than to the Genesis. The OS surface, not the CPU,
-is the real engineering.
+`TRAP #0` OS-9 system calls. The whole CD-RTOS system ROM is therefore
+recompiled and executed; there is **no hand-written OS-9 HLE layer**. The
+clean-room interpreter remains the correctness floor for RAM-resident and
+dispatch-missed code, while the hand-written runtime models only hardware.
 
 ## Strategy: recompile the BIOS first (like psxrecomp)
 
@@ -33,12 +33,14 @@ in the emulated RAM, written by recompiled code, no parallel C mirror. We
 emulate only the hardware chips. Conveniently, the CD-RTOS ROM is a flat 68000
 ROM that boots from its reset vector, so the copied Genesis frontend recompiles
 it directly. **The BIOS ROM is user-provided** (copyrighted) — see `bios/`.
-We bring the OS up to the player shell **before any Hotel Mario work begins**
-(the game is Phase 3). Roadmap and ordering live in **TODO.md**.
+We are completing the BIOS/player shell, including navigation, media states,
+and real-time behavior **before any Hotel Mario game work begins**. The game
+image is currently used only as a real Mode-2 media fixture. Roadmap and
+ordering live in **TODO.md**.
 
-## Current status (scaffold)
+## Current status
 
-What already works and is verified on the real disc:
+What is verified today:
 
 - **Shared 68000 frontend** copied verbatim from `segagenesisrecomp` (decoder,
   validator, code generator, function finder, cycle probe). Builds clean as
@@ -49,32 +51,68 @@ What already works and is verified on the real disc:
   program module **`cdi_hotel`** (Prog, ~110 KB of 68000 code) plus the
   per-level/scene `L0_s01_sub.o … L8_s15_sub.o` modules the game streams off
   the disc.
-- **Runtime substrate** (`runner/`): SCC68070 memory map (grounded in CeDImu's
-  Mono2 bus), MMIO routing, OS-9 `TRAP #0` gateway, SCC68070 exception model,
-  dispatch-miss accounting. Builds clean as `CdiRuntime`. Everything not yet
-  modelled **fails loud** (no silent stubs). Booting `cdi490a.rom` runs ~43k
-  recompiled instructions before reaching a RAM-resident stub (dispatch miss at
-  `$050A`, the hybrid-interpreter milestone MC-CDI-011).
-- **Observability** (`runner/src/debug_server.c`, `tools/`): always-on block-
-  trace ring (262144 blocks: PC + full register file) + frame ring, a fault
-  trail dumped on every abort, and a threaded TCP debug server (127.0.0.1:4380)
-  answering `ping/status/get_registers/read_mem/trace/dispatch_miss_info`.
-  Clients: `tools/cdi_debug.py`, `tools/check_dispatch_misses.py` (RULE 0a).
+- **The recompiled CD-RTOS boots to its player-shell STOP** at `$40A3E2` with
+  `SR=$2000`, matching CeDImu, with zero dispatch misses. The clean-room hybrid
+  interpreter handles RAM-built/dispatch-missed code without AGPL/GPL code in
+  the shipped runtime.
+- **Genesis-mature overlapping-entry coverage**: 3,982 execution-proven in-ROM
+  seeds produce 6,066 functions (5,852 canonical + 214 aliases). Fall-off and
+  dispatch audits are clean, true unsupported events are zero, legal
+  overlapping 68000 decode streams are retained, and backward cross-boundary
+  PC-indexed offset tables resolve through the normal boundary-split path. A
+  separate sorted map routes all 49,171 emitted instruction PCs back into their
+  canonical native bodies after asynchronous exceptions, without splitting
+  those bodies or inflating the callable-function set. OS-9 `TRAP #0` inline
+  service words are skipped as data so their post-RTE continuations remain in
+  the canonical caller.
+- **Cycle-faithful CPU/device time** through the boot. The aligned normal-
+  instruction cycle audit is clean through seq 529999, the 43-cycle reset phase
+  matches CeDImu from seq 0, and the SCC68070 timer IRQ is accepted on the same
+  guest boundary. Player mode advances devices at 60 fps and wakes STOP through
+  the real autovector path; fixed-sequence co-sim remains unpaced.
+- **Validated differential co-simulation** (`tools/cdi_cosim.py`): full CPU
+  state, canonical USP/SSP, incremental full-RAM hashes, cycle traces, injected
+  faults, and hash-vs-byte audits. All four trust gates pass.
+- **Development observability** (`runner/src/debug_server.c`, `tools/`):
+  always-on instruction/store/IRQ/fallback rings and a TCP query surface. The
+  `set_input` command is dev instrumentation; it feeds the same timed IKAT path
+  as the physical frontend and cannot bypass the IKAT mask.
+- **Clean-room MCD212 display pipeline**: ICA/DCA control programs, bitmap,
+  CLUT, RGB555, DYUV, RL7/RL3 and mosaic decoding, transparency/matte/ICF
+  composition, pixel hold and cursor output. Native completed fields 7–421 are
+  byte-identical to CeDImu; field 421 is `768x240`, FNV-1a
+  `ddcf263ed1261363`, after an identical 8,152-word ICA/DCA stream. Differential
+  frame tracing found and fixed the device-wide Always/Never transparency
+  polarity and color-key mask equation. At seq 570000 the earlier boot frame
+  also remains exact (`bc0c80cbd59d8383`).
+- **Player-facing SDL2 frontend**: resizable 4:3 window, fullscreen toggle,
+  keyboard and game-controller mapping. It only consumes atomically published
+  frames and feeds the timed IKAT input model, so presentation cannot mutate
+  guest state.
+- **Real media insertion/ejection boundary**: CUE/BIN images are validated and
+  retained as sector backing, then observed by IKAT on emulated time. Mount and
+  eject each assert the shell's enabled channel-D IRQ and return cleanly to the
+  persistent shell STOP. The smoke dwells in guest frames and rejects any
+  observed in-ROM target absent from the trace-guided native seed set. The
+  post-resume-map stress passes 30/30 independent Release schedules. Passive
+  ready-media detection legitimately issues `E1 00 02 13` reads (first seen at
+  field 790 with zero input), polls B0, and remains in the BIOS shell. The
+  navigation boundary is therefore proved by button-free input packets,
+  persistent shell STOP, and a synthetic media fixture—not by forbidding drive
+  reads.
 - **Oracle parity** (`oracle/cdi_oracle.cpp`): a headless driver linking the
-  wxWidgets-free CeDImu core, serving the SAME trace surface on :4381.
-  `tools/first_divergence.py` pages both rings and reports the first divergence.
-  Result: the recompiled CD-RTOS is **bit-exact to the CeDImu oracle across all
-  43,159 boot instructions** (full register file, every instruction sampled at
-  entry) — zero codegen divergence. Native stops only because it reaches the
-  `$050A` RAM-built stub (dispatch miss); the oracle's interpreter walks into it.
-  That RAM stub is the structural boot blocker (MC-CDI-011 hybrid interpreter).
+  wxWidgets-free CeDImu core and serving the matching trace surface on :4381.
+  CeDImu is the behavioral oracle; Ghidra in 68000 mode is the literal oracle.
 - **Oracle**: CeDImu (open-source C++ CD-i emulator) cloned into
   `external/CeDImu` — has its own `SCC68070`, `MCD212`, `OS9`, and `HLE`
   implementations we use as the reference + future in-process oracle.
 
-What is **not** done yet (the actual project): the CD-RTOS/OS-9 loader that
-turns modules into runnable code, the MCD212/CDIC/SLAVE device models, and the
-oracle wiring. See **TODO.md** (`MC-CDI-*` roadmap).
+What is **not** done yet: broad input-driven coverage across every non-launching
+player-shell screen, new-CFG coverage for those unexercised paths, and the
+remaining BIOS-visible RTC/NVRAM and peripheral behavior. Those are the active
+scope. CIAP content delivery, the OS-9 loaded-module bridge, Hotel Mario
+modules, and gameplay remain deferred until the BIOS is complete. See
+**TODO.md** and **PLAN.md**.
 
 ## Layout
 
@@ -83,9 +121,9 @@ cdirecomp/
 ├── recompiler/        # CdiRecomp: 68000 frontend (copied) + CD-i disc/module layer
 │   ├── src/           #   m68k_decoder/validator/code_generator/... + disc_parser + main_cdi
 │   └── PROVENANCE.txt #   what was copied, from where, at which commit
-├── runner/            # CdiRuntime: CD-i hardware + CD-RTOS HLE
+├── runner/            # CdiRuntime: hardware + native/interpreted guest execution
 │   ├── include/       #   cdi_runtime.h (the generated-code <-> runner contract), game_extras.h
-│   └── src/           #   cdi_bus, runtime, mcd212, cdic, slave, cdrtos, debug_server, main
+│   └── src/           #   cdi_bus, runtime, mcd212, cdic, slave, debug_server, main
 ├── external/          # clown68000 (cycle probe), clowncommon, CeDImu (oracle)
 ├── hotelmario/        # game.cfg + generated/ (CdiRecomp output)
 ├── tools/  tests/  docs/
@@ -94,18 +132,22 @@ cdirecomp/
 
 ## Build
 
-Toolchain: CMake + a C11 compiler. The sibling projects build with **Visual
-Studio 17 2022**; this scaffold has also been verified with **MinGW gcc +
-Ninja**.
+Toolchain: CMake + a C11 compiler + the **SDL2 development package**. The
+sibling projects build with **Visual Studio 17 2022**; this scaffold has also
+been verified with **MinGW gcc + Ninja**.
 
 ```powershell
 # Recompiler
 cmake -S recompiler -B build/recompiler -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build/recompiler -j
 
-# Runtime
-cmake -S runner -B build/runner -G Ninja -DCMAKE_BUILD_TYPE=Debug
+# Diagnostic runtime (co-sim instrument enabled)
+cmake -S runner -B build/runner -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCDI_COSIM_BUILD=ON
 cmake --build build/runner -j
+
+# Production-speed checkpoint
+cmake -S runner -B build/runner-release -G Ninja -DCMAKE_BUILD_TYPE=Release -DCDI_COSIM_BUILD=OFF
+cmake --build build/runner-release -j
 ```
 
 ## Run (today)
@@ -114,9 +156,32 @@ cmake --build build/runner -j
 # Inventory a CD-i disc: tracks, volume descriptor, OS-9 modules
 build/recompiler/CdiRecomp.exe "\\SERVER\Games\CDI\Hotel Mario (USA)\Hotel Mario (USA).cue"
 
-# Bring up the runtime substrate (reports honestly that there's nothing to run yet)
-build/runner/CdiRuntime.exe "Hotel Mario (USA).cue"
+# Boot the user-provided system ROM; the normal runtime remains live at STOP
+build/runner-release/CdiRuntime.exe bios/cdi490a.rom
+
+# Insert a single-track Mode-2 image at power-on
+build/runner-release/CdiRuntime.exe bios/cdi490a.rom --disc game.cue
+
+# Automation/co-sim can explicitly suppress presentation
+build/runner/CdiRuntime.exe bios/cdi490a.rom --headless
+
+# Production-paced regression for the persistent shell boundary
+py -3 tools/shell_idle_smoke.py build/runner-release/CdiRuntime.exe bios/cdi490a.rom
+
+# Mount/eject regression for a valid Mode-2 CUE/BIN image
+py -3 tools/disc_insert_smoke.py build/runner-release/CdiRuntime.exe `
+  bios/cdi490a.rom game.cue
+
+# BIOS-only directional navigation; the mounted image is never launched
+py -3 tools/bios_navigation_smoke.py build/runner-release/CdiRuntime.exe `
+  bios/cdi490a.rom build/tmp/disc_smoke/fixture.cue
 ```
+
+Player controls: arrows or WASD move the CD-i pointer; Enter, Space, or Z is
+button 1; Backspace or X is button 2; F11 or Alt+Enter toggles fullscreen; Esc
+closes the player. Standard game-controller D-pad/A/B mappings are also live.
+Dropping a CUE or BIN file onto the window performs a real media mount and IKAT
+channel-D insertion event.
 
 ---
 

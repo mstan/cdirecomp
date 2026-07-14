@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """collect_seeds.py — trace-guided discovery: union the runtime's observed
-indirect-call targets into the recompiler's seed file.
+uncovered control-flow entries into the recompiler's seed file.
 
 The static function finder cannot follow register-indirect `JSR (An)` through
 dispatch tables the OS-9 kernel builds at runtime, so those functions surface as
 dispatch misses and run interpreted (see tools/interp_report.py). The runtime
-records every such target (`indirect_targets` TCP command); this unions the
-in-ROM ones into bios/cdrtos_discovered.txt, which CdiRecompBios re-seeds. Run
-it after a boot, regen the BIOS, rebuild, and repeat until no NEW targets appear
-(the miss set goes dry) — the general coverage loop, not a hand-picked patch.
+records missed indirect targets (`indirect_targets` TCP command); this unions
+the in-ROM ones into bios/cdrtos_discovered.txt, which CdiRecompBios re-seeds.
+Every instruction already emitted in a canonical body has an async native
+resume row, so exception resumes only appear here when they expose a genuinely
+undiscovered CFG. Run after a new BIOS path, regenerate, and repeat until no NEW
+targets appear — the general coverage loop, not a hand-picked patch.
 
     python tools/collect_seeds.py --port 4396          # union into the default file
     python tools/collect_seeds.py --port 4396 --dry-run # show new targets, don't write
@@ -38,7 +40,7 @@ def read_existing(path):
     seen = set()
     if not os.path.exists(path):
         return seen
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         for line in f:
             p = line.strip()
             if not p or p.startswith("#"):
@@ -52,9 +54,9 @@ def read_existing(path):
 
 def write_file(path, addrs):
     os.makedirs(os.path.dirname(path), exist_ok=True) if os.path.dirname(path) else None
-    with open(path, "w", newline="\n") as f:
+    with open(path, "w", newline="\n", encoding="utf-8") as f:
         f.write("# cdrtos_discovered.txt — trace-guided discovery seeds (in-ROM\n")
-        f.write("# indirect-call targets the static finder missed). One hex addr\n")
+        f.write("# uncovered control-flow entries the static finder missed). One hex addr\n")
         f.write("# per line. Auto-unioned by tools/collect_seeds.py; re-seeded by\n")
         f.write("# CdiRecompBios. Regen + rebuild + re-run + collect until dry.\n")
         for a in sorted(addrs):
@@ -62,7 +64,7 @@ def write_file(path, addrs):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="union runtime indirect-call targets into the seed file")
+    ap = argparse.ArgumentParser(description="union runtime uncovered entries into the seed file")
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=4380)
     ap.add_argument("--file", default=DEFAULT_FILE, help="seed file to union into")
@@ -88,7 +90,7 @@ def main():
     existing = read_existing(args.file)
     new = sorted(set(in_rom) - existing)
 
-    print(f"observed indirect targets : {len(observed)}")
+    print(f"observed uncovered entries: {len(observed)}")
     print(f"  in-ROM (seedable)       : {len(in_rom)}")
     print(f"  below-ROM (RAM-resident): {len(below)}  (not seeded; run interpreted)")
     print(f"already in {args.file}: {len(existing)}")

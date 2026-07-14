@@ -190,6 +190,26 @@ fields — the coordinator reads the hash streams through it; no new streaming
 command is needed. `--stop-seq N` (native, and NEW on the oracle) freezes one
 side at seq N with rings live for drill-down (`get_registers`/`read_mem`).
 
+For MC-CDI-009 cycle-model audits, both sides also expose a compact view of the
+same always-on ring (it does not arm or capture anything):
+
+```
+{"cmd":"cycle_trace","from":N,"count":512}
+    -> {"ok":true,"total":T,"records":[
+         {"seq":N,"pc":P,"op":OP,"cycle_seam":S,"tcyc":C}, ...]}
+```
+
+`pc`, `op`, and `tcyc` are sampled for the instruction-entry record. Therefore
+the cycle cost attributable to record N is `tcyc[N+1] - tcyc[N]`. `op` is also
+present in the full `trace` record as an informational field; it is not a
+full-state divergence key.
+
+The oracle sets `cycle_seam=1` when CeDImu processed a queued exception before
+the captured instruction (`pre.PC != currentPC`). That `Run(false)` bundles the
+exception cost with the handler's first instruction. The coordinator excludes
+the transitions on both sides of such a record from opcode-cost aggregation;
+they remain visible in the ring for separate exception-timing analysis.
+
 Fault injection for Gate 3 is a startup CLI/env knob, NOT a mid-run command
 (keeps the free-run doctrine — the flip is applied when the run reaches the seq):
 ```
@@ -237,10 +257,14 @@ Run in order; each is CI-gateable (exit non-zero on FAIL):
    persists/cascades; verify the incremental page-hash actually recomputed the
    touched page. This is the gate that catches a blind/constant hasher — never
    skip it.
-4. **Hash-vs-byte audit.** At intervals, call `cosim_full_ram_hash` (full
-   recompute) and compare to the ring's incremental `ram0_h`/`ram1_h` at that
-   seq. A mismatch means a missed write-hook site (§3b). Proves the dirty-page
-   tracking is complete.
+4. **Hash-vs-byte audit.** At intervals, first poll `status.blocks` until the
+   requested `--stop-seq` checkpoint has actually parked, then call
+   `cosim_full_ram_hash`. Require the response `seq` to be at least that
+   checkpoint and compare its full and incremental fields from that same
+   response. Native exposes TCP while it is still running, so merely waiting
+   for the port can otherwise produce a plausible early PASS. A hash mismatch
+   means a missed write-hook site (§3b); an early seq means the checkpoint was
+   never measured.
 
 Only after 1–4 pass is a native-vs-oracle first-divergence report trusted.
 

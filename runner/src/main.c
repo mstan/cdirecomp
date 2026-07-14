@@ -12,6 +12,8 @@
 #include "cdi_runtime.h"
 #include "debug_server.h"
 #include "cosim_state.h"
+#include "cdi_frontend.h"
+#include "cdi_media.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -38,32 +40,51 @@ int main(int argc, char *argv[]) {
     setvbuf(stderr, NULL, _IONBF, 0);
 
     const char *rom_path = NULL;
+    const char *disc_path = NULL;
     int port = 4380;   /* native; oracle (CeDImu) on +1 — see TCP.md */
     int hold = 0;      /* keep the rings queryable after the run ends */
+    int exit_on_stop = 0; /* diagnostic one-shot; normal runtime keeps devices live */
+    int headless = 0;  /* deterministic tools and unattended environments */
+    int player_quit = 0;
     /* MC-CDI-016 (COSIM-SPEC.md §5): parsed unconditionally (even when built
      * with CDI_COSIM off) so the flag always correctly consumes its argument
      * — otherwise the spec string would fall through to the `argv[i][0] !=
      * '-'` branch below and get mistaken for rom_path. */
     const char *cosim_inject_spec = NULL;
+    const char *cosim_session = "";
+    const char *input_script_spec = NULL;
 
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--port") && i + 1 < argc) port = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--hold")) hold = 1;
+        else if (!strcmp(argv[i], "--exit-on-stop")) exit_on_stop = 1;
+        else if (!strcmp(argv[i], "--headless")) headless = 1;
+        else if (!strcmp(argv[i], "--disc") && i + 1 < argc) disc_path = argv[++i];
         else if (!strcmp(argv[i], "--fault-hold")) g_hold_on_fault = 1;
         else if (!strcmp(argv[i], "--stop-seq") && i + 1 < argc) g_stop_seq = strtoull(argv[++i], NULL, 0);
+        else if (!strcmp(argv[i], "--stop-frame") && i + 1 < argc) g_stop_frame = strtoull(argv[++i], NULL, 0);
         else if (!strcmp(argv[i], "--cosim-inject") && i + 1 < argc) cosim_inject_spec = argv[++i];
+        else if (!strcmp(argv[i], "--cosim-session") && i + 1 < argc) cosim_session = argv[++i];
+        else if (!strcmp(argv[i], "--input-script") && i + 1 < argc) input_script_spec = argv[++i];
         else if (argv[i][0] != '-') rom_path = argv[i];
     }
 
     printf("CdiRuntime — Philips CD-i (SCC68070) static-recomp runtime\n");
     if (!rom_path) {
-        fprintf(stderr, "usage: CdiRuntime <cdrtos.rom> [--port N] [--hold] [--stop-seq N]\n"
+        fprintf(stderr, "usage: CdiRuntime <cdrtos.rom> [--disc image.cue] [--port N] [--hold] [--headless] [--exit-on-stop] [--stop-seq N] [--stop-frame N]\n"
                         "                  [--cosim-inject <seq>:<ram|reg>:<idx>:<xorhex>]\n"
+                        "                  [--input-script <frame:mask,...>]\n"
                         "  boots the recompiled CD-RTOS system ROM.\n"
                         "  --hold: keep the process (and the debug rings) alive after\n"
                         "          the run for post-mortem TCP inspection.\n"
+                        "  --exit-on-stop: diagnostic one-shot; exit at the first STOP\n"
+                        "          instead of advancing devices until an interrupt.\n"
+                        "  --headless: disable the SDL display and physical input frontend.\n"
+                        "  --disc: insert a single-track Mode-2 CUE/BIN image at power-on.\n"
                         "  --cosim-inject: MC-CDI-016 fault injection (see COSIM-SPEC.md\n"
-                        "          §5); also settable via env CDI_COSIM_INJECT.\n");
+                        "          §5); also settable via env CDI_COSIM_INJECT.\n"
+                        "  --input-script: deterministic dev input transitions applied\n"
+                        "          immediately after each named completed frame.\n");
         return 1;
     }
 
@@ -88,6 +109,9 @@ int main(int argc, char *argv[]) {
     cdi_bus_load_rom(raw, (uint32_t)sz);
     free(raw);
 
+    cdi_media_init();
+    if (disc_path && !cdi_media_mount(disc_path)) return 1;
+
     printf("  ROM: %s (%ld KB) @ $%08X\n", rom_path, sz / 1024, CDI_ROM_BASE);
     printf("  reset SSP=$%08X  reset PC=$%08X\n", reset_ssp, reset_pc);
 
@@ -95,11 +119,15 @@ int main(int argc, char *argv[]) {
     runtime_init();                 /* zeroes g_cpu */
     periph_reset();                 /* on-chip peripheral power-on state (UART TxRDY) */
     nvram_reset();                  /* DS1216 SmartWatch: SRAM=$FF, clock=1989-01-01 */
+    mcd212_video_reset();           /* display parameters + canonical buffers */
     g_cpu.A[7] = reset_ssp;         /* supervisor stack pointer (S=1 → A7 aliases SSP) */
     g_cpu.SSP  = reset_ssp;         /* SSP shadow (used when a user->super swap restores A7) */
     g_cpu.PC   = reset_pc;
     g_cpu.SR   = 0x2700;            /* 68000 reset: S=1, IPL=7, T=0 */
     g_recomp_initial_ssp = reset_ssp;
+    /* Player runs follow emulated time in real time. Fixed-sequence co-sim is
+     * observational and must free-run deterministically. */
+    runtime_set_realtime_pacing(g_stop_seq == 0 && g_stop_frame == 0);
 
 #ifdef CDI_COSIM
     /* MC-CDI-016: reset RAM page-hash bookkeeping to all-dirty now that
@@ -111,7 +139,20 @@ int main(int argc, char *argv[]) {
     if (cosim_inject_spec) cdi_cosim_set_inject(cosim_inject_spec);
 #endif
 
+    debug_server_set_session(cosim_session);
     debug_server_init(port);
+    if (input_script_spec && !cdi_input_schedule_configure(input_script_spec)) {
+        fprintf(stderr, "[cdi] malformed --input-script '%s' (want frame:mask,...; frames strictly increasing)\n",
+                input_script_spec);
+        return 1;
+    }
+
+    /* Fixed-sequence co-simulation is an observational tool, not a player run;
+     * suppress presentation automatically so it cannot add host scheduling
+     * noise. Normal execution opens the physical frontend unless requested
+     * otherwise. */
+    int frontend_active = !headless && !g_stop_seq && !g_stop_frame;
+    if (frontend_active && !cdi_frontend_init()) return 1;
 
     /* ---- drive execution from the reset entry ----
      * recomp_call_addr looks the entry up in the generated dispatch table and
@@ -140,8 +181,9 @@ int main(int argc, char *argv[]) {
      *       resolves — its return target is [A7] (g_cpu.PC is the RTS's own stale
      *       address), so follow [A7] and clear the flag before dispatching, or
      *       the fresh callee's first JSR site would wrongly see a return pending.
-     * Loop until STOP (shell idle, g_halted) or the guest stack unwinds to its
-     * boot base (nothing left to return to). A no-progress guard fails loud.
+     * STOP enters a device-advance wait and resumes here on an eligible IRQ;
+     * `--exit-on-stop` is the diagnostic exception. A no-progress guard fails
+     * loud if ordinary guest dispatch stops advancing.
      *
      * The setjmp below is the recompiled-tier bus-error landing pad (MC-CDI-004):
      * an unmapped access from recompiled code longjmps here via g_recomp_bus_env
@@ -183,13 +225,25 @@ int main(int argc, char *argv[]) {
 
         for (;;) {
             uint32_t target;
+            if (frontend_active && !cdi_frontend_pump()) {
+                player_quit = 1;
+                break;
+            }
             if (g_redirect_pending) {
                 g_redirect_pending = 0;
                 target = g_redirect_addr;
             } else if (g_halted) {
-                break;                                  /* STOP: shell idle reached */
+                if (exit_on_stop) break;
+                /* CeDImu's stopped SCC68070 consumes 25 cycles per interpreter
+                 * iteration and advances every device. No instruction is traced
+                 * while stopped. A real device event raises g_irq_pending; the
+                * standard IRQ path clears STOP, builds the autovector frame and
+                 * longjmps to the landing pad above. */
+                mcd212_tick(25);
+                if (recomp_pending_irq_level()) recomp_take_irq();
+                continue;
             } else if (g_rte_resume) {
-                /* A recompiled RTE unwound to here: the handler already popped
+                /* A recompiled RTE/RTR unwound to here: the instruction already popped
                  * SR/PC/format and g_cpu.PC holds the resume PC. Resume there —
                  * NOT at [A7] (that's the post-frame stack, not the return). */
                 g_rte_resume = 0;
@@ -226,9 +280,12 @@ int main(int argc, char *argv[]) {
         g_recomp_irq_armed = 0;
     }
 
-    if (g_halted)
+    if (player_quit)
+        printf("[cdi] player requested shutdown after %llu instructions.\n",
+               (unsigned long long)g_native_insn_count);
+    else if (g_halted)
         printf("[cdi] CPU halted (STOP) after %llu instructions — shell idle reached. "
-               "PC=$%08X SR=$%04X (MC-CDI-007 will wake on IRQ).\n",
+               "PC=$%08X SR=$%04X (--exit-on-stop).\n",
                (unsigned long long)g_native_insn_count, g_cpu.PC, g_cpu.SR);
     else
         printf("[cdi] top-level returned after %llu instructions "
@@ -249,5 +306,6 @@ int main(int argc, char *argv[]) {
 #endif
         }
     }
+    if (frontend_active) cdi_frontend_shutdown();
     return 0;
 }

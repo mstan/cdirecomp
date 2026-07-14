@@ -43,6 +43,46 @@ enum {
 static uint16_t s_reg[CIAP_REGS_SIZE / 2];
 static int      s_inited = 0;
 
+/* Every CPU-side CIAP access, retained independently of the generic store
+ * ring so reads (including read-to-clear registers) and dropped firmware-window
+ * writes remain visible.  64K entries is intentionally large enough to query
+ * backward through boot-time polling without an armed trace. */
+#define CIAP_EVENT_CAP (1u << 16)
+#define CIAP_EVENT_MASK (CIAP_EVENT_CAP - 1u)
+static CdiCiapEvent s_events[CIAP_EVENT_CAP];
+static uint64_t s_event_total;
+
+static void ciap_record_access(uint32_t off, uint32_t val, int size, int write) {
+    CdiCiapEvent *e = &s_events[s_event_total & CIAP_EVENT_MASK];
+    e->seq = s_event_total++;
+    e->trace_seq = debug_trace_sequence();
+    e->frame = g_frame_count;
+    e->cycles = g_total_cycles;
+    e->pc = g_cpu.PC;
+    e->offset = off;
+    e->value = val;
+    e->size = (uint8_t)size;
+    e->write = (uint8_t)(write != 0);
+}
+
+int cdic_debug_events(CdiCiapEvent *out, int capacity, uint64_t from,
+                      uint64_t *total, uint64_t *oldest) {
+    uint64_t end = s_event_total;
+    uint64_t begin = end > CIAP_EVENT_CAP ? end - CIAP_EVENT_CAP : 0;
+    if (from == UINT64_MAX) {
+        uint64_t wanted = capacity > 0 ? (uint64_t)capacity : 0;
+        from = end > wanted ? end - wanted : 0;
+    }
+    if (from < begin) from = begin;
+    if (from > end) from = end;
+    int count = 0;
+    for (uint64_t seq = from; seq < end && count < capacity; seq++)
+        out[count++] = s_events[seq & CIAP_EVENT_MASK];
+    if (total) *total = end;
+    if (oldest) *oldest = begin;
+    return count;
+}
+
 static void ciap_init(void) {
     memset(s_reg, 0, sizeof s_reg);
     s_reg[CIAP_ID >> 1] = 0xCD02;
@@ -74,14 +114,17 @@ uint32_t cdic_read(uint32_t addr, int size) {
     }
 
     uint16_t w = ciap_get_word(off & ~1u);
-    if (size == 1)
-        return (off & 1) ? (w & 0xFF) : (w >> 8);   /* CeDImu Mono3::GetByte */
-    return w;
+    uint32_t result = size == 1
+        ? ((off & 1) ? (w & 0xFF) : (w >> 8))       /* CeDImu Mono3::GetByte */
+        : w;
+    ciap_record_access(off, result, size, 0);
+    return result;
 }
 
 void cdic_write(uint32_t addr, uint32_t val, int size) {
     if (!s_inited) ciap_init();
     uint32_t off = addr - CDI_CDIC_BASE;
+    ciap_record_access(off, val, size, 1);
 
     /* CeDImu CIAP::SetWord stores ONLY offsets < 0x2600 ("if(addr < 0x2600)");
      * writes beyond the documented window are silently dropped. The CD-RTOS CD

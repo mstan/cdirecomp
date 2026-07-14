@@ -12,13 +12,14 @@
  *     readable status registers; CSR2R clears (IT1/IT2/BE) on read; any other
  *     register read is a bus error on hardware (fail loud here).
  *
- * The pixel pipeline (DYUV/CLUT decode, plane A/B compositing) and the
- * display-line interrupt are deferred (TODO MC-CDI-012 / MC-CDI-007); the
- * register file is what early CD-RTOS boot programs.
+ * Scan timing, ICA/DCA sequencing and pointer registers live here. The
+ * deterministic pixel pipeline is isolated in mcd212_video.c.
  */
 #include "cdi_runtime.h"
+#include "debug_server.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #define MCD_BASE 0x004FFFE0u
 
@@ -31,7 +32,14 @@ static uint8_t  s_csr2r = 0;    /* CSR2R read-side status (IT1/IT2/BE)      */
  * these — the boot programs DCR1.FD/CF before the display polls matter, and
  * the oracle uses the live values, so mirroring them keeps us in phase. */
 #define MCD_CSR1W 0x10u
+#define MCD_DCR2  0x02u
+#define MCD_VSR2  0x04u
+#define MCD_DDR2  0x08u
+#define MCD_DCP2  0x0Au
 #define MCD_DCR1  0x12u
+#define MCD_VSR1  0x14u
+#define MCD_DDR1  0x18u
+#define MCD_DCP1  0x1Au
 
 /* ---- Display timing (CSR1R.DA, bit 7) — faithful port of CeDImu ----
  * The boot polls `BTST #7,$4FFFF1 / BNE` for DA (Display Active). CeDImu
@@ -60,6 +68,7 @@ static uint8_t  s_csr2r = 0;    /* CSR2R read-side status (IT1/IT2/BE)      */
 
 static double   s_time_ns;      /* ns accumulated toward the next line       */
 static uint32_t s_vlines;       /* vertical line within the current frame    */
+static uint16_t s_line_number;  /* active output line (interlace advances 2) */
 
 /* Live frame geometry (CeDImu MCD212.hpp GetFD/GetST/GetCF). FD selects NTSC
  * (262 lines / 22 retrace) vs the larger PAL-rate raster; CF shortens the line
@@ -70,8 +79,136 @@ static unsigned mcd_retrace_lines(void) {
     return (s_reg[MCD_CSR1W] & (1u<<1)) ? 72u : 32u;        /* !FD: ST selects  */
 }
 static double   mcd_line_time_ns(void)  { return (s_reg[MCD_DCR1] & (1u<<14)) ? 63560.0 : 64000.0; } /* CF */
+static unsigned mcd_base_width(void) {
+    /* Host raster format, not CM source-fetch width: the only 360-wide
+     * monitor format is CF=0/ST=0. TV formats are 384 wide. */
+    return !(s_reg[MCD_DCR1] & (1u << 14)) &&
+           !(s_reg[MCD_CSR1W] & (1u << 1)) ? 360u : 384u;
+}
+static unsigned mcd_active_height(void) {
+    if (s_reg[MCD_DCR1] & (1u << 13)) return 240u;
+    return !(s_reg[MCD_DCR1] & (1u << 14)) &&
+           !(s_reg[MCD_CSR1W] & (1u << 1)) ? 240u : 280u;
+}
+
+static uint8_t mcd_dram8(uint32_t address) {
+    extern uint8_t g_ram0[CDI_RAM0_SIZE];
+    extern uint8_t g_ram1[CDI_RAM1_SIZE];
+    if (address < CDI_RAM0_SIZE) return g_ram0[address];
+    if (address >= CDI_RAM1_BASE && address - CDI_RAM1_BASE < CDI_RAM1_SIZE)
+        return g_ram1[address - CDI_RAM1_BASE];
+    fprintf(stderr, "[mcd212] control fetch outside DRAM @ $%08X\n", address);
+    abort();
+}
+
+static uint32_t mcd_control_word(uint32_t address) {
+    return ((uint32_t)mcd_dram8(address) << 24) |
+           ((uint32_t)mcd_dram8(address + 1) << 16) |
+           ((uint32_t)mcd_dram8(address + 2) << 8) |
+           mcd_dram8(address + 3);
+}
+
+static uint32_t mcd_get_pointer(unsigned high_reg, unsigned low_reg) {
+    return ((uint32_t)(s_reg[high_reg] & 0x3Fu) << 16) | s_reg[low_reg];
+}
+
+static void mcd_set_vsr(int plane, uint32_t value) {
+    unsigned dcr = plane ? MCD_DCR2 : MCD_DCR1;
+    unsigned vsr = plane ? MCD_VSR2 : MCD_VSR1;
+    s_reg[dcr] &= plane ? 0x0B00u : 0xFB00u;
+    s_reg[dcr] |= (uint16_t)((value >> 16) & 0x3Fu);
+    s_reg[vsr] = (uint16_t)value;
+}
+
+static void mcd_set_dcp(int plane, uint32_t value) {
+    unsigned ddr = plane ? MCD_DDR2 : MCD_DDR1;
+    unsigned dcp = plane ? MCD_DCP2 : MCD_DCP1;
+    s_reg[ddr] &= 0x0F00u;
+    s_reg[ddr] |= (uint16_t)((value >> 16) & 0x3Fu);
+    s_reg[dcp] = (uint16_t)value;
+}
+
+static uint32_t mcd_get_vsr(int plane) {
+    return plane ? mcd_get_pointer(MCD_DCR2, MCD_VSR2) :
+                   mcd_get_pointer(MCD_DCR1, MCD_VSR1);
+}
+
+static uint32_t mcd_get_dcp(int plane) {
+    return plane ? mcd_get_pointer(MCD_DDR2, MCD_DCP2) :
+                   mcd_get_pointer(MCD_DDR1, MCD_DCP1);
+}
+
+static void mcd_interrupt(int plane) {
+    uint8_t bit = plane ? 0x02u : 0x04u;
+    uint16_t control = s_reg[plane ? 0x00u : MCD_CSR1W];
+    s_csr2r = (uint8_t)((s_csr2r & (plane ? 0x05u : 0x03u)) | bit);
+    if (!(control & 0x8000u)) cdi_irq_raise_onchip(1);
+}
+
+static int mcd_flow_instruction(int plane, uint32_t word, uint32_t *address,
+                                int is_ica) {
+    uint32_t pointer = word & 0x003FFFFCu;
+    switch (word >> 28) {
+    case 0: return 1;
+    case 1: break;
+    case 2: mcd_set_dcp(plane, pointer); break;
+    case 3: mcd_set_dcp(plane, pointer); return 1;
+    case 4:
+        if (is_ica) *address = word & 0x003FFFFFu;
+        else mcd_set_vsr(plane, word & 0x003FFFFFu);
+        break;
+    case 5: mcd_set_vsr(plane, word & 0x003FFFFFu); return 1;
+    case 6: mcd_interrupt(plane); break;
+    case 7:
+        if ((word >> 24) == 0x78u) {
+            unsigned dcr = plane ? MCD_DCR2 : MCD_DCR1;
+            unsigned ddr = plane ? MCD_DDR2 : MCD_DDR1;
+            uint16_t cm = (uint16_t)((word >> 4) & 1u);
+            uint16_t mf = (uint16_t)((word >> 2) & 3u);
+            uint16_t ft = (uint16_t)(word & 3u);
+            s_reg[dcr] = (uint16_t)((s_reg[dcr] & (plane ? 0x033Fu : 0xF33Fu)) |
+                                    (cm << 11));
+            s_reg[ddr] = (uint16_t)((s_reg[ddr] & 0x003Fu) |
+                                    (mf << 10) | (ft << 8));
+        }
+        break;
+    default: break;
+    }
+    return 0;
+}
+
+static void mcd_execute_ica(int plane) {
+    unsigned budget = (s_reg[MCD_DCR1] & (1u << 14) ? 120u : 112u) *
+                      mcd_retrace_lines();
+    uint32_t address = ((s_reg[MCD_DCR1] & MCD_DCR1_SM) && !(s_csr1r & MCD_PA)) ?
+                       0x404u : 0x400u;
+    if (plane) address += CDI_RAM1_BASE;
+    for (unsigned i = 0; i < budget; i++) {
+        uint32_t word = mcd_control_word(address);
+        debug_trace_mcd_event(plane ? 2u : 0u, 0, word);
+        address += 4;
+        if (mcd_flow_instruction(plane, word, &address, 1)) return;
+        mcd212_video_control(plane, word);
+    }
+}
+
+static void mcd_execute_dca(int plane) {
+    unsigned budget = s_reg[MCD_DCR1] & (1u << 14) ? 16u : 8u;
+    for (unsigned i = 0; i < budget; i++) {
+        uint32_t address = mcd_get_dcp(plane);
+        mcd_set_dcp(plane, address + 4);
+        uint32_t word = mcd_control_word(address);
+        debug_trace_mcd_event(plane ? 3u : 1u, s_line_number, word);
+        if (mcd_flow_instruction(plane, word, &address, 0)) return;
+        mcd212_video_control(plane, word);
+    }
+}
 
 void mcd212_tick(uint32_t cycles) {
+    const double ns = (double)cycles * MCD_CYCLE_DELAY_NS;
+    /* CeDImu advances the SCC68070 timer before CDI::IncrementTime on every
+     * interpreter iteration, including the stopped-CPU path. */
+    periph_increment_timer(cycles);
     /* Advance the IKAT's delayed-response check BEFORE the frame counter may
      * advance this tick. CeDImu's Mono3::IncrementTime runs CDI::IncrementTime
      * (→ IKAT::IncrementTime, which fires a 2-frame-delayed response the instant
@@ -81,13 +218,12 @@ void mcd212_tick(uint32_t cycles) {
      * guest instruction as the oracle — checking after the increment would fire
      * one instruction early. mcd212_tick is called once per instruction in both
      * tiers, so this matches CeDImu's per-step IKAT advance. (MC-CDI-007.) */
-    slave_increment_frame();
+    slave_increment_time(ns);
     /* CDI::IncrementTime (CDI.cpp:108-112) runs m_slave->IncrementTime(ns) then
      * m_timekeeper->IncrementClock(ns) BEFORE Mono3::IncrementTime's own
      * m_mcd212.IncrementTime(ns) — tick the DS1216 here, same ns, same order,
      * so its internal clock advances on the identical per-instruction schedule
      * as the oracle's (MC-CDI-022; see cdi_nvram.c nvram_increment_clock). */
-    const double ns = (double)cycles * MCD_CYCLE_DELAY_NS;
     nvram_increment_clock(ns);
     g_total_cycles += cycles;   /* running SCC68070 clock; diffed per seq vs CeDImu totalCycleCount */
     s_time_ns += ns;
@@ -95,22 +231,60 @@ void mcd212_tick(uint32_t cycles) {
     while (s_time_ns >= line_ns) {
         s_time_ns -= line_ns;
         s_vlines++;
-        if (s_vlines == mcd_retrace_lines() + 1) {  /* leaving retrace -> active */
-            s_csr1r |= MCD_DA;
-            /* PA: non-interlaced -> always set; interlaced -> odd frames set,
-             * even clear (CeDImu uses m_totalFrameCount parity; g_frame_count
-             * tracks it 1:1 since both increment at frame end). */
-            if (!(s_reg[MCD_DCR1] & MCD_DCR1_SM) || (g_frame_count & 1))
-                s_csr1r |= MCD_PA;
-            else
-                s_csr1r &= (uint8_t)~MCD_PA;
+        if (s_vlines <= mcd_retrace_lines()) {
+            if (s_vlines == 1 && (s_reg[MCD_DCR1] & (1u << 15))) {
+                if (s_reg[MCD_DCR1] & (1u << 9)) mcd_execute_ica(0);
+                if (s_reg[MCD_DCR2] & (1u << 9)) mcd_execute_ica(1);
+            }
+            continue;
         }
+
+        s_csr1r |= MCD_DA;
+        if (s_reg[MCD_DCR1] & MCD_DCR1_SM) {
+            if (!(g_frame_count & 1)) {
+                s_csr1r &= (uint8_t)~MCD_PA;
+                if (s_line_number == 0) s_line_number = 1;
+            } else {
+                s_csr1r |= MCD_PA;
+            }
+        } else {
+            s_csr1r |= MCD_PA;
+        }
+
+        if (s_line_number <= 1)
+            mcd212_video_begin_frame((uint16_t)mcd_base_width(),
+                                     (uint16_t)mcd_active_height(),
+                                     (s_reg[MCD_DCR1] & MCD_DCR1_SM) != 0);
+
+        if (s_reg[MCD_DCR1] & (1u << 15)) {
+            uint32_t vsr_a = mcd_get_vsr(0), vsr_b = mcd_get_vsr(1);
+            unsigned base = mcd_base_width();
+            uint16_t bytes_a = 0, bytes_b = 0;
+            uint16_t width_a = (uint16_t)(base * ((s_reg[MCD_DCR1] & (1u << 11)) ? 2u : 1u));
+            uint16_t width_b = (uint16_t)(base * ((s_reg[MCD_DCR2] & (1u << 11)) ? 2u : 1u));
+            mcd212_video_draw_line(vsr_a, vsr_b, s_line_number,
+                                   width_a, width_b, &bytes_a, &bytes_b);
+            mcd_set_vsr(0, vsr_a + bytes_a);
+            mcd_set_vsr(1, vsr_b + bytes_b);
+            if ((s_reg[MCD_DCR1] & 0x0300u) == 0x0300u) mcd_execute_dca(0);
+            if ((s_reg[MCD_DCR2] & 0x0300u) == 0x0300u) mcd_execute_dca(1);
+        }
+        s_line_number += (s_reg[MCD_DCR1] & MCD_DCR1_SM) ? 2u : 1u;
+
         if (s_vlines >= mcd_total_lines()) {        /* frame end -> retrace      */
             s_csr1r &= (uint8_t)~MCD_DA;            /* keeps PA (CeDImu &= 0x20) */
             s_vlines = 0;
+            s_line_number = 0;
+            mcd212_video_end_frame();
             g_frame_count++;
+            cdi_input_schedule_advance(g_frame_count);
+            debug_ring_capture_frame();
+            if (g_stop_frame && g_frame_count >= g_stop_frame) cdi_fault_hold();
         }
     }
+    /* Host pacing is deliberately outside the device-state update above, so a
+     * concurrent debug query never observes a half-applied CPU cycle batch. */
+    runtime_pace_cycles(cycles);
 }
 
 uint32_t mcd212_read(uint32_t addr, int size) {
@@ -145,6 +319,27 @@ void mcd212_write(uint32_t addr, uint32_t val, int size) {
 }
 
 void mcd212_render_frame(uint32_t *framebuf) {
-    (void)framebuf;
-    /* TODO MC-CDI-012: composite plane A/B from DRAM into ARGB8888. */
+    mcd212_video_copy_frame(framebuf,
+                            MCD212_VIDEO_MAX_WIDTH * MCD212_VIDEO_MAX_HEIGHT,
+                            NULL, NULL, NULL);
+}
+
+uint32_t mcd212_framebuffer_info(uint16_t *width, uint16_t *height,
+                                 uint64_t *generation) {
+    return mcd212_video_copy_frame(NULL, 0, width, height, generation);
+}
+
+uint64_t mcd212_framebuffer_hash(uint16_t *width, uint16_t *height,
+                                 uint64_t *generation) {
+    return mcd212_video_frame_hash(width, height, generation);
+}
+
+void mcd212_debug_state(uint16_t regs[32], uint8_t *csr1r,
+                        uint8_t *csr2r, uint32_t *vline,
+                        uint16_t *active_line) {
+    if (regs) memcpy(regs, s_reg, sizeof s_reg);
+    if (csr1r) *csr1r = s_csr1r;
+    if (csr2r) *csr2r = s_csr2r;
+    if (vline) *vline = s_vlines;
+    if (active_line) *active_line = s_line_number;
 }
