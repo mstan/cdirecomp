@@ -15,8 +15,8 @@ bios/generated/*.log
 *.iso
 *.rom
 
-# CeDImu oracle is a clone for now; convert to a submodule (MC-CDI-017).
-# Don't commit its working tree wholesale until then.
+# CeDImu is an optional local-only development oracle (MC-CDI-017).
+# Never commit, submodule, package, or publish its tree/local modifications.
 /external/CeDImu/
 
 # Python bytecode

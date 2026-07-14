@@ -74,3 +74,21 @@ than those; CD-i just adds an OS layer.
 - Bootability is a milestone, not a finish line. The patterns we encode are
   game-agnostic and will be reused on the next CD-i title (Zelda CD-i discs sit
   next to Hotel Mario on the share).
+
+## Production release boundary
+
+- A cdirecomp production release contains the native player/runtime and only
+  its required redistributable runtime dependencies/assets. It never contains
+  the recompiler, `CdiOracle`, CeDImu, clown68000, development tools, ROM/disc
+  images, traces, dumps, or build-tree debris.
+- Development-only oracle/tool dependencies do not enter the native target's
+  source list, include paths, link, package, or startup path. Enforce that
+  mechanically in both CMake and the release packager; do not rely on a naming
+  convention or manual zip selection.
+- If an AGPL-linked recompiler/oracle/tool is ever distributed, create a
+  separate tooling repository/release for it and comply with AGPL there,
+  including complete corresponding source. Do not change the runtime release's
+  licensing or dependency boundary to accommodate tooling.
+- Prefer the author's clean-room components in `../segagenesisrecomp` when they
+  fit. Port deliberately with provenance and CD-i-specific validation; never
+  pull clownmdemu/clown68000 oracle code across with them.

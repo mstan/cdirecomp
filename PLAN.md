@@ -109,8 +109,10 @@ bus error at `$FFFFFFFC`.
   the first PC mismatch. Proven: **36,896 instructions match the oracle exactly**,
   then diverge around `$400CB2–$400CB8` (seq ~36895) — a condition-code/branch
   bug, the next concrete debugging target.
-- ⏳ Remaining: convert `external/CeDImu` to a submodule (MC-CDI-017); add
-  emulator-internal probes (`emu_mcd212_state`, `framebuf_diff`) as devices land.
+- ⏳ Remaining: preserve the local-only CeDImu oracle boundary (MC-CDI-017) and
+  add emulator-internal probes (`emu_mcd212_state`, `framebuf_diff`) locally as
+  devices land. CeDImu, its modifications, and `CdiOracle` are never production
+  dependencies or release artifacts.
 
 ### Phase C — Boot to the player shell (the milestone) — *DONE 2026-07-13*
 
@@ -241,6 +243,25 @@ Each lands with an oracle diff showing the divergence closed.
   diff vs committed baseline (baseline updates = same commit as the change).
 - `COVERAGE.md`: 68000 instruction-coverage audit for the SCC68070 (port the
   Genesis COVERAGE.md method; note SCC68070-only opcodes).
+- **MC-CDI-027:** extend the transport-neutral host-input ABI from directional
+  state to accumulated relative motion, packetize it through the existing
+  25-ms IKAT cadence, and add focus-safe SDL mouse capture. Expose the opt-in
+  through a launcher setting persisted in user/player config, not a transient
+  CLI flag or per-title `game.cfg` entry.
+- **MC-CDI-028:** separate the faithful DS1216 reset seed from an optional
+  one-shot host-local clock seed, while preserving cycle-derived advancement
+  and guest RTC writes after startup. Expose and persist the opt-in through the
+  launcher; deterministic validation profiles force it off.
+- **MC-CDI-029:** port the sibling's allowlist-based release packager and native
+  purity audit to CD-i. The package must reject tools/oracles, ROM/disc images,
+  traces, dumps, and build debris, and the native link/include audit must prove
+  no CeDImu or clown68000 boundary crossed. Any future AGPL-linked tooling
+  distribution is a separate repository/release with its own compliance.
+- **MC-CDI-030:** audit production comments and implementation history that use
+  "port"/"exact port" language for CeDImu or clown68000. Tie each shipped
+  implementation to hardware documentation, observable behavior, or an
+  author-owned clean-room ancestor; independently rewrite anything whose
+  provenance cannot be established, then rerun its oracle/synthetic tests.
 
 Historical unpaced performance checkpoint (2026-07-13): a clean `Release` runner with
 `CDI_COSIM_BUILD=OFF`, the full MCD212 pixel pipeline active, and presentation
@@ -266,15 +287,23 @@ misses. Zero-input tracing shows passive ready-media detection issues
 `E1 00 02 13` at field 790, polls B0, and remains at the shell STOP. The
 BIOS/application boundary is therefore enforced with button-free navigation,
 shell-state assertions, and synthetic fixtures. Continue non-launching
-player-shell screen coverage, settings/memory UI, RTC/NVRAM, and peripheral audits. The TCP
-`set_input` and `mount_disc` commands remain development instrumentation; SDL
+player-shell screen coverage, settings/memory UI, RTC/NVRAM, and peripheral
+audits. Then land the persistent launcher/player-config paths for captured host
+mouse input (MC-CDI-027) and one-shot host clock seeding (MC-CDI-028), retaining
+faithful defaults. The TCP `set_input` and `mount_disc` commands remain
+development instrumentation; SDL
 drag-and-drop is the player media path.
 
 ## 5. Scaffolding gaps to close alongside
 
 - `ENHANCEMENTS.md` — the one canonical doc missing (added with this plan).
 - `tools/ tests/ docs/` — currently empty dirs; Phase A seeds tools/ and docs/.
-- `external/CeDImu` → submodule (Phase B).
+- `external/CeDImu` → intentionally optional, git-ignored local oracle checkout;
+  reference the upstream project/base revision but never vendor, submodule, or
+  publish the local modifications (MC-CDI-017).
+- Port `tools/package_release.py` and `tools/audit_runner_purity.py` from the
+  author-owned `../segagenesisrecomp/segagenesisrecomp` patterns, with CD-i
+  allowlists and forbidden-artifact/link checks (MC-CDI-029).
 
 ## 6. What "done" looks like for each phase
 

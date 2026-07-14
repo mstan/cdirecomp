@@ -103,9 +103,10 @@ What is verified today:
 - **Oracle parity** (`oracle/cdi_oracle.cpp`): a headless driver linking the
   wxWidgets-free CeDImu core and serving the matching trace surface on :4381.
   CeDImu is the behavioral oracle; Ghidra in 68000 mode is the literal oracle.
-- **Oracle**: CeDImu (open-source C++ CD-i emulator) cloned into
-  `external/CeDImu` — has its own `SCC68070`, `MCD212`, `OS9`, and `HLE`
-  implementations we use as the reference + future in-process oracle.
+- **Local-only oracle**: an optional, git-ignored CeDImu developer checkout in
+  `external/CeDImu` has independent `SCC68070`, `MCD212`, `OS9`, and `HLE`
+  implementations used as behavioral reference. CeDImu, local oracle changes,
+  and `CdiOracle` are not committed, packaged, or required by `CdiRuntime`.
 
 What is **not** done yet: broad input-driven coverage across every non-launching
 player-shell screen, new-CFG coverage for those unexercised paths, and the
@@ -113,6 +114,18 @@ remaining BIOS-visible RTC/NVRAM and peripheral behavior. Those are the active
 scope. CIAP content delivery, the OS-9 loaded-module bridge, Hotel Mario
 modules, and gameplay remain deferred until the BIOS is complete. See
 **TODO.md** and **PLAN.md**.
+
+Production releases are deliberately runtime-only: `CdiRuntime` plus explicitly
+allowlisted redistributable player dependencies/assets. The recompiler,
+`CdiOracle`, CeDImu, clown68000, development tools, user-supplied ROM/disc
+images, traces, and build outputs are never packaged. If an AGPL-linked tool is
+ever distributed, it will live in a separate tooling repository/release with
+complete AGPL compliance; it will not be added to the native player package.
+MC-CDI-029 tracks mechanical packaging and native-link enforcement, following
+the author-owned release-audit patterns in the sibling `segagenesisrecomp`.
+MC-CDI-030 separately audits source provenance for runtime code historically
+described as a CeDImu/clown68000 "port"; excluding a library from the link does
+not by itself establish independent implementation.
 
 ## Layout
 
