@@ -1,6 +1,7 @@
 # Build trees
 /build/
 build/
+/dist/
 
 # Generated C (throwaway artifacts — regenerate from the disc + recompiler)
 hotelmario/generated/*.c

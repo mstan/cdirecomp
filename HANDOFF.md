@@ -113,7 +113,8 @@ The Phase-C/player-shell baseline is `4f102d7`; rollback checkpoint `7a715c1`
 captures the burndown/config/provenance policy immediately before the clean
 rewrite. The rewrite independently replaces the flagged production components,
 removes the AGPL cycle-probe link and tracked vendor trees, and adds focused
-tests plus `PROVENANCE.md`. No release tag has been created.
+tests plus `PROVENANCE.md`. Private tag `v0.0.1` is the first internal runtime
+checkpoint.
 
 A fresh 2026-07-14 verification regenerated the BIOS with zero unsupported
 events; built the recompiler, Debug runner, local oracle, and non-co-sim Release
@@ -123,7 +124,12 @@ audit with zero skipped records, resyncs, timing mismatches, or cycle drift.
 The exact final Release binary reached STOP after 662032 instructions at
 `PC=$40A3E6 SR=$2000`, passed the shell smoke at 61 fps, mounted/ejected the
 Mode-2 fixture, and rendered all four BIOS navigation directions RULE 0a clean.
-This is ready for an internal 0.0.1 runtime/binary checkpoint.
+The 0.0.1 checkpoint also includes persistent captured mouse and one-shot
+host-local RTC options. Debug and Release CTests pass 6/6; the RTC startup,
+press/release, relative-mouse BIOS navigation, media, 20k trust-gate, and
+659,998-transition cycle audits all pass. The runtime-only archive is produced
+by `tools/package_runtime_release.py` from exactly five allowlisted files and is
+re-audited before its SHA-256 checksum is emitted.
 
 MC-CDI-017 deliberately keeps the oracle outside the release boundary. The
 local `external/CeDImu` checkout at `6eb8df4`, its four local modifications, and
@@ -138,8 +144,8 @@ source provenance audit; see `PROVENANCE.md`.
 Production release policy is runtime-only: package `CdiRuntime` and an explicit
 allowlist of redistributable runtime dependencies/assets, never any recompiler,
 oracle, development tool, user ROM/disc image, trace, or build-tree byproduct.
-MC-CDI-029 will adapt the author-owned `package_release.py` and
-`audit_runner_purity.py` patterns from `../segagenesisrecomp`. If AGPL-linked
+MC-CDI-029 now enforces the runtime archive allowlist, PE imports, forbidden
+markers, final ZIP contents, and checksum. If AGPL-linked
 tooling is ever distributed, it must be built and released from a separate
 tooling repository with complete AGPL compliance; it never joins the player
 release. The obsolete clown68000 probe and vendor trees are now removed from

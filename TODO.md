@@ -157,12 +157,13 @@ Disc insertion/ejection tests in the BIOS phase are not game progress.
 - **MC-CDI-026 — Behavioral oracle for gameplay.** CeDImu's disc/audio devices
   are incomplete, so it is the reference + BIOS-shell oracle; evaluate MAME
   `cdimono` (more complete) as the in-game behavioral oracle.
-- **MC-CDI-029 — Runtime-only release enforcement.** Production packages contain
+- ✅ **MC-CDI-029 — Runtime-only release enforcement.** Production packages contain
   `CdiRuntime` plus explicitly allowlisted redistributable runtime dependencies/
   assets only—never the recompiler, `CdiOracle`, CeDImu, clown68000, developer
-  tools, ROM/disc images, traces, or build debris. Adapt the author-owned
-  `../segagenesisrecomp/segagenesisrecomp/tools/package_release.py` and
-  `audit_runner_purity.py` patterns into CD-i-specific package/link audits. If an
+  tools, ROM/disc images, traces, or build debris. The CD-i-specific
+  `tools/package_runtime_release.py` builds from a five-file allowlist, rejects
+  unexpected PE imports and oracle/emulator markers, re-audits the final ZIP,
+  and emits its SHA-256 checksum. If an
   AGPL-linked tool is ever distributed, create a separate tooling repository
   and satisfy AGPL there; it does not join the player release. The clean-room
   68000 fallback has already been adapted from the sibling; reuse further
