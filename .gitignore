@@ -15,6 +15,7 @@ bios/generated/*.log
 *.cue
 *.iso
 *.rom
+/disc/
 
 # CeDImu is an optional local-only development oracle (MC-CDI-017).
 # Never commit, submodule, package, or publish its tree/local modifications.
