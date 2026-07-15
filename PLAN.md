@@ -8,6 +8,10 @@ sits in the family, what's missing, and the order to close the gaps. The
 `MC-CDI-*` tickets; this file sequences them and adds the cross-cutting
 infrastructure the tickets assume.
 
+**2026-07-14 status:** the BIOS/player-shell phase is closed. Its acceptance
+evidence and remaining boundary are in `BIOS-CLOSEOUT.md`; Phase E is now the
+active path.
+
 ## 1. The house style (what a mature sibling looks like)
 
 Every sibling converges on the same shape:
@@ -49,14 +53,15 @@ The non-negotiable maturity markers, in the order siblings acquired them:
 | Runtime boots recompiled code      | ✅  | ✅      | ✅   | ✅  | ✅ (shell) |
 | Always-on ring + TCP debug server  | ✅  | ✅      | ✅   | ✅  | ✅      |
 | Independent oracle, same surface   | ✅  | ✅      | ~   | ~   | ✅ CeDImu |
-| Regression smoke harness           | ✅  | ✅      | ✅   | ~   | ~ co-sim gates |
+| Regression smoke harness           | ✅  | ✅      | ✅   | ~   | ✅ shell/UI/media/RTC + co-sim |
 | Device models do real work         | ✅  | ✅      | ✅   | ✅  | ✅ partial |
 | Boots to shell / plays a game      | ✅  | ✅      | ✅   | ✅  | ✅ shell / ❌ game |
 
-cdirecomp is a **working scaffold**: the engine is proven on real CD-RTOS code,
-the runtime executes it, and it fails loud exactly where the hardware model
-runs out. It is blind, though — there is no way to see *how* a run reached a
-fault. That blindness is the bottleneck, not any single device.
+cdirecomp is now a **closed BIOS/player-shell implementation and an early game
+recompiler**. The engine is proven on real CD-RTOS code; the runtime has mature
+always-on rings, symmetric oracle instrumentation, deterministic trust gates,
+and player-facing regression smokes. The next bottleneck is connecting code
+relocated by the real OS-9 loader to statically recompiled game modules.
 
 ## 3. The 68000 frontend (provenance + reconciliation)
 
@@ -237,8 +242,14 @@ Each lands with an oracle diff showing the divergence closed.
   LEFT/DOWN/UP/RIGHT reports, and proves each enabled level-2 IRQ, guest drain,
   hardware-cursor move, framebuffer publication, and STOP return. All packets
   remain button-free and RULE 0a clean; five consecutive Release runs pass with
-  a synthetic fixture. Broader screen/settings coverage remains open before
-  calling every BIOS function navigable.
+  a synthetic fixture.
+- ✅ `tools/bios_options_smoke.py` (2026-07-14): creates a blank player battery,
+  lets the real BIOS initialize it, loads it on a second boot, and traverses
+  Options → Storage → Options → Exit through relative IKAT input and the real
+  `pt1driv` guest path. Every action changes sampled framebuffer output, returns
+  to the shell, and remains RULE 0a clean. A final deterministic boot proves it
+  neither loads nor rewrites player NVRAM. This closes the BIOS UI/settings
+  boundary.
 - `tools/boot_smoke.py`: snapshot system RAM + regs at a fixed OS-9-call count,
   diff vs committed baseline (baseline updates = same commit as the change).
 - `COVERAGE.md`: 68000 instruction-coverage audit for the SCC68070 (port the
@@ -252,6 +263,10 @@ Each lands with an oracle diff showing the divergence closed.
   one-shot host-local clock seed, while preserving cycle-derived advancement
   and guest RTC writes after startup. Persist the opt-in through the shared
   player config; deterministic validation profiles force it off.
+- ✅ **MC-CDI-022 closeout:** persist the faithful 32 KiB DS1216 SRAM as an
+  exact, atomically replaced `nvram.bin` beside `player.cfg`, independently of
+  the RTC clock. Reject malformed images without partial state and suppress all
+  battery I/O in deterministic profiles.
 - ✅ **MC-CDI-029:** the allowlist-based release packager and native
   purity audit to CD-i. The package must reject tools/oracles, ROM/disc images,
   traces, dumps, and build debris, and the native link/include audit must prove
@@ -274,11 +289,11 @@ runs). Player mode is now intentionally paced against the SCC68070 guest clock;
 fixed-sequence co-sim remains unpaced. The older 0.361 s measurement predated pixel
 decoding/composition and is not a like-for-like checkpoint.
 
-### Phase E — The game (Hotel Mario)
+### Phase E — The game (Hotel Mario) — *active next phase*
 
-Deferred until the BIOS/player-shell navigation goal is complete. Mounting the
-disc for BIOS media-state tests is not game work and is not evidence of game
-launch or gameplay progress.
+The BIOS/player-shell navigation goal is complete as of 2026-07-14. Mounting
+the disc for earlier BIOS media-state tests was not game work and is not
+evidence of game launch or gameplay progress.
 
 Phase 3 in TODO.md: OS-9 module-loader bridge (MC-CDI-024), recompile
 `cdi_hotel` + streamed level modules (MC-CDI-025), CIAP CD/audio (MC-CDI-013),
@@ -290,18 +305,20 @@ shell wakes, consumes the four-byte status, and returns to `$40A3E2` with zero
 misses. Zero-input tracing shows passive ready-media detection issues
 `E1 00 02 13` at field 790, polls B0, and remains at the shell STOP. The
 BIOS/application boundary is therefore enforced with button-free navigation,
-shell-state assertions, and synthetic fixtures. Continue non-launching
-player-shell screen coverage, settings/memory UI, RTC/NVRAM, and peripheral
-audits. The persistent player-config paths for captured host mouse input
-(MC-CDI-027) and one-shot host clock seeding (MC-CDI-028) are now landed with
-faithful defaults. The TCP `set_input` and `mount_disc` commands remain
-development instrumentation; SDL
-drag-and-drop is the player media path.
+shell-state assertions, synthetic fixtures, and the real Options/Storage/Exit
+closeout. The persistent player-config paths for captured host mouse input
+(MC-CDI-027), one-shot host clock seeding (MC-CDI-028), and independent 32 KiB
+battery persistence are landed with faithful defaults. Begin MC-CDI-024 at the
+real `F$Load` relocation boundary; add remaining peripheral coverage only when
+an observed application path requires it. The TCP `set_input` and `mount_disc`
+commands remain development instrumentation; SDL drag-and-drop is the player
+media path.
 
 ## 5. Scaffolding gaps to close alongside
 
-- `ENHANCEMENTS.md` — the one canonical doc missing (added with this plan).
-- `tools/ tests/ docs/` — currently empty dirs; Phase A seeds tools/ and docs/.
+- `ENHANCEMENTS.md` is the canonical opt-in feature contract.
+- Add `tools/boot_smoke.py` and `COVERAGE.md` as cross-cutting regression work;
+  the existing tools and unit-test suites cover the closed BIOS boundary.
 - `external/*` → intentionally optional, git-ignored local validation checkouts;
   reference the upstream project/base revision but never vendor, submodule, or
   publish the local modifications (MC-CDI-017).

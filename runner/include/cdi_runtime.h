@@ -318,6 +318,12 @@ void     periph_increment_timer(uint32_t cycles);
  * a serial RTC transfer. `dev` is (busaddr-$320000)>>1. Reset uses the
  * deterministic 1989-01-01 test epoch. */
 void    nvram_reset(void);
+/* Player-only battery SRAM persistence. The clock remains independent: these
+ * functions load/save exactly the 32 KiB SRAM and never alter RTC state. Load
+ * returns 1 on success, 0 when no file exists, and -1 for invalid/unreadable
+ * input. Save uses a same-directory temporary file and atomic replacement. */
+int     nvram_load_sram(const char *path);
+int     nvram_save_sram(const char *path);
 typedef struct CdiRtcTime {
     int year;              /* representable startup range: 1970..2069 */
     uint8_t month;         /* 1..12 */

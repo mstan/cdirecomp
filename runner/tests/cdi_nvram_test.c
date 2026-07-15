@@ -43,10 +43,15 @@ static void write_clock(const uint8_t in[8]) {
 }
 
 int main(void) {
+    const char *battery_path = "cdi_nvram_test.bin";
     uint8_t clock[8];
     CdiRtcTime host_time;
+    FILE *file;
 
+    remove(battery_path);
+    remove("cdi_nvram_test.bin.tmp");
     nvram_reset();
+    CHECK(nvram_load_sram(battery_path) == 0);
     CHECK(nvram_get_byte(0x1234) == 0xFF);
     nvram_set_byte(0x1234, 0x5A);
     CHECK(nvram_get_byte(0x1234) == 0x5A);
@@ -130,6 +135,35 @@ int main(void) {
     CHECK(host_time.year >= 1970 && host_time.year <= 2069);
     CHECK(host_time.month >= 1 && host_time.month <= 12);
     CHECK(host_time.weekday >= 1 && host_time.weekday <= 7);
+
+    /* Battery persistence carries only SRAM, never the independent RTC. */
+    nvram_reset();
+    nvram_set_byte(0x1234, 0xA6);
+    host_time = (CdiRtcTime){ 2024, 2, 29, 4, 23, 59, 58, 50 };
+    CHECK(nvram_seed_clock_once(&host_time) == 1);
+    CHECK(nvram_save_sram(battery_path));
+    nvram_reset();
+    CHECK(nvram_load_sram(battery_path) == 1);
+    CHECK(nvram_get_byte(0x1234) == 0xA6);
+    read_clock(clock);
+    CHECK(clock[7] == 0x89); /* SRAM loading does not restore clock fields. */
+    nvram_set_byte(0x1234, 0x3C);
+    CHECK(nvram_save_sram(battery_path)); /* Replace an existing battery. */
+    nvram_reset();
+    CHECK(nvram_load_sram(battery_path) == 1);
+    CHECK(nvram_get_byte(0x1234) == 0x3C);
+
+    file = fopen(battery_path, "wb");
+    CHECK(file != NULL);
+    if (file) {
+        fputc(0, file);
+        fclose(file);
+    }
+    nvram_reset();
+    CHECK(nvram_load_sram(battery_path) == -1);
+    CHECK(nvram_get_byte(0x1234) == 0xFF);
+    remove(battery_path);
+    remove("cdi_nvram_test.bin.tmp");
 
     if (failures) {
         fprintf(stderr, "DS1216 tests: %d failure(s)\n", failures);

@@ -12,8 +12,13 @@
  */
 #include "cdi_runtime.h"
 
+#include <errno.h>
+#include <stdio.h>
 #include <stdint.h>
 #include <string.h>
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 enum {
     RTC_HUNDREDTHS,
@@ -196,6 +201,57 @@ void nvram_reset(void) {
     rtc.now.date = 1;
     rtc.now.weekday = 7; /* 1989-01-01 was Sunday. */
     latch_clock_registers();
+}
+
+int nvram_load_sram(const char *path) {
+    uint8_t loaded[NVRAM_BYTES];
+    FILE *file;
+    int extra;
+    errno = 0;
+    file = fopen(path, "rb");
+    if (!file) return errno == ENOENT ? 0 : -1;
+    if (fread(loaded, 1, sizeof loaded, file) != sizeof loaded) {
+        fclose(file);
+        return -1;
+    }
+    extra = fgetc(file);
+    if (extra != EOF || ferror(file)) {
+        fclose(file);
+        return -1;
+    }
+    if (fclose(file) != 0) return -1;
+    memcpy(rtc.ram, loaded, sizeof loaded);
+    return 1;
+}
+
+int nvram_save_sram(const char *path) {
+    char temporary[1200];
+    FILE *file;
+    int ok;
+    int written = snprintf(temporary, sizeof temporary, "%s.tmp", path);
+    if (written <= 0 || (size_t)written >= sizeof temporary) return 0;
+    file = fopen(temporary, "wb");
+    if (!file) return 0;
+    ok = fwrite(rtc.ram, 1, sizeof rtc.ram, file) == sizeof rtc.ram;
+    if (fflush(file) != 0) ok = 0;
+    if (fclose(file) != 0) ok = 0;
+    if (!ok) {
+        remove(temporary);
+        return 0;
+    }
+#ifdef _WIN32
+    if (!MoveFileExA(temporary, path,
+                     MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        remove(temporary);
+        return 0;
+    }
+#else
+    if (rename(temporary, path) != 0) {
+        remove(temporary);
+        return 0;
+    }
+#endif
+    return 1;
 }
 
 int nvram_seed_clock_once(const CdiRtcTime *time_value) {

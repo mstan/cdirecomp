@@ -57,6 +57,7 @@ int main(int argc, char *argv[]) {
     const char *input_script_spec = NULL;
     CdiPlayerConfig player_config;
     char player_config_path[1024] = "";
+    char nvram_path[1024] = "";
     int player_preferences_active;
 
     for (int i = 1; i < argc; i++) {
@@ -123,6 +124,11 @@ int main(int argc, char *argv[]) {
                player_config_path,
                player_config.capture_mouse ? "on" : "off",
                player_config.sync_host_on_startup ? "on" : "off");
+        if (!cdi_player_config_sibling_path(player_config_path, "nvram.bin",
+                                            nvram_path, sizeof nvram_path)) {
+            fprintf(stderr, "[nvram] cannot form the battery-file path\n");
+            return 1;
+        }
     }
 
     /* ---- load the system ROM ---- */
@@ -156,6 +162,17 @@ int main(int argc, char *argv[]) {
     runtime_init();                 /* zeroes g_cpu */
     periph_reset();                 /* on-chip peripheral power-on state (UART TxRDY) */
     nvram_reset();                  /* DS1216 SmartWatch: SRAM=$FF, clock=1989-01-01 */
+    if (player_preferences_active) {
+        int loaded = nvram_load_sram(nvram_path);
+        if (loaded < 0) {
+            fprintf(stderr,
+                    "[nvram] %s must be an exact 32768-byte battery image\n",
+                    nvram_path);
+            return 1;
+        }
+        printf("[nvram] %s (%s)\n", nvram_path,
+               loaded ? "loaded" : "new battery");
+    }
     if (player_preferences_active && player_config.sync_host_on_startup) {
         CdiRtcTime host_time;
         int seeded;
@@ -368,5 +385,9 @@ int main(int argc, char *argv[]) {
         }
     }
     if (frontend_active) cdi_frontend_shutdown();
+    if (player_preferences_active && !nvram_save_sram(nvram_path)) {
+        fprintf(stderr, "[nvram] cannot save battery image %s\n", nvram_path);
+        return 1;
+    }
     return 0;
 }

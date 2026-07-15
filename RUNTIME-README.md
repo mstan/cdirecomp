@@ -47,6 +47,10 @@ including real-time hardware input and media-state handling. CD-i application
 loading and gameplay are not part of this checkpoint. The runtime will reject
 or fail to launch incomplete/synthetic media as real CD-i software.
 
+This 0.0.1 package predates the post-checkpoint player-battery closeout. Current
+source additionally persists the DS1216 SRAM as `nvram.bin`; that change belongs
+to the next runtime checkpoint rather than retroactively changing this archive.
+
 This private internal checkpoint is not a public redistribution or licensing
 grant. SDL2 is redistributed under the notice in
 `THIRD-PARTY-NOTICES.md`.

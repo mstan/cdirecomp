@@ -1,6 +1,7 @@
 #include "player_config.h"
 
 #include <stdio.h>
+#include <string.h>
 
 static int failures;
 
@@ -16,6 +17,7 @@ int main(void) {
     CdiPlayerConfig written;
     CdiPlayerConfig loaded;
     FILE *file;
+    char sibling[128];
 
     remove(path);
     loaded.capture_mouse = 1;
@@ -47,6 +49,19 @@ int main(void) {
     CHECK(cdi_player_config_load(path, &loaded) == -1);
     CHECK(loaded.capture_mouse == 0);
     CHECK(loaded.sync_host_on_startup == 0);
+
+    CHECK(cdi_player_config_sibling_path(
+        "C:\\Users\\Player\\player.cfg", "nvram.bin",
+        sibling, sizeof sibling));
+    CHECK(!strcmp(sibling, "C:\\Users\\Player\\nvram.bin"));
+    CHECK(cdi_player_config_sibling_path(
+        "/tmp/cdirecomp/player.cfg", "nvram.bin", sibling, sizeof sibling));
+    CHECK(!strcmp(sibling, "/tmp/cdirecomp/nvram.bin"));
+    CHECK(cdi_player_config_sibling_path(
+        "player.cfg", "nvram.bin", sibling, sizeof sibling));
+    CHECK(!strcmp(sibling, "nvram.bin"));
+    CHECK(!cdi_player_config_sibling_path(
+        "player.cfg", "nvram.bin", sibling, 4));
 
     remove(path);
     if (failures) return 1;

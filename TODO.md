@@ -1,10 +1,11 @@
 # cdirecomp TODO / roadmap
 
-**Strategy (decided 2026-05-28): recompile the entire OS first — the game comes later.**
-BIOS-first, mirroring psxrecomp v4. We statically recompile the whole CD-RTOS /
-OS-9 system ROM and make the player shell fully navigable and real-time **before
-any Hotel Mario game work begins**. The Hotel Mario image may be mounted only
-as a real-media BIOS fixture; game launch and gameplay remain deferred.
+**Strategy (decided 2026-05-28, BIOS milestone closed 2026-07-14): recompile
+the entire OS first — the game comes later.** BIOS-first, mirroring psxrecomp
+v4. The whole CD-RTOS / OS-9 system ROM is now statically recompiled and its
+player shell is navigable, persistent, and real-time. The Hotel Mario image was
+used only as a real-media BIOS fixture during that chapter. Phase 3 may now
+begin; game launch and gameplay have not yet been implemented.
 CD-i runs CD-RTOS / OS-9 from a player **system ROM** (the "BIOS"). We do NOT
 hand-write HLE stubs for OS-9 — psxrecomp learned the hard way that stubbing the
 BIOS (faking syscall outputs, mirroring kernel state in C) causes silent drift
@@ -22,33 +23,33 @@ loading) comes after the OS boots.
 
 IDs are referenced from code comments (`TODO MC-CDI-NNN`).
 
-## Phase 0 — prerequisite (blocks everything)
+## ✅ Phase 0 — prerequisite (complete)
 
-- **MC-CDI-019 — Obtain + verify the CD-i system BIOS ROM.** User-provided
+- ✅ **MC-CDI-019 — Obtain + verify the CD-i system BIOS ROM.** User-provided
   (copyrighted Philips firmware). Target: a CeDImu-known-good **Mono-4** board
   ROM run in **NTSC** mode (Hotel Mario USA), e.g. CDI 470/00, 470/20, 490/00,
   or 220/80. Drop it in `bios/`. Confirm size + reset vector (SSP@$000000,
   PC@$000004) on receipt. See `bios/README.md`.
 
-## Phase 1 — recompile + boot the BIOS (the engine-proof milestone)
+## ✅ Phase 1 — recompile + boot the BIOS (complete)
 
-- **MC-CDI-001 — BIOS recompiler entry (`main_cdi_bios.c`).** Adapt the flat-ROM
+- ✅ **MC-CDI-001 — BIOS recompiler entry (`main_cdi_bios.c`).** Adapt the flat-ROM
   path (like `main_genesis.c`): load the ROM at its boot base, seed discovery
   from the reset vector + exception vectors + Ghidra-derived OS-9 kernel entries,
   run `function_finder`, emit `bios/generated/cdrtos_full.c` + `_dispatch.c`.
   NO STUBS (port psxrecomp's stub-marker rejection + self-compile check).
-- **MC-CDI-020 — Boot-slice proof first.** Before full emission, recompile a
+- ✅ **MC-CDI-020 — Boot-slice proof first.** Before full emission, recompile a
   bounded slice from the reset vector and compile-validate it (psxrecomp Phase
   1a pattern) to prove the engine on real CD-RTOS code.
-- **MC-CDI-021 — BIOS seeds file.** Ghidra (68000 mode) over the ROM → kernel /
+- ✅ **MC-CDI-021 — BIOS seeds file.** Ghidra (68000 mode) over the ROM → kernel /
   syscall-handler / driver entry points. The OS-9 `TRAP #0` handler + F$/I$
   service tables are the priority targets.
-- **MC-CDI-016 — Boot to player shell + oracle diff.** Link recompiled BIOS C +
+- ✅ **MC-CDI-016 — Boot to player shell + oracle diff.** Link recompiled BIOS C +
   runtime into one binary (psxrecomp single-binary + shared-dispatch model),
   boot to the CD-i player shell, diff against CeDImu (which boots to shell).
   This is "Hotel Mario" of the BIOS phase: prove the recompiled OS runs.
 
-## Phase 2 — hardware enough to boot the shell
+## ✅ Phase 2 — hardware enough to boot and operate the shell (complete)
 
 - ✅ **MC-CDI-012 — MCD212 video.** Clean-room register/timing and ICA/DCA
   sequencer plus DYUV/RGB555/CLUT/RL7/RL3/mosaic decoders, transparency,
@@ -57,9 +58,12 @@ IDs are referenced from code comments (`TODO MC-CDI-NNN`).
   identical ICA/DCA event streams; field 421 hashes to `ddcf263ed1261363`.
   Semantics were checked against the Motorola MCD212 manual; CeDImu remains the
   behavioral output oracle.
-- **MC-CDI-022 — Timekeeper (RTC + NVRAM)** at $320000. Required for boot;
-  Mono-4 uses 8 KB or 32 KB NVRAM depending on model.
-- **MC-CDI-023 — IKAT** (Mono-3/4 input/serial gate; replaces the Mono-2 SLAVE).
+- ✅ **MC-CDI-022 — Timekeeper (RTC + NVRAM)** at $320000. The DS1216 clock
+  advances from emulated cycles, supports the optional one-shot host seed, and
+  keeps its 32 KiB battery-backed SRAM in an atomic `nvram.bin` beside the
+  player config. A new battery is initialized by the real BIOS and later boots
+  retain its settings. Deterministic profiles never touch it.
+- ✅ **MC-CDI-023 — IKAT** (Mono-3/4 input/serial gate; replaces the Mono-2 SLAVE).
   CeDImu HLEs IKAT — mirror that. Command/response channels plus the timed
   25-ms Class::Maneuvering channel-A packet generator and physical SDL keyboard/
   game-controller mapping are present. At the no-disc shell STOP, CD-RTOS uses
@@ -73,8 +77,11 @@ IDs are referenced from code comments (`TODO MC-CDI-NNN`).
 - **MC-CDI-006 — SCC68070 on-chip peripherals + MMU** ($80001001..): I2C, UART,
   timers, DMA, MMU translation. UART reset/TX state and T0/T1/T2 with the
   96-cycle prescaler, TCR/TSR/RR/PICR1 and on-chip IRQ delivery are present;
-  I2C, DMA and MMU coverage remain.
-- **MC-CDI-010 — exception/trap vectors** beyond OS-9 `TRAP #0`.
+  I2C, DMA and MMU coverage remain as application-driven platform work; none is
+  exercised by or blocks the closed player-shell boundary.
+- **MC-CDI-010 — exception/trap vectors** beyond the boot- and shell-exercised
+  OS-9 `TRAP #0`, IRQ, and fault paths. Add variants when loaded application
+  code reaches them; they are not a BIOS-shell blocker.
 - ✅ **MC-CDI-011 — hybrid interpreter fallback.** The clean-room shared-
   decoder interpreter remains the correctness floor for RAM-built vectors and
   stubs. Trace-guided discovery currently contains 3,982 in-ROM entries and
@@ -84,7 +91,7 @@ IDs are referenced from code comments (`TODO MC-CDI-NNN`).
   PC without splitting canonical functions. Configured OS-9 `TRAP #0` scanning
   skips its inline service word and owns the post-RTE continuation in the
   original caller. Trace discovery now grows only for genuinely unknown CFGs;
-  broader BIOS navigation coverage remains open.
+  Options/Storage/Exit navigation and the persistent shell are now covered.
 
 ## Player-quality enhancements (PLAN Phase D; opt-in, persistent)
 
@@ -110,11 +117,11 @@ These preferences are user/player configuration, not title policy in
 launcher restarts; the current runtime creates it in SDL's user preference
 folder and a future launcher UI can edit the same file/API.
 
-## Phase 3 — the game (Hotel Mario)
+## Phase 3 — the game (Hotel Mario; now unblocked)
 
-**Deferred:** do not begin this phase until BIOS/player-shell navigation,
-real-time performance, and native coverage are closed.
-Disc insertion/ejection tests in the BIOS phase are not game progress.
+The BIOS/player-shell entry criteria are closed; see `BIOS-CLOSEOUT.md`.
+Disc insertion/ejection tests from the BIOS phase were not game progress. The
+next critical item is the relocated OS-9 module bridge.
 
 - **MC-CDI-024 — OS-9 module loader bridge.** The recompiled CD-RTOS `F$Load`
   relocates a module into RAM; we register that module's *statically recompiled*

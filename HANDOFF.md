@@ -1,9 +1,9 @@
 # Session Handoff — cdirecomp
 
 **Date:** 2026-07-14
-**Goal:** a fully navigable, real-time, LLE-focused BIOS/player shell. Hotel
-Mario is only a real-media fixture; game launch and gameplay are out of scope
-until the BIOS goal is complete.
+**Completed goal:** a navigable, persistent, real-time, LLE-focused BIOS/player
+shell. **Next goal:** the relocated OS-9 module bridge. Hotel Mario has so far
+been only a real-media fixture; game launch and gameplay are not implemented.
 
 ## Non-negotiable architecture
 
@@ -40,8 +40,8 @@ until the BIOS goal is complete.
   PCs and drove the seed list upward. The async native resume map fixes that
   general class: `indirect_targets` now reports only RAM or genuinely unknown
   ROM CFGs. The same Release stress that previously failed 10 of 30 schedules
-  now passes 30/30 with no new entries. This is still bounded evidence, not a
-  substitute for input-driven navigation coverage.
+  now passes 30/30 with no new entries. Input-driven main-menu and
+  Options/Storage/Exit coverage now supplies the complementary UI evidence.
 - Nested generated RTE/RTR now propagates through every C JSR frame to the
   depth-zero trampoline; skip-RTS remains a one-frame unwind. The post-STOP
   service window is full-state identical to CeDImu for 54,773 native
@@ -93,6 +93,17 @@ until the BIOS goal is complete.
   guest drain, observes hardware-cursor and framebuffer movement, and returns
   RULE 0a-clean to STOP without a button packet. Five consecutive Release runs
   pass with a synthetic fixture; no application was launched.
+- The DS1216 now has a faithful player battery lifecycle. A normal launch loads
+  and atomically saves an exact 32 KiB `nvram.bin` beside `player.cfg`; a fresh
+  all-`$FF` battery is initialized by the real BIOS, and the next launch loads
+  those settings without the cold-battery configuration warning. RTC clock
+  state is intentionally independent. Deterministic/headless/co-sim profiles
+  neither load nor rewrite the player battery.
+- `tools/bios_options_smoke.py` creates that fresh battery, reboots from it,
+  moves and clicks through the real timed IKAT/`pt1driv` path, traverses Options
+  → Storage → Options → Exit, verifies framebuffer transitions and shell return,
+  and finishes with zero RULE 0a misses. This closes the BIOS/player-shell
+  acceptance boundary recorded in `BIOS-CLOSEOUT.md`.
 - The resulting ROM targets `$43FD2E/$43FD54/$440022` exposed a general OS-9
   CFG hole: each follows `TRAP #0` plus an inline service word. The recompiler
   now follows those continuations inside their canonical callers. Regeneration
@@ -130,6 +141,10 @@ press/release, relative-mouse BIOS navigation, media, 20k trust-gate, and
 659,998-transition cycle audits all pass. The runtime-only archive is produced
 by `tools/package_runtime_release.py` from exactly five allowlisted files and is
 re-audited before its SHA-256 checksum is emitted.
+
+Post-0.0.1 source completes the player-battery and real Options/Storage/Exit
+closeout described above. It is intentionally not represented as a silent
+replacement of the existing `v0.0.1` archive; it belongs to the next checkpoint.
 
 MC-CDI-017 deliberately keeps the oracle outside the release boundary. The
 local `external/CeDImu` checkout at `6eb8df4`, its four local modifications, and
@@ -194,17 +209,23 @@ Key modified/new files in the `4f102d7` baseline commit:
   guest-driver/UI navigation regression.
 - `tools/rtc_startup_smoke.py`: enabled persistent-config/host-local RTC boot
   regression.
+- `runner/src/cdi_nvram.c`, `runner/src/main.c`: exact 32 KiB player battery
+  load/atomic-save lifecycle, isolated from deterministic profiles and RTC time.
+- `tools/bios_options_smoke.py`: fresh/load battery plus real
+  Options/Storage/Exit guest-path closeout regression.
+- `BIOS-CLOSEOUT.md`: accepted BIOS scope, evidence, and next-phase boundary.
 - `README.md`, `PLAN.md`, `TODO.md`: current milestone and remaining work.
 
 ## Next critical path
 
-1. Cover the remaining non-launching player-shell screens and BIOS-visible
-   settings while keeping every input button boundary explicit and RULE 0a clean.
-2. Audit memory/settings UI behavior plus RTC/NVRAM and peripheral behavior
-   without activating Play CD-I.
+1. Implement MC-CDI-024: map modules relocated by the real CD-RTOS `F$Load`
+   path to their statically recompiled native functions.
+2. Recompile and connect `cdi_hotel` first (MC-CDI-025), keeping CIAP content
+   delivery changes driven by the first real application boundary reached.
 3. Add the fixed guest-clock RAM/register baseline, SCC68070 instruction-
-   coverage audit, and CI. Game
-   loading, module recompilation, and gameplay remain deferred.
+   coverage audit, and CI as cross-cutting regression work. Fill I2C/DMA/MMU or
+   additional exception behavior only when an observed application path needs
+   it, with focused evidence.
 
 ## Rebuild and verification
 
@@ -232,6 +253,8 @@ py -3 tools/shell_idle_smoke.py build/runner/CdiRuntime.exe `
   -DCMAKE_BUILD_TYPE=Release -DCDI_COSIM_BUILD=OFF
 & $cm --build F:/Projects/cdirecomp/build/runner-release -j
 & build/runner-release/CdiRuntime.exe bios/cdi490a.rom --exit-on-stop
+py -3 tools/bios_options_smoke.py build/runner-release/CdiRuntime.exe `
+  bios/cdi490a.rom build/tmp/disc_smoke/fixture.cue --port 4406
 ```
 
 Always kill held instances before rebuilding or launching:

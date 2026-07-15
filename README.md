@@ -33,10 +33,11 @@ in the emulated RAM, written by recompiled code, no parallel C mirror. We
 emulate only the hardware chips. Conveniently, the CD-RTOS ROM is a flat 68000
 ROM that boots from its reset vector, so the copied Genesis frontend recompiles
 it directly. **The BIOS ROM is user-provided** (copyrighted) — see `bios/`.
-We are completing the BIOS/player shell, including navigation, media states,
-and real-time behavior **before any Hotel Mario game work begins**. The game
-image is currently used only as a real Mode-2 media fixture. Roadmap and
-ordering live in **TODO.md**.
+The BIOS/player-shell chapter—including navigation, settings/storage UI, media
+states, persistence, and real-time behavior—is complete. The game image has so
+far been used only as a real Mode-2 media fixture; the next chapter begins the
+OS-9 loaded-module bridge. See **BIOS-CLOSEOUT.md** for the acceptance boundary
+and **TODO.md** for the remaining roadmap.
 
 ## Current status
 
@@ -92,6 +93,16 @@ What is verified today:
   model; the RTC is sampled only before the first guest instruction and then
   remains cycle-derived. Deterministic/headless tooling suppresses both without
   changing the saved choices.
+- **Persistent player battery**: normal player launches load and atomically
+  save an exact 32 KiB `nvram.bin` beside `player.cfg`. The BIOS initializes a
+  new all-`$FF` battery once; later launches retain its settings without the
+  cold-battery system-configuration warning. RTC clock fields remain an
+  independent one-shot/cycle-derived model. Deterministic and headless profiles
+  never touch the player battery.
+- **Real settings UI closeout**: an automated run follows the real `pt1driv`
+  input path through Options → Storage → Options → Exit, verifies each guest
+  drain and framebuffer transition, returns to the persistent shell, and stays
+  RULE 0a clean.
 - **Real media insertion/ejection boundary**: CUE/BIN images are validated and
   retained as sector backing, then observed by IKAT on emulated time. Mount and
   eject each assert the shell's enabled channel-D IRQ and return cleanly to the
@@ -111,12 +122,12 @@ What is verified today:
   implementations used as behavioral reference. CeDImu, local oracle changes,
   and `CdiOracle` are not committed, packaged, or required by `CdiRuntime`.
 
-What is **not** done yet: broad input-driven coverage across every non-launching
-player-shell screen, new-CFG coverage for those unexercised paths, and the
-remaining BIOS-visible RTC/NVRAM and peripheral behavior. Those are the active
-scope. CIAP content delivery, the OS-9 loaded-module bridge, Hotel Mario
-modules, and gameplay remain deferred until the BIOS is complete. See
-**TODO.md** and **PLAN.md**.
+The BIOS/player-shell milestone is closed; its exact evidence and limits are in
+**BIOS-CLOSEOUT.md**. What is **not** done yet is the game/application chapter:
+CIAP content delivery and audio, the OS-9 relocated-module bridge, Hotel Mario
+module recompilation, and gameplay. Unexercised I2C/DMA/MMU and additional
+exception cases remain platform backlog to implement when those application
+paths demand them. See **TODO.md** and **PLAN.md**.
 
 Production releases are deliberately runtime-only: `CdiRuntime` plus explicitly
 allowlisted redistributable player dependencies/assets. The recompiler,
@@ -197,6 +208,10 @@ py -3 tools/bios_navigation_smoke.py build/runner-release/CdiRuntime.exe `
 # One-shot host-local RTC integration regression
 py -3 tools/rtc_startup_smoke.py build/runner-release/CdiRuntime.exe `
   bios/cdi490a.rom
+
+# Fresh-battery persistence plus real Options/Storage/Exit traversal
+py -3 tools/bios_options_smoke.py build/runner-release/CdiRuntime.exe `
+  bios/cdi490a.rom build/tmp/disc_smoke/fixture.cue
 ```
 
 Player controls: arrows or WASD move the CD-i pointer; Enter, Space, or Z is
@@ -230,6 +245,11 @@ the clock afterward. Both preferences default to `false`. Headless, scripted,
 fixed-sequence, and co-sim profiles ignore them for determinism without
 overwriting the file. `CDI_PLAYER_CONFIG_PATH` is available to launcher and
 test integrations that need an explicit path; it is not required for players.
+
+Normal player runs also maintain `nvram.bin` beside `player.cfg`. It contains
+only the DS1216's 32 KiB battery-backed SRAM and is atomically replaced on clean
+shutdown; it does not serialize the live clock. Automation/headless/co-sim
+profiles neither load nor rewrite it.
 
 ---
 

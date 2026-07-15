@@ -117,3 +117,20 @@ int cdi_player_config_default_path(char *path, size_t capacity) {
     SDL_free(directory);
     return written > 0 && (size_t)written < capacity;
 }
+
+int cdi_player_config_sibling_path(const char *config_path,
+                                   const char *filename,
+                                   char *path, size_t capacity) {
+    const char *slash = strrchr(config_path, '/');
+    const char *backslash = strrchr(config_path, '\\');
+    const char *separator = slash;
+    size_t directory_length;
+    size_t filename_length = strlen(filename);
+    if (!separator || (backslash && backslash > separator)) separator = backslash;
+    directory_length = separator ? (size_t)(separator - config_path + 1) : 0;
+    if (!filename_length || directory_length + filename_length + 1 > capacity)
+        return 0;
+    if (directory_length) memcpy(path, config_path, directory_length);
+    memcpy(path + directory_length, filename, filename_length + 1);
+    return 1;
+}

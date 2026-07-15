@@ -56,8 +56,8 @@ divergence vs the faithful path, fix the class. No printf, no eyeballing.
 
 ## Implemented player-quality enhancements
 
-The BIOS player shell is bootable, rendered, real-time paced, and physically
-controllable. These first host-integration enhancements are implemented through
+The BIOS player shell is bootable, rendered, real-time paced, physically
+controllable, and closed as a milestone. These first host-integration enhancements are implemented through
 the durable per-user `player.cfg` contract. Enabled and disabled values pass
 load/save round trips. A deterministic profile suppresses them for that run but
 does not read, create, or overwrite the user's saved choices. The repository
@@ -98,8 +98,9 @@ host's local civil date/time once per emulated startup and uses it to seed the
 CD-i RTC before the first guest instruction. The player config persists the
 preference; enabling it does not imply continuous synchronization.
 
-- Synchronize only the DS1216 clock fields; preserve the faithful NVRAM reset/
-  persistence policy independently.
+- Synchronize only the DS1216 clock fields; preserve the faithful 32 KiB SRAM
+  persistence policy independently. Normal player runs use `nvram.bin` beside
+  `player.cfg`; deterministic profiles do not touch it.
 - After startup, advance solely from emulated SCC68070 cycles. Never poll or
   continuously correct against wall-clock time, so guest changes to the date,
   time, oscillator state, or hundredths remain authoritative at runtime.
@@ -115,3 +116,9 @@ cycle rollover, SRAM independence, and no re-seed after a guest RTC write),
 `PlayerConfigTest`, and `tools/rtc_startup_smoke.py`, which boots a real BIOS
 with a temporary enabled persistent config and verifies one host-local sample,
 the canonical shell STOP, and an unchanged config file.
+
+Battery persistence itself is faithful hardware behavior, not an enhancement.
+`CdiNvramTest` covers exact-size load/save, malformed-image rejection, atomic
+replacement, and RTC independence. `tools/bios_options_smoke.py` proves a fresh
+battery is initialized by the real BIOS, loaded on the next player boot, used
+through Options/Storage/Exit, and ignored by deterministic execution.
