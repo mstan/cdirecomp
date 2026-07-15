@@ -369,8 +369,8 @@ static void emit_store_dn(FILE *f, const char *indent,
  *   bits 14-12 register number
  *   bit 11     index size — 0 = sign-extended low word (.W), 1 = full long (.L)
  * The W/L bit IS significant on the 68000/SCC68070: an .L index uses the WHOLE
- * 32-bit register, not a sign-extended word. (CeDImu computes a JSR (d8,PC,A3.L)
- * target with the full A3=$0000A4AA; sign-extending the word to $FFFFA4AA gave a
+ * 32-bit register, not a sign-extended word. A BIOS JSR (d8,PC,A3.L) regression
+ * uses the full A3=$0000A4AA; sign-extending the word to $FFFFA4AA gave a
  * wrong target $411788 vs the correct $421788 — the $4172DC divergence.) Scale
  * (bits 10-9) is 68020+ and is always 0 here. Output e.g.
  * "(int32_t)(int16_t)g_cpu.A[3]" (.W) or "(int32_t)g_cpu.A[3]" (.L); both are
@@ -1010,8 +1010,8 @@ static void emit_cycle_accounting(FILE *f, const char *indent, int cycles)
 static void emit_register_shift_cycle_accounting(FILE *f, const char *indent,
                                                  int count_dreg)
 {
-    /* CeDImu SCC68070: every register-count shift/rotate costs
-     * 13 + 3*(Dn mod 64). Evaluate Dn at instruction entry: the count
+    /* SCC68070 register-count shifts cost 13 + 3*(Dn mod 64) periods.
+     * Evaluate Dn at instruction entry: the count
      * register is allowed to be the destination and may be overwritten by
      * the instruction body. */
     fprintf(f, "%sg_native_insn_count++;"
@@ -1765,11 +1765,9 @@ static uint32_t *build_entry_owners(const GenesisRom *rom,
 /* =========================================================================
  * Cycle-accurate VBlank: per-instruction 68K cycle cost.
  *
- * Values derived from the Motorola 68000 Programmer's Reference Manual
- * (Appendix B, "Instruction Timing"), cross-checked against the
- * interpreter's cost code in
- *   clownmdemu-core/libraries/clown68000/source/interpreter/clown68000.c
- * lines 399-463 (EA-mode costs) and per-instruction microcode.
+ * The legacy base-68000 reference table below comes from the Motorola 68000
+ * Programmer's Reference Manual, Appendix B. CD-i emission uses the separate
+ * SCC68070 table later in this file.
  *
  * Data-dependent costs (MULx/DIVx result magnitude, Dn-register shift
  * counts, BTST on memory with dynamic bit index) use averages near the
@@ -1781,7 +1779,6 @@ static uint32_t *build_entry_owners(const GenesisRom *rom,
  * g_vblank_threshold (109,312 cycles = scanline 224).
  * ========================================================================= */
 
-#include "cycle_probe.h"
 
 /* popcount of a 16-bit mask — used for MOVEM register count. */
 static int popcount16(uint16_t v) {
@@ -1991,21 +1988,18 @@ static int estimate_cycles_prm(const M68KInstr *instr)
 /* =========================================================================
  * SCC68070 cycle model (MC-CDI-005) — the CD-i CPU is a 68070, NOT a plain
  * 68000, and its per-instruction timings differ (NOP=7, MOVE reg-reg=7,
- * RTS=15, ...). The behavioral oracle (CeDImu) drives MCD212 display timing
- * (the DA bit the boot polls) from these exact 68070 cycle counts, so the
- * recompiled tier must emit 68070 cycles too or its accumulated display phase
- * drifts out of lockstep — clown68000 (a 68000 core) is wrong for CD-i here.
+ * RTS=15, ...). Recompiled and interpreted execution must use the same timing
+ * model or cycle-driven devices drift out of phase.
  *
- * This MIRRORS CeDImu cores/SCC68070/{InstructionSet,AddressingModes,
- * MemoryAccess}.cpp, and is the static-codegen twin of the runtime interpreter's
- * m68k_cycles() (runner/src/m68k_interp.c) — the two must agree. (TODO MC-CDI-009
- * extracts the one cycle model both consume.) The interpreter computes the few
+ * Values are transcribed from SCC68070 User Manual sections 2.13.1–2.13.12.
+ * This is the static-codegen twin of runner/src/m68k_interp.c:m68k_cycles(); the
+ * two must agree. (TODO MC-CDI-009 extracts the one shared model.) The interpreter computes the few
  * data-dependent costs (register shift counts, DBcc condition, RTE frame) from
  * live state; codegen can't, so it bakes the dominant-case estimate noted below.
  * ========================================================================= */
 
-/* SCC68070 effective-address calculation time (CeDImu IT* constants). sb =
- * operand size in bytes; only byte/word (<4 → "BW") vs long (==4 → "L") matters. */
+/* SCC68070 effective-address calculation periods. sb is the operand size in
+ * bytes; only byte/word (<4) versus long (==4) matters. */
 static int scc_ea(int ea6, int sb)
 {
     int mode = (ea6 >> 3) & 7, reg = ea6 & 7;
@@ -2113,7 +2107,7 @@ static int estimate_cycles_scc68070(const M68KInstr *instr)
             return 13 + 3 * 4;                     /* Dn-count: data-dependent estimate */
         { int cnt = (op >> 9) & 7; return 13 + 3 * (cnt ? cnt : 8); }  /* imm-count: exact */
 
-    /* ---- multiply / divide (CeDImu fixed costs) ---- */
+    /* ---- multiply / divide ---- */
     case MN_MULS: case MN_MULU: return 76  + scc_ea(ea6, 2);
     case MN_DIVS:               return 169 + scc_ea(ea6, 2);
     case MN_DIVU:               return 130 + scc_ea(ea6, 2);
@@ -2158,17 +2152,13 @@ static int estimate_cycles_scc68070(const M68KInstr *instr)
          * the MCD212 display clock at a different rate (the old `4 + PRM-EA`
          * under-counted these ~10 cycles each; the driver modules at $416xxx/
          * $417xxx/$427xxx run enough MN_OTHER in the recompiled tier to drift the
-         * frame clock ~1 frame behind the oracle over the boot — MC-CDI-009). 14
-         * is CeDImu's "reasonable SCC68070 default"; the PRM table is 68000, not
-         * 68070, and is kept only for the reference/diff tooling. */
+         * frame clock about one frame behind the reference trace over boot —
+         * MC-CDI-009). Use the SCC68070's 14-cycle conservative default. */
         return 14;
     }
 }
 
-/* Primary cycle-cost entry point. The CD-i CPU is an SCC68070, so we use the
- * 68070 model (above) — matching the CeDImu oracle's display-timing cycle base.
- * The clown68000 probe and the 68000 PRM table remain for reference/diff tooling
- * but are NOT used for CD-i emission (they are 68000-accurate, not 68070). */
+/* Primary cycle-cost entry point: CD-i emission always uses SCC68070 timing. */
 static int estimate_cycles(const M68KInstr *instr)
 {
     return estimate_cycles_scc68070(instr);
@@ -2270,7 +2260,7 @@ static void emit_instr(FILE *f, const GenesisRom *rom,
      * self-account on a NON-terminating (fall-through) path — Bcc not-taken,
      * DBcc counter-expired / condition-true — must set this so the caller
      * SUPPRESSES that global charge, else the path is billed twice (the boot's
-     * MCD212 frame clock then runs hot vs the CeDImu oracle). Terminators that
+     * MCD212 frame clock then runs hot versus the instruction trace). Terminators that
      * self-account then `return` don't need it: their global charge is dead
      * code after the return. Default: rely on the global charge. */
     *cycles_self_accounted = false;
@@ -2377,8 +2367,8 @@ static void emit_instr(FILE *f, const GenesisRom *rom,
          * the codegen instr set. So we yield and return, matching the
          * prior (comment-only) emission's control-flow shape but adding
          * real SR + yield semantics. */
-        /* The stopped core's architectural PC is post-STOP. CeDImu keeps the
-         * trace label on the STOP opcode while parked, but an interrupt frame
+        /* The stopped core's architectural PC is post-STOP. The diagnostic
+         * trace remains labeled with the STOP opcode while parked, but an interrupt frame
          * stacks addr+length; leaving g_cpu.PC at the opcode re-executes STOP
          * after every wake. */
         fprintf(f, "  g_cpu.PC = 0x%06Xu; /* post-STOP interrupt resume */\n",
@@ -2398,9 +2388,8 @@ static void emit_instr(FILE *f, const GenesisRom *rom,
          * must point AT that word — the kernel's F$ dispatcher reads the code
          * there and RTEs past it. Advance g_cpu.PC to post-TRAP before vectoring
          * (the per-instruction emit set it to the TRAP's own address). */
-        /* CeDImu's TRAP instruction returns 0 cycles. Its next Run(false)
-         * processes the queued 52-cycle exception and executes the handler's
-         * first instruction in one device-time batch. Keep the architectural
+        /* TRAP queues its 52-cycle exception entry with the handler's first
+         * instruction in one device-time batch. Keep the architectural
          * instruction count here, flush only an older pending batch (the rare
          * exception-handler-begins-with-TRAP case), then defer this exception
          * cost so the first handler instruction drains it. */
@@ -2567,8 +2556,7 @@ static void emit_instr(FILE *f, const GenesisRom *rom,
             emit_cycle_accounting(f, "  ", estimate_cycles(instr));
             /* The address-error stack frame's PC and fault-address (TPF) fields
              * are the ODD TARGET, not this JMP — the fault is the fetch from the
-             * odd address (mirrors CeDImu ProcessException: PC and lastAddress =
-             * the odd PC). The OS-9 handler reads them, so set PC to the target
+             * odd address. The OS-9 handler reads both fields, so set PC to the target
              * before the trap or the kernel resumes at the wrong place. */
             fprintf(f, "  g_cpu.PC = 0x%06Xu; /* odd target = stacked PC (post-fetch) */\n",
                     instr->target_addr);
@@ -2579,9 +2567,8 @@ static void emit_instr(FILE *f, const GenesisRom *rom,
              * otherwise the recompiled trap is off-by-one vs the interpreter
              * oracle and masks every later divergence. */
             fprintf(f, "  debug_trace_block(); /* the faulting fetch at the odd PC */\n");
-            /* IRC/IR in the frame = the faulting instruction's opcode (this JMP).
-             * CeDImu stacks currentOpcode, which the odd fetch left as this JMP;
-             * the OS-9 handler reads it. */
+            /* IRC/IR in the frame is the faulting instruction's opcode (this
+             * JMP), which the OS-9 handler reads. */
             fprintf(f, "  g_fault_opcode = 0x%04Xu;\n", instr->words[0]);
             fprintf(f, "  m68k_trap_vector(3u); return; /* JMP to odd addr -> address error */\n");
             break;
@@ -2728,9 +2715,9 @@ static void emit_instr(FILE *f, const GenesisRom *rom,
         int cond = (instr->words[0] >> 8) & 0xF;
         const char *ce = bcc_cond_expr(cond);
         if (instr->has_target) {
-            /* Cost the Bcc ONCE, UNCONDITIONALLY, before the branch test.
-             * CeDImu's Bcc() returns calcTime (13; .W displacement form 14)
-             * REGARDLESS of whether the condition is met — the cost is the
+            /* Cost Bcc once, unconditionally, before the branch test. Its
+             * SCC68070 cost is 13 periods (14 for a .W displacement) regardless
+             * of whether the condition is met — the cost is the
              * instruction's, not the jump's. The taken path then goto/tail-calls
              * (skipping the caller's global charge); the not-taken path FALLS
              * THROUGH to the caller, so we set cycles_self_accounted to suppress
@@ -2789,8 +2776,8 @@ static void emit_instr(FILE *f, const GenesisRom *rom,
                                      estimate_cycles(instr));
             }
         }
-        /* CeDImu DBcc() returns a cost on EVERY path: loop / counter-expired = 17,
-         * condition-true = 14. The loop-back path above goto/tail-calls (skips the
+        /* DBcc costs 17 periods on loop/counter-expired paths and 14 when the
+         * condition is true. The loop-back path above goto/tail-calls (skips the
          * caller's global charge); the counter-expired and condition-true paths
          * FALL THROUGH to the caller, so we self-account them here (17 / 14) and
          * set cycles_self_accounted to suppress the caller's global charge — else
@@ -2841,7 +2828,7 @@ static void emit_instr(FILE *f, const GenesisRom *rom,
         /* Register-direct sources (Dn/An) are returned as a lazy "g_cpu.X[reg]"
          * expression read at STORE time. If the destination EA predecrements
          * that same register (MOVE An,-(An)), the lazy read would see the
-         * DECREMENTED value. CeDImu/the 68000 read the source fully BEFORE
+         * DECREMENTED value. The processor reads the source fully before
          * computing the destination EA, so materialise register-direct sources
          * into the temp first. (Memory sources already materialise via tmp.) */
         if (src_mode == 0 || src_mode == 1) {
@@ -2849,15 +2836,9 @@ static void emit_instr(FILE *f, const GenesisRom *rom,
             fprintf(f, "  %s %s = (%s)(%s);\n", ct, stmp, ct, src_expr);
             snprintf(src_expr, 256, "%s", stmp);
         }
-        /* CeDImu computes N/Z (and clears V/C) from the source BEFORE
-         * attempting the destination write (InstructionSet.cpp SCC68070::MOVE:
-         * SetN/SetZ precede SetByte/SetWord/SetLong; V/C textually follow the
-         * store there only because CeDImu's bus-error model queues the fault
-         * and lets the C++ function run to completion — it never aborts
-         * mid-instruction, so the statement order after the store is not
-         * load-bearing for CeDImu itself). Our recompiled/interpreted tiers
-         * DO abort synchronously on a faulting store (recomp_bus_error
-         * longjmps out immediately), so the emit order IS load-bearing here:
+        /* MOVE derives N/Z and clears V/C from the source before attempting the
+         * destination write. Our tiers abort synchronously on a faulting store
+         * (recomp_bus_error longjmps out immediately), so emit order matters:
          * a faulting destination store must leave the CCR update already
          * applied, or build_exception_frame captures stale pre-instruction
          * flags in the pushed SR (MC-CDI faithfulness bug: $404B96
@@ -3200,14 +3181,10 @@ static void emit_instr(FILE *f, const GenesisRom *rom,
          * side-effect. The other RMW ops (NEG/NOT/NEGX/NBCD/TAS) pass rmw=1
          * because their emit_ea_load_ex already advanced An; CLR has no load,
          * so rmw=1 silently dropped the predecrement (e.g. CLR.L -(A7) wrote 0
-         * to (A7) without first doing A7-=4 — corrupting the stack). CeDImu's
-         * CLR (SetLong(eamode,eareg,...)) applies the EA side-effect and does
-         * not separately read, which rmw=0 matches. */
-        /* CeDImu sets N=0/Z=1/V=C=0 AFTER the SetByte/SetWord/SetLong call
-         * (InstructionSet.cpp SCC68070::CLR), but that ordering is not
-         * load-bearing there — CeDImu's bus-error model queues the fault and
-         * runs the C++ function to completion. Our tiers abort synchronously
-         * on a faulting store, so the flags (which are always the same
+         * to (A7) without first doing A7-=4 — corrupting the stack). CLR applies
+         * the EA side effect without a separate operand read, which rmw=0 models. */
+        /* CLR commits N=0/Z=1/V=C=0 after the destination store. Our tiers abort
+         * synchronously on a faulting store, so the flags (which are always the same
          * constant here, independent of the write) must be applied BEFORE
          * the store — same faithfulness class as MN_MOVE above. */
         fprintf(f, "  g_cpu.SR = (g_cpu.SR & ~0x0Fu) | (1u<<2);\n");
@@ -3881,8 +3858,8 @@ static void emit_instr(FILE *f, const GenesisRom *rom,
          *   ext bit15  : A/D (0 = Dn, 1 = An) for the general register
          *   ext 14-12  : general register number Rn
          *   ext 11-0   : 12-bit control-register code Cc
-         * The SCC68070 control-register set isn't modelled in the runtime
-         * yet (and CeDImu treats MOVEC as illegal), so the access routes to
+         * The SCC68070 control-register set isn't modelled in the runtime yet,
+         * so the access routes to
          * a runtime hook that owns the control-register state and fails loud
          * with the exact code until that model lands. These sites are dead
          * code on the SCC68070 (gated behind a CPU-type dispatch), so the
@@ -4863,9 +4840,8 @@ bool codegen_emit(const GenesisRom *rom, const FunctionList *funcs,
              * `tst.X (mem)` and the NEXT instruction is `bne self`
              * (i.e. branches to this tst). On real hardware the IRQ
              * handler clears the polled flag asynchronously; in our
-             * cooperative-fiber model the game thread must yield to
-             * let the runner advance clownmdemu (which fires the
-             * H/V-Int handler that clears the flag).
+             * cooperative-fiber model the game thread must yield so the runner
+             * can fire the H/V-Int handler that clears the flag.
              *
              * Mark the next bne so its emitter inserts
              * glue_yield_for_interrupt_poll() inside the loop-back branch

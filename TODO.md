@@ -163,15 +163,17 @@ Disc insertion/ejection tests in the BIOS phase are not game progress.
   and satisfy AGPL there; it does not join the player release. The clean-room
   68000 fallback has already been adapted from the sibling; reuse further
   author-owned components only with explicit provenance and CD-i validation.
-- **MC-CDI-030 — Production-source provenance audit.** Before a public player
-  release, audit every shipped runtime section described as a CeDImu/clown68000
-  "port," "exact port," or source-level mirror. For each, record an independent
-  hardware specification, author-owned clean-room ancestor, or behavioral test
-  provenance; otherwise rewrite it without consulting the third-party source
-  and revalidate against the oracle. Initial scope includes exception/timing
-  code, SCC68070 peripherals, IKAT, DS1216, CIAP, and the interpreter's DIV
-  path. A clean native link is necessary but does not replace this source-
-  provenance gate.
+- ✅ **MC-CDI-030 — Production-source provenance audit.** Independently rewrote
+  the flagged SCC68070 exception/DIV/peripheral, IKAT, DS1216, CIAP, and MCD212
+  timing/video paths from hardware specifications and project-owned traces.
+  Removed the unused AGPL cycle probe and untracked the vendored clown68000 /
+  clowncommon trees; no recompiler or runtime target references them. Added
+  focused DS1216, peripheral, MCD212-video, and DIVU/DIVS tests plus
+  `PROVENANCE.md`. The final audit found no exact run of 24 or more code tokens
+  shared with either local third-party checkout; 659,998 near-full-boot
+  instruction transitions retain zero resyncs, cost mismatches, or cycle drift.
+  Existing Git history still contains the removed vendor blobs and must be
+  filtered or replaced by a clean export before that history is made public.
 
 ## Long-term
 

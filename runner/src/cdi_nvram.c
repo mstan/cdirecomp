@@ -1,195 +1,238 @@
 /*
- * cdi_nvram.c — DS1216 SmartWatch timekeeper + 32 KB NVRAM at $320000.
+ * DS1216-compatible phantom clock and 32 KiB battery-backed SRAM.
  *
- * Faithful C port of CeDImu's DS1216 core (external/CeDImu/src/CDI/cores/DS1216),
- * the behavioral oracle for the Mono-IV (Mono3) board cdi490a runs on. The chip
- * is a battery-backed 32 KB SRAM with an embedded RTC: reads/writes pass through
- * to SRAM until the host writes a fixed 64-bit magic pattern (to bit 0 of any
- * cell), which unlocks SERIAL access to 8 BCD clock registers (one bit per
- * access) for the next 64 accesses, then relocks.
+ * Source basis: Dallas/Maxim DS1216 data sheet, revision 2.  The device acts
+ * like ordinary SRAM until the documented 64-bit comparison sequence is
+ * written through D0.  The next 64 accesses shift the eight clock registers
+ * least-significant bit first, after which normal SRAM access resumes.
  *
- * Bus wiring (Mono3, even bytes; see cdi_bus.c): the chip address is
- * (busaddr-$320000)>>1; byte access uses GetByte/SetByte directly, word access
- * puts the chip byte in the HIGH byte (GetByte<<8, SetByte(data>>8)).
- *
- * The clock is seeded from IRTC::defaultTime = 599616000 (1989-01-01 00:00:00),
- * the same deterministic time the oracle uses; SRAM is seeded to 0xFF (CeDImu's
- * empty-NVRAM default). The clock advances with EMULATED cycle time, exactly as
- * CeDImu's DS1216::IncrementClock does: nvram_increment_clock(ns) is driven by
- * mcd212_tick() with ns = cycles * (the SCC68070 cycle period), the same
- * per-instruction cycle-scaled quantity CeDImu's Interpreter feeds its
- * CDI::IncrementTime -> DS1216::IncrementClock chain (Interpreter.cpp:76-78,
- * CDI.cpp:108-112). This is deterministic (derived from the emulated cycle
- * count, never the host wall clock) so the co-sim stays reproducible; it is NOT
- * a frozen clock, so an RTC read's sub-second (and, on a long enough boot,
- * whole-second) fields depend on how many cycles have elapsed since reset —
- * matching the oracle bit-for-bit requires ticking on the same schedule.
+ * The implementation keeps civil time directly instead of translating
+ * through a host time library.  That makes reset and cycle-derived advancement
+ * deterministic on every host and keeps the RTC independent of wall time.
  */
-#define _CRT_SECURE_NO_WARNINGS
 #include "cdi_runtime.h"
+
+#include <stdint.h>
 #include <string.h>
-#include <time.h>
-#include <math.h>
 
-/* DS1216 clock-register indices (CeDImu enum DS1216Clock). */
-enum { Hundredths = 0, Seconds, Minutes, Hour, Day, Date, Month, Year };
-
-/* The 64-bit unlock pattern ($C5,$3A,$A3,$5C twice), one bool per bit, exactly
- * as CeDImu's matchPattern (compared newest-bit-first against the rolling
- * history). */
-static const uint8_t s_match[64] = {
-    0,1,0,1,1,1,0,0,  1,0,1,0,0,0,1,1,
-    0,0,1,1,1,0,1,0,  1,1,0,0,0,1,0,1,
-    0,1,0,1,1,1,0,0,  1,0,1,0,0,0,1,1,
-    0,0,1,1,1,0,1,0,  1,1,0,0,0,1,0,1,
+enum {
+    RTC_HUNDREDTHS,
+    RTC_SECONDS,
+    RTC_MINUTES,
+    RTC_HOURS,
+    RTC_WEEKDAY,
+    RTC_DATE,
+    RTC_MONTH,
+    RTC_YEAR,
+    RTC_REGISTER_COUNT
 };
 
-static uint8_t  s_sram[0x8000];
-static uint8_t  s_clock[8];
-static uint64_t s_pattern;        /* rolling history: bit i = the bit pushed i steps ago */
-static uint64_t s_magic;          /* s_match packed: bit i = s_match[i] */
-static int      s_pattern_count;  /* <0 = SRAM mode; 0..63 = serial RTC access index */
-static time_t   s_internal_time;
-static double   s_nsec;           /* raw ns accumulator, always < 10'000'000 (CeDImu m_nsec) */
-static uint32_t s_msec;           /* milliseconds within the current second, 0..999 —
-                                    * the Hundredths register is byte_to_pbcd(s_msec/10), matching
-                                    * CeDImu's hh_mm_ss(m_internalClock.time_since_epoch()).subseconds() */
+enum { NVRAM_BYTES = 0x8000 };
 
-static uint8_t byte_to_pbcd(uint8_t v) { v %= 100; return (uint8_t)(((v / 10) << 4) | (v % 10)); }
-static uint8_t pbcd_to_byte(uint8_t v) { return (uint8_t)((v >> 4) * 10 + (v & 0x0F)); }
+/* C5 3A A3 5C C5 3A A3 5C, with every byte presented D0 first. */
+static const uint8_t unlock_bytes[8] = {
+    0xC5, 0x3A, 0xA3, 0x5C, 0xC5, 0x3A, 0xA3, 0x5C
+};
 
-static time_t portable_timegm(struct tm *t) {
-#ifdef _WIN32
-    return _mkgmtime(t);
-#else
-    return timegm(t);
-#endif
+typedef struct {
+    int year;              /* full Gregorian year */
+    uint8_t month;         /* 1..12 */
+    uint8_t date;          /* 1..31 */
+    uint8_t weekday;       /* 1=Monday .. 7=Sunday */
+    uint8_t hour;          /* 0..23 */
+    uint8_t minute;
+    uint8_t second;
+    uint8_t hundredth;
+} CivilClock;
+
+typedef struct {
+    uint8_t ram[NVRAM_BYTES];
+    uint8_t transfer[RTC_REGISTER_COUNT];
+    CivilClock now;
+    uint64_t key_window;
+    uint64_t key_value;
+    double sub_hundredth_ns;
+    uint8_t transfer_bit;
+    uint8_t transferring;
+} PhantomClock;
+
+static PhantomClock rtc;
+
+static uint8_t bcd_encode(unsigned value) {
+    return (uint8_t)(((value / 10u) << 4) | (value % 10u));
 }
 
-/* Internal clock -> SRAM clock registers (CeDImu DS1216::ClockToSRAM). */
-static void clock_to_sram(void) {
-    if (s_pattern_count >= 0) return;   /* never change the clock while it is being read */
-    time_t t = s_internal_time;
-    struct tm *g = gmtime(&t);
-    if (!g) return;
-
-    unsigned hour = (unsigned)(g->tm_hour % 24);
-    uint8_t hreg;
-    if (s_clock[Hour] & 0x80) {                 /* 12h format */
-        int h = (int)hour;
-        if (h >= 12) { hreg = 0xA0; if (h > 12) h -= 12; }  /* PM */
-        else         { hreg = 0x80; if (h == 0) h = 12; }   /* AM */
-        hreg |= byte_to_pbcd((uint8_t)h);
-    } else {                                     /* 24h format */
-        hreg = byte_to_pbcd((uint8_t)hour);
-    }
-
-    int iso = (g->tm_wday == 0) ? 7 : g->tm_wday;       /* weekday ISO: Mon=1..Sun=7 */
-    s_clock[Hundredths] = byte_to_pbcd((uint8_t)(s_msec / 10));
-    s_clock[Seconds]    = byte_to_pbcd((uint8_t)g->tm_sec);
-    s_clock[Minutes]    = byte_to_pbcd((uint8_t)g->tm_min);
-    s_clock[Hour]       = hreg;
-    s_clock[Day]        = (uint8_t)(byte_to_pbcd((uint8_t)iso) | (s_clock[Day] & 0x30));
-    s_clock[Date]       = byte_to_pbcd((uint8_t)g->tm_mday);
-    s_clock[Month]      = byte_to_pbcd((uint8_t)(g->tm_mon + 1));
-    s_clock[Year]       = byte_to_pbcd((uint8_t)((g->tm_year + 1900) % 100));
+static unsigned bcd_decode(uint8_t value) {
+    return (unsigned)(value >> 4) * 10u + (unsigned)(value & 0x0Fu);
 }
 
-/* SRAM clock registers -> internal clock (CeDImu DS1216::SRAMToClock), used when
- * the host writes the RTC. */
-static void sram_to_clock(void) {
-    uint8_t hour;
-    if (s_clock[Hour] & 0x80) {                  /* 12h */
-        hour = pbcd_to_byte(s_clock[Hour] & 0x1F);
-        if (hour == 12) hour = 0;
-        if (s_clock[Hour] & 0x20) hour += 12;    /* PM */
+static int leap_year(int year) {
+    return (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
+}
+
+static unsigned days_in_month(int year, unsigned month) {
+    static const uint8_t lengths[12] = {
+        31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31
+    };
+    if (month == 2) return lengths[1] + (unsigned)leap_year(year);
+    if (month >= 1 && month <= 12) return lengths[month - 1];
+    return 31;
+}
+
+static unsigned bounded(unsigned value, unsigned low, unsigned high,
+                        unsigned fallback) {
+    return value >= low && value <= high ? value : fallback;
+}
+
+static void advance_one_second(CivilClock *clock) {
+    if (++clock->second < 60) return;
+    clock->second = 0;
+    if (++clock->minute < 60) return;
+    clock->minute = 0;
+    if (++clock->hour < 24) return;
+    clock->hour = 0;
+    clock->weekday = (uint8_t)(clock->weekday == 7 ? 1 : clock->weekday + 1);
+    if (++clock->date <= days_in_month(clock->year, clock->month)) return;
+    clock->date = 1;
+    if (++clock->month <= 12) return;
+    clock->month = 1;
+    clock->year++;
+}
+
+static void latch_clock_registers(void) {
+    uint8_t hour_mode = rtc.transfer[RTC_HOURS] & 0x80u;
+    uint8_t day_control = rtc.transfer[RTC_WEEKDAY] & 0x30u;
+    unsigned display_hour = rtc.now.hour;
+    uint8_t encoded_hour;
+
+    if (hour_mode) {
+        int pm = display_hour >= 12;
+        display_hour %= 12;
+        if (display_hour == 0) display_hour = 12;
+        encoded_hour = (uint8_t)(0x80u | (pm ? 0x20u : 0u) |
+                                 bcd_encode(display_hour));
     } else {
-        hour = pbcd_to_byte(s_clock[Hour] & 0x3F);
+        encoded_hour = bcd_encode(display_hour);
     }
-    struct tm tmv;
-    memset(&tmv, 0, sizeof tmv);
-    tmv.tm_sec  = pbcd_to_byte(s_clock[Seconds] & 0x7F);
-    tmv.tm_min  = pbcd_to_byte(s_clock[Minutes] & 0x7F);
-    tmv.tm_hour = hour;
-    tmv.tm_mday = pbcd_to_byte(s_clock[Date] & 0x3F);
-    tmv.tm_mon  = pbcd_to_byte(s_clock[Month] & 0x1F) - 1;
-    {
-        unsigned y = 1900 + pbcd_to_byte(s_clock[Year]);
-        if (y < 1970) y += 100;                  /* two-digit year window 1970..2069 */
-        tmv.tm_year = (int)y - 1900;
-    }
-    s_internal_time = portable_timegm(&tmv);
-    /* CeDImu sets m_nsec (not the internal time_point's subsecond field) to the
-     * written Hundredths value; the pending fractional second is drained back
-     * out — 10ms at a time — by future IncrementClock calls, so the internal
-     * clock itself starts this second at :00 (s_msec=0) and climbs back up. */
-    s_nsec = pbcd_to_byte(s_clock[Hundredths]) * 10000000.0;
-    s_msec = 0;
+
+    rtc.transfer[RTC_HUNDREDTHS] = bcd_encode(rtc.now.hundredth);
+    rtc.transfer[RTC_SECONDS] = bcd_encode(rtc.now.second);
+    rtc.transfer[RTC_MINUTES] = bcd_encode(rtc.now.minute);
+    rtc.transfer[RTC_HOURS] = encoded_hour;
+    rtc.transfer[RTC_WEEKDAY] = (uint8_t)(day_control | rtc.now.weekday);
+    rtc.transfer[RTC_DATE] = bcd_encode(rtc.now.date);
+    rtc.transfer[RTC_MONTH] = bcd_encode(rtc.now.month);
+    rtc.transfer[RTC_YEAR] = bcd_encode((unsigned)(rtc.now.year % 100));
 }
 
-static void push_pattern(int bit) {
-    s_pattern = (s_pattern << 1) | (uint64_t)(bit & 1);   /* bit 0 = newest */
-    if (s_pattern == s_magic) {
-        clock_to_sram();
-        s_pattern_count = 0;
+static void commit_clock_registers(void) {
+    unsigned hour;
+    unsigned year = bcd_decode(rtc.transfer[RTC_YEAR]);
+
+    if (rtc.transfer[RTC_HOURS] & 0x80u) {
+        hour = bounded(bcd_decode(rtc.transfer[RTC_HOURS] & 0x1Fu), 1, 12, 12);
+        if (hour == 12) hour = 0;
+        if (rtc.transfer[RTC_HOURS] & 0x20u) hour += 12;
+    } else {
+        hour = bounded(bcd_decode(rtc.transfer[RTC_HOURS] & 0x3Fu), 0, 23, 0);
+    }
+
+    rtc.now.year = (int)(year < 70 ? 2000u + year : 1900u + year);
+    rtc.now.month = (uint8_t)bounded(bcd_decode(rtc.transfer[RTC_MONTH] & 0x1Fu),
+                                     1, 12, 1);
+    rtc.now.date = (uint8_t)bounded(bcd_decode(rtc.transfer[RTC_DATE] & 0x3Fu),
+                                    1, days_in_month(rtc.now.year, rtc.now.month), 1);
+    rtc.now.weekday = (uint8_t)bounded(rtc.transfer[RTC_WEEKDAY] & 7u, 1, 7, 1);
+    rtc.now.hour = (uint8_t)hour;
+    rtc.now.minute = (uint8_t)bounded(bcd_decode(rtc.transfer[RTC_MINUTES] & 0x7Fu),
+                                      0, 59, 0);
+    rtc.now.second = (uint8_t)bounded(bcd_decode(rtc.transfer[RTC_SECONDS] & 0x7Fu),
+                                      0, 59, 0);
+    rtc.now.hundredth = (uint8_t)bounded(bcd_decode(rtc.transfer[RTC_HUNDREDTHS]),
+                                         0, 99, 0);
+    rtc.sub_hundredth_ns = 0.0;
+}
+
+static uint64_t make_unlock_value(void) {
+    uint64_t value = 0;
+    unsigned byte_index;
+    for (byte_index = 0; byte_index < 8; byte_index++) {
+        unsigned bit;
+        for (bit = 0; bit < 8; bit++)
+            value = (value << 1) | ((unlock_bytes[byte_index] >> bit) & 1u);
+    }
+    return value;
+}
+
+static void observe_key_bit(unsigned bit) {
+    rtc.key_window = (rtc.key_window << 1) | (uint64_t)(bit & 1u);
+    if (rtc.key_window == rtc.key_value) {
+        latch_clock_registers();
+        rtc.key_window = 0;
+        rtc.transfer_bit = 0;
+        rtc.transferring = 1;
     }
 }
 
-static void increment_clock_access(void) {
-    if (++s_pattern_count >= 64) s_pattern_count = -1;
-}
-
-/* Advance the internal clock by `ns` of EMULATED cycle time (CeDImu
- * DS1216::IncrementClock). Called once per instruction from mcd212_tick() with
- * ns = cycles * the SCC68070 cycle period — the same deterministic, cycle-
- * derived quantity CeDImu's Interpreter feeds through CDI::IncrementTime into
- * this same chain, never host wall-clock time. The OSC bit (Day reg bit 5)
- * stops the oscillator, exactly as on real hardware / CeDImu. */
-void nvram_increment_clock(double ns) {
-    if (s_clock[Day] & 0x20) return;       /* OSC bit set: clock halted */
-    s_nsec += ns;
-    while (s_nsec >= 10000000.0) {
-        s_nsec -= 10000000.0;
-        s_msec += 10;
-        if (s_msec >= 1000) { s_msec -= 1000; s_internal_time += 1; }
+static void finish_transfer_bit(void) {
+    rtc.transfer_bit++;
+    if (rtc.transfer_bit == 64) {
+        rtc.transferring = 0;
+        rtc.transfer_bit = 0;
+        rtc.key_window = 0;
+        commit_clock_registers();
     }
 }
 
 void nvram_reset(void) {
-    memset(s_sram, 0xFF, sizeof s_sram);   /* CeDImu empty-NVRAM default */
-    memset(s_clock, 0, sizeof s_clock);
-    s_pattern = 0;
-    s_pattern_count = -1;
-    s_internal_time = 599616000;           /* IRTC::defaultTime: 1989-01-01 00:00:00 */
-    s_nsec = 0.0;
-    s_msec = 0;
-    s_magic = 0;
-    for (int i = 0; i < 64; i++) s_magic |= (uint64_t)(s_match[i] & 1) << i;
-    clock_to_sram();
+    memset(&rtc, 0, sizeof rtc);
+    memset(rtc.ram, 0xFF, sizeof rtc.ram);
+    rtc.key_value = make_unlock_value();
+    rtc.now.year = 1989;
+    rtc.now.month = 1;
+    rtc.now.date = 1;
+    rtc.now.weekday = 7; /* 1989-01-01 was Sunday. */
+    latch_clock_registers();
 }
 
-uint8_t nvram_get_byte(uint16_t dev) {
-    if (s_pattern_count < 0)
-        return s_sram[dev & 0x7FFF];
-    {
-        uint8_t reg   = (uint8_t)(s_pattern_count / 8);
-        uint8_t shift = (uint8_t)(s_pattern_count % 8);
-        uint8_t bit   = (uint8_t)((s_clock[reg] >> shift) & 1);
-        increment_clock_access();
-        return bit;
+void nvram_increment_clock(double nanoseconds) {
+    if (rtc.transfer[RTC_WEEKDAY] & 0x20u) return; /* oscillator disabled */
+    rtc.sub_hundredth_ns += nanoseconds;
+    while (rtc.sub_hundredth_ns >= 10000000.0) {
+        rtc.sub_hundredth_ns -= 10000000.0;
+        if (++rtc.now.hundredth == 100) {
+            rtc.now.hundredth = 0;
+            advance_one_second(&rtc.now);
+        }
     }
 }
 
-void nvram_set_byte(uint16_t dev, uint8_t data) {
-    int lsb = data & 1;
-    if (s_pattern_count < 0) {
-        s_sram[dev & 0x7FFF] = data;
-        push_pattern(lsb);
-    } else {
-        uint8_t reg   = (uint8_t)(s_pattern_count / 8);
-        uint8_t shift = (uint8_t)(s_pattern_count % 8);
-        s_clock[reg] = (uint8_t)((s_clock[reg] & ~(1 << shift)) | (lsb << shift));
-        increment_clock_access();
-        if (s_pattern_count == -1) sram_to_clock();
+uint8_t nvram_get_byte(uint16_t device_address) {
+    if (!rtc.transferring)
+        return rtc.ram[device_address & (NVRAM_BYTES - 1)];
+
+    {
+        unsigned reg = rtc.transfer_bit >> 3;
+        unsigned shift = rtc.transfer_bit & 7u;
+        uint8_t result = (uint8_t)((rtc.transfer[reg] >> shift) & 1u);
+        finish_transfer_bit();
+        return result;
+    }
+}
+
+void nvram_set_byte(uint16_t device_address, uint8_t data) {
+    if (!rtc.transferring) {
+        rtc.ram[device_address & (NVRAM_BYTES - 1)] = data;
+        observe_key_bit(data);
+        return;
+    }
+
+    {
+        unsigned reg = rtc.transfer_bit >> 3;
+        unsigned shift = rtc.transfer_bit & 7u;
+        uint8_t mask = (uint8_t)(1u << shift);
+        rtc.transfer[reg] = (uint8_t)((rtc.transfer[reg] & ~mask) |
+                                      ((data & 1u) ? mask : 0u));
+        finish_transfer_bit();
     }
 }

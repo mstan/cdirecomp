@@ -32,7 +32,7 @@ void cdi_input_schedule_advance(uint64_t completed_frame);
 void debug_ring_capture_frame(void);
 
 /* Fold one executed MCD212 ICA/DCA word into the current completed-frame
- * diagnostic hash. area uses CeDImu's ControlArea order:
+ * diagnostic hash. area uses the project's control-area order:
  * ICA1=0, DCA1=1, ICA2=2, DCA2=3. */
 void debug_trace_mcd_event(uint8_t area, uint16_t line, uint32_t word);
 

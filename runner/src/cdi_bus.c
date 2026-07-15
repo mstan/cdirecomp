@@ -23,12 +23,8 @@ uint8_t g_ram0[CDI_RAM0_SIZE];
 uint8_t g_ram1[CDI_RAM1_SIZE];
 uint8_t g_rom [CDI_ROM_SIZE];
 
-/* Last operand effective address accessed (CeDImu SCC68070::lastAddress). The
- * bus/address-error frame stacks this as TPF — for an ADDRESS error it is NOT
- * the faulting (odd) target but the last DATA EA touched before it (CeDImu's
- * GetWord/SetWord throw AddressError without updating lastAddress), which the
- * static recompiler cannot know. Set on every operand access; long accesses
- * collapse to the base EA to match CeDImu's once-per-operand GetEffectiveAddress. */
+/* Last operand effective address. The SCC68070 access-error frame records this
+ * as TPF; long accesses restore the base address after their two word cycles. */
 uint32_t g_last_access_addr = 0;
 
 /* Load the CD-RTOS system ROM image into the ROM window ($400000..). The
@@ -41,9 +37,8 @@ void cdi_bus_load_rom(const uint8_t *src, uint32_t n) {
 
 static void bus_fault(const char *op, uint32_t addr, int bits) {
     /* A real SCC68070 bus error. When the interpreter is mid-instruction it has
-     * armed an unwind: raise the faithful vector-2 exception (CeDImu does the
-     * same — see Mono3::GetWord throwing BusError out to ProcessException). This
-     * call does not return when armed; control longjmps back into the step,
+     * armed an unwind so the partial instruction is abandoned and vector 2 is
+     * delivered. This call does not return when armed; control returns to the step,
      * stacks the long frame, and vectors to the OS-9 handler. Only a fault from
      * un-unwindable (recompiled) code reaches the fail-loud path below — that is
      * a genuinely unmodelled region, not an architectural bus error. */
@@ -122,7 +117,7 @@ uint16_t m68k_read16(uint32_t addr) {
         case RGN_CDIC:   return (uint16_t)cdic_read(addr, 2);
         case RGN_SLAVE:  return (uint16_t)slave_read(addr, 2);
         case RGN_PERIPH: return (uint16_t)periph_read(addr, 2);
-        /* word read: chip byte in the HIGH byte (CeDImu Mono3::GetWord). */
+        /* Board wiring places the DS1216 byte on D15..D8. */
         case RGN_NVRAM:  return (uint16_t)(nvram_get_byte((uint16_t)((addr - CDI_NVRAM_BASE) >> 1)) << 8);
         default:         bus_fault("R", addr, 16); return 0;
     }
@@ -177,7 +172,7 @@ void m68k_write16(uint32_t addr, uint16_t val) {
         case RGN_CDIC:   cdic_write(addr, val, 2);   return;
         case RGN_SLAVE:  slave_write(addr, val, 2);  return;
         case RGN_PERIPH: periph_write(addr, val, 2); return;
-        /* word write: the chip takes the HIGH byte (CeDImu Mono3::SetWord). */
+        /* Board wiring presents D15..D8 to the DS1216 socket. */
         case RGN_NVRAM:  nvram_set_byte((uint16_t)((addr - CDI_NVRAM_BASE) >> 1), (uint8_t)(val >> 8)); return;
         default:         bus_fault("W", addr, 16);   return;
     }

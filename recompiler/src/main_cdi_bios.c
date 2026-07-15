@@ -25,7 +25,6 @@
 #include "m68k_validator.h"
 #include "annotations.h"
 #include "game_config.h"
-#include "cycle_probe.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -288,11 +287,6 @@ int main(int argc, char *argv[]) {
                nseeds, nmod_seeds, nseeds - nmod_seeds);
     }
 
-    if (cycle_probe_init(&rom) == 0)
-        printf("[CdiRecompBios] cycle probe armed (clown68000)\n");
-    else
-        fprintf(stderr, "[CdiRecompBios] cycle probe init failed; PRM cycle fallback\n");
-
     static FunctionList funcs = {0};
     function_finder_run(&rom, &funcs, &cfg);
     printf("[CdiRecompBios] functions discovered from reset entry $%08X: %d\n",
@@ -333,7 +327,6 @@ int main(int argc, char *argv[]) {
            ok ? "ok" : "FAILED", diag);
     printf("[CdiRecompBios] output: %s , %s\n", out_full, out_disp);
 
-    cycle_probe_shutdown();
     function_list_free(&funcs);
     free(img);
     return ok ? 0 : 2;

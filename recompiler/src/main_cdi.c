@@ -29,7 +29,6 @@
 #include "code_generator.h"
 #include "codegen_diag.h"
 #include "annotations.h"
-#include "cycle_probe.h"
 
 static const char *os9_type_name(uint8_t t) {
     switch (t) {

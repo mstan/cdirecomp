@@ -174,8 +174,8 @@ instruction ENTRY (recompiler emits `debug_trace_block()` after each PC store)
 so every instruction is sampled in order, JSR/BSR included — a hook at
 instruction END misses the JSR sample and desyncs the streams. The only blocker
 is the `$050A` RAM-built stub (dispatch miss) → the MC-CDI-011 hybrid
-interpreter is the critical path, gated on the engine-licensing decision
-(clown68000 AGPL / CeDImu GPL — both attach copyleft to the shipped runtime).
+interpreter is the critical path, gated on avoiding third-party CPU code with
+AGPL or unclear licensing in the shipped runtime.
 
 **MC-CDI-011 hybrid interpreter — DONE (2026-06-17), and AGPL-free.** Rather than
 link clown68000 (AGPL), we ported segagenesisrecomp's own **clean-room** 68000
@@ -187,8 +187,8 @@ un-recompiled gap until PC re-enters a recompiled function, then resumes native
 (`m68k_interp_run_until_known` + `dispatch_has_addr`). Result: the boot bridges
 the `$050A` exception stub and runs **2.3M+ instructions** of CD-RTOS init —
 validated by the oracle (native lands exactly where CeDImu is during boot). So
-the clean-room replacement the licensing plan deferred is already done; clown68000
-stays a dev-only cycle-probe in the recompiler.
+the clean-room replacement the licensing plan deferred is already done. The
+obsolete third-party cycle probe was removed in MC-CDI-030.
 
 **Device bring-up via oracle-guided first-divergence (2026-06-17/18).** Each wall
 is a status bit/region the runtime didn't model; each fix mirrors CeDImu exactly
@@ -257,11 +257,13 @@ Each lands with an oracle diff showing the divergence closed.
   traces, dumps, and build debris, and the native link/include audit must prove
   no CeDImu or clown68000 boundary crossed. Any future AGPL-linked tooling
   distribution is a separate repository/release with its own compliance.
-- **MC-CDI-030:** audit production comments and implementation history that use
-  "port"/"exact port" language for CeDImu or clown68000. Tie each shipped
-  implementation to hardware documentation, observable behavior, or an
-  author-owned clean-room ancestor; independently rewrite anything whose
-  provenance cannot be established, then rerun its oracle/synthetic tests.
+- ✅ **MC-CDI-030:** the production-source audit and independent rewrite are
+  complete. SCC68070 exception/DIV/peripheral, IKAT, DS1216, CIAP, and MCD212
+  timing/video code now cites specifications/project-owned experiments, with
+  focused unit tests and near-full-boot differential coverage. The dead AGPL
+  cycle probe and vendored clown trees are absent from every tracked build.
+  `PROVENANCE.md` records the boundary and the required pre-publication Git
+  history cleanup.
 
 Historical unpaced performance checkpoint (2026-07-13): a clean `Release` runner with
 `CDI_COSIM_BUILD=OFF`, the full MCD212 pixel pipeline active, and presentation
@@ -298,7 +300,7 @@ drag-and-drop is the player media path.
 
 - `ENHANCEMENTS.md` — the one canonical doc missing (added with this plan).
 - `tools/ tests/ docs/` — currently empty dirs; Phase A seeds tools/ and docs/.
-- `external/CeDImu` → intentionally optional, git-ignored local oracle checkout;
+- `external/*` → intentionally optional, git-ignored local validation checkouts;
   reference the upstream project/base revision but never vendor, submodule, or
   publish the local modifications (MC-CDI-017).
 - Port `tools/package_release.py` and `tools/audit_runner_purity.py` from the

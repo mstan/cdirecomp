@@ -5,15 +5,16 @@
  * decoder (m68k_decoder.c) and MIRRORS code_generator.c's per-mnemonic
  * semantics exactly, executing on the g_cpu / m68k_read*-write* runtime ABI.
  * Every EA-resolution and flag formula here is a direct "emit C" -> "execute"
- * port of the corresponding code_generator.c helper, so the interpreter and
- * the static path are parity-by-construction; clown68000 is the runtime oracle
- * that proves it (see runner/tests/m68k_interp_diff.c).
+ * port of the corresponding author-owned code_generator.c helper, so the
+ * interpreter and static path are parity-by-construction. Independent CPU
+ * validators are development-only black boxes, never linked dependencies.
  *
  * Precision over recall: anything not implemented HALTS LOUDLY (returns
  * M68KI_HALT_UNIMPL with g_m68ki_bad_pc/op set) — it never silently
  * mis-executes. Widening coverage is purely additive and always safe.
  */
 #include "m68k_interp.h"
+#include "m68k_arith.h"
 #include "m68k_decoder.h"   /* recompiler/src — added to the runner include path */
 #include "rom_parser.h"     /* GenesisRom, rom_read* (decoder's fetch source)    */
 #include "debug_server.h"   /* debug_trace_interp (fallback classifier)          */
@@ -25,7 +26,7 @@
 /* ---- mid-instruction bus-error unwind (MC-CDI-004) ----
  * A memory access to an unmapped address is a real SCC68070 bus error. The
  * faulting instruction must be ABORTED (no result committed) and the exception
- * raised — exactly as CeDImu throws a C++ Exception out of GetWord. The
+ * raised — the synchronous abort required by the SCC68070 bus cycle. The
  * generated/recompiled tier reaches memory through plain C calls we can't
  * unwind, but the interpreter owns its instruction loop, so it arms a longjmp
  * around exec_one. cdi_bus.c's fault path calls m68k_interp_bus_error(), which
@@ -38,7 +39,7 @@ static uint32_t s_fault_pc = 0;   /* post-fetch PC to stack on the frame */
 
 int m68k_interp_bus_error(uint32_t addr) {
     if (!s_bus_armed) return 0;   /* not in an armed interpreter step: fail loud upstream */
-    g_fault_addr = addr;          /* TPF = the unmapped DATA address (CeDImu lastAddress) */
+    g_fault_addr = addr;          /* TPF = the unmapped data-cycle address */
     s_bus_armed = 0;              /* disarm before unwinding past exec_one */
     longjmp(s_bus_env, 1);
     return 1;                     /* unreachable */
@@ -445,39 +446,24 @@ static int do_shift(M68KMnemonic mn, int dreg, M68KSize sz,
     return 0;
 }
 
-/* DIVU/DIVS — exact port of clown68000's Action_DIVCommon (the HW-accurate
- * overflow path the generated C omits: on quotient overflow, set V+N, clear Z,
- * and leave Dn UNCHANGED). On real (non-overflow) inputs this matches the
- * generated C; the fuzzer only exercises the overflow edge. */
+/* 68000 DIVU/DIVS architectural result and condition codes. Quotients are
+ * limited to 16 bits; overflow leaves the destination register untouched.
+ * The reference manual leaves N and Z undefined on overflow, but the hardware
+ * validation corpus consistently observes N=1 and Z=0. */
 static void do_div(int dr, uint32_t src16, int is_signed) {
-    uint32_t dest = g_cpu.D[dr];
-    g_cpu.SR &= ~SR_C;                                   /* carry always cleared */
-    if ((uint16_t)src16 == 0) {                          /* div by zero: clown traps (vec 5) */
-        g_cpu.SR &= ~(SR_N | SR_Z | SR_V);               /* (harness skips the trap excursion) */
+    uint32_t result = g_cpu.D[dr];
+    uint16_t ccr;
+    M68kDivideStatus status = m68k_divide_word(
+        g_cpu.D[dr], (uint16_t)src16, is_signed, &result, &ccr);
+
+    g_cpu.SR &= (uint16_t)~(SR_N | SR_Z | SR_V | SR_C);
+    g_cpu.SR |= ccr;
+    if (status == M68K_DIVIDE_BY_ZERO) {
+        /* Vector 5 is delivered by the surrounding instruction path. */
         return;
     }
-    int src_neg  = is_signed && ((src16 & 0x8000u) != 0);
-    int dest_neg = is_signed && ((dest & 0x80000000u) != 0);
-    int res_neg  = (src_neg != dest_neg);
-    uint32_t abs_src  = src_neg  ? (uint32_t)(0u - (uint32_t)(int32_t)(int16_t)(uint16_t)src16)
-                                 : (uint32_t)(uint16_t)src16;
-    uint32_t abs_dest = dest_neg ? (0u - dest) : dest;
-
-    if (abs_src >= (abs_dest >> 16)) {                   /* unsigned overflow pre-check */
-        uint32_t abs_quo = abs_dest / abs_src;
-        if (!is_signed || abs_quo <= (res_neg ? 0x8000u : 0x7FFFu)) {
-            uint32_t abs_rem = abs_dest % abs_src;
-            uint32_t quo = res_neg  ? (0u - abs_quo) : abs_quo;
-            uint32_t rem = dest_neg ? (0u - abs_rem) : abs_rem;
-            g_cpu.D[dr] = (quo & 0xFFFFu) | ((rem & 0xFFFFu) << 16);
-            g_cpu.SR &= ~(SR_N | SR_Z | SR_V);
-            if (quo & 0x8000u) g_cpu.SR |= SR_N;
-            if (quo == 0)      g_cpu.SR |= SR_Z;
-            return;
-        }
-    }
-    /* overflow */
-    g_cpu.SR |= SR_V; g_cpu.SR |= SR_N; g_cpu.SR &= ~SR_Z;   /* Dn left unchanged */
+    if (status == M68K_DIVIDE_OK)
+        g_cpu.D[dr] = result;
 }
 
 /* ADDX/SUBX — port of code_generator.c (Dn,Dn and -(Ay),-(Ax) forms).
@@ -918,7 +904,7 @@ static M68kiStatus exec_one(const M68KInstr *ins, uint32_t *next_pc) {
     case MN_RESET:
         genesis_reset_devices();
         return M68KI_OK;
-    case MN_RTE: {                       /* pop SR, PC, format word (CeDImu RTE) */
+    case MN_RTE: {                       /* pop SR, PC, and format-specific tail */
         uint16_t new_sr = pop16() & 0xA71Fu;  /* frame lives on the supervisor stack; */
         *next_pc = pop32();                    /* pop the WHOLE frame off A7 first ... */
         uint16_t fmt = pop16();                /* format/vector word */
@@ -1135,14 +1121,10 @@ static M68kiStatus exec_one(const M68KInstr *ins, uint32_t *next_pc) {
 /* =========================================================================
  * m68k_cycles — clean-room SCC68070 per-instruction cycle cost (MC-CDI-005).
  *
- * The interpreter must advance device timing (MCD212 DA, timers) at the SAME
- * rate the CeDImu oracle does, or it drifts out of phase on the boot's
- * vertical-sync poll loops (BTST #7,$4FFFF1 / BNE). CeDImu sums a per-handler
- * `calcTime` per instruction; this mirrors that table EXACTLY. The values are
- * SCC68070 timings — NOT a plain 68000 (PRM) and NOT clown68000: the 68070's
- * costs differ (e.g. NOP=7, MOVE reg-reg=7, RTS=15), so matching the *oracle*
- * is what keeps lockstep. Source of truth: external/CeDImu cores/SCC68070/
- * {InstructionSet,AddressingModes,MemoryAccess}.cpp.
+ * Device time uses SCC68070 instruction periods, not generic MC68000 periods,
+ * or vertical-display polling drifts. Values below are transcribed from the
+ * SCC68070 User Manual timing tables in sections 2.13.1–2.13.12 and checked
+ * at instruction boundaries by black-box co-simulation.
  *
  * Must be evaluated in the instruction's ENTRY state (before exec_one mutates
  * g_cpu): a few costs read entry register/flag/stack state (register shift
@@ -1154,10 +1136,8 @@ static int cyc_popcount16(uint16_t v) {
     return c;
 }
 
-/* SCC68070 effective-address calculation time (CeDImu IT* constants,
- * AddressingModes.cpp / MemoryAccess.cpp). sb = operand size in bytes; only
- * byte/word (<4 → "BW") vs long (==4 → "L") matters. Dn/An cost nothing;
- * immediate (mode 7, reg 4) costs ITIBW(4)/ITIL(8). */
+/* SCC68070 effective-address periods (manual section 2.13.1). `sb` is the
+ * operand size; byte/word share one timing column and long uses the other. */
 static int cyc_ea(int ea6, int sb) {
     int mode = (ea6 >> 3) & 7, reg = ea6 & 7;
     int isL = (sb == 4);
@@ -1184,7 +1164,7 @@ static int sb_of(M68KSize sz) {
     return sz == M68K_SIZE_L ? 4 : sz == M68K_SIZE_B ? 1 : 2;
 }
 
-/* Cycle cost of `ins`, mirroring CeDImu's SCC68070 instruction handlers. */
+/* Cycle cost of `ins` from the SCC68070 instruction timing tables. */
 int m68k_cycles(const M68KInstr *ins) {
     const uint16_t op     = ins->words[0];
     const int      eamode = (op >> 3) & 7;
@@ -1275,7 +1255,7 @@ int m68k_cycles(const M68KInstr *ins) {
             return 13 + 3 * shift;
         }
 
-    /* ---- multiply / divide (CeDImu uses fixed costs) ---- */
+    /* ---- multiply / divide (SCC68070 fixed periods) ---- */
     case MN_MULS: case MN_MULU: return 76  + cyc_ea(ea6, 2);
     case MN_DIVS:               return 169 + cyc_ea(ea6, 2);
     case MN_DIVU:               return 130 + cyc_ea(ea6, 2);
@@ -1348,9 +1328,9 @@ M68kiStatus m68k_interp_step(void) {
      * is about to mutate. See m68k_cycles (MC-CDI-005). */
     int cyc = m68k_cycles(&ins);
 
-    /* Publish this instruction's exception context, in case a memory access
-     * inside exec_one hits an unmapped address (bus error). CeDImu stacks the
-     * post-fetch PC and currentOpcode; byte_length is the post-fetch advance.
+    /* Publish this instruction's exception context in case a memory access
+     * inside exec_one hits an unmapped address. The SCC68070 frame stores the
+     * post-fetch PC and current opcode; byte_length is the post-fetch advance.
      * (For an instruction that source-reads before fetching trailing dest
      * extension words this slightly overshoots — the boot's probe is a register-
      * indirect read with no extension words, so it is exact.) */
@@ -1370,9 +1350,8 @@ M68kiStatus m68k_interp_step(void) {
         s_bus_armed = prev_armed;
         g_cpu.PC = s_fault_pc;
         m68k_raise_exception_frame(2);
-        /* CeDImu batches exception processing with the handler's first
-         * instruction on its next Run(false). Defer instead of advancing
-         * devices at the fault boundary. */
+        /* Batch exception entry with the handler's first instruction instead
+         * of advancing devices at the fault boundary. */
         runtime_defer_exception_cycles(158);
         return M68KI_OK;
     }
@@ -1389,9 +1368,8 @@ M68kiStatus m68k_interp_step(void) {
         return M68KI_HALT_UNIMPL;
     }
     g_cpu.PC = next & 0xFFFFFFu;
-    /* CeDImu's TRAP instruction consumes 0 cycles; the 52-cycle exception is
-     * processed together with the first handler instruction on the next
-     * Run(false). m68k_cycles() returns that exception cost, so retain it as a
+    /* TRAP's 52-cycle exception entry is processed together with the first
+     * handler instruction. m68k_cycles() returns that cost, so retain it as a
      * deferred batch here. Any older batch belongs to the current Run and is
      * drained first (relevant if an exception handler itself begins with TRAP).
      * Normal interpreted instructions consume any exception batch deferred by
