@@ -43,6 +43,9 @@ enum {
     CIAP_CCR_ASEL = 0x0008u,
     CIAP_CCR_STARTD = 0x00C4u,
     CIAP_CCR_RESET = 0x0100u,
+    CIAP_APCR_FINISH = 0x0020u,
+    CIAP_APCR_INTNOW = 0x00A0u,
+    CIAP_APCR_ACK = 0x0200u,
     CD_I_SUBMODE_EOF = 0x80u,
     CD_I_SUBMODE_TRIGGER = 0x10u,
     CD_I_SUBMODE_DATA = 0x08u,
@@ -270,11 +273,12 @@ static void handle_register_write(uint32_t offset, uint16_t value) {
         break;
     case CIAP_APCR:
         store_word(offset, value);
-        /* CD-RTOS uses the audio processor for main-channel classification as
-         * well as decoded audio.  Every submitted operation reports ready via
-         * ASTAT bit 7 and ISR bit 3; $200 is the driver's explicit
-         * acknowledge/reset command and must not recursively complete. */
-        if (value == 0x0200u) {
+        /* Starting an audio-processor operation is not itself a completion.
+         * CD-RTOS follows the setup command with INTNOW (or FINISH at EOR)
+         * once the current buffer is ready, then acknowledges the resulting
+         * AP interrupt with ACK.  Completing the setup command synchronously
+         * re-enters the driver before it can publish its new state. */
+        if (value == CIAP_APCR_ACK) {
             store_word(CIAP_ASTAT,
                        (uint16_t)(read_word(CIAP_ASTAT) & ~0x0080u));
             store_word(CIAP_ISR,
@@ -282,7 +286,7 @@ static void handle_register_write(uint32_t offset, uint16_t value) {
             clear_interrupt_line();
             assert_interrupt_line();
         }
-        else {
+        else if (value == CIAP_APCR_INTNOW || value == CIAP_APCR_FINISH) {
             store_word(CIAP_ASTAT,
                        (uint16_t)(read_word(CIAP_ASTAT) | 0x0080u));
             store_word(CIAP_ISR,

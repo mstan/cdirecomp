@@ -7,6 +7,8 @@
 
 static int failures;
 static uint8_t fake_sector[2340];
+static int irq_raises;
+static int irq_clears;
 
 M68KState g_cpu;
 uint64_t g_total_cycles;
@@ -26,8 +28,12 @@ void cdi_fault_hold(void) {}
 void cdi_irq_raise_vector(uint8_t level, uint8_t vector) {
     (void)level;
     (void)vector;
+    irq_raises++;
 }
-void cdi_irq_clear(uint8_t level) { (void)level; }
+void cdi_irq_clear(uint8_t level) {
+    (void)level;
+    irq_clears++;
+}
 void periph_ciap_dma_request(uint16_t control) { (void)control; }
 void cdi_audio_reset(void) {}
 int cdi_audio_decode_sector(const uint8_t sector[2340]) {
@@ -82,7 +88,25 @@ int main(void) {
     CHECK(selected == 1);
     CHECK(drive_lba == 102);
 
+    /* AP setup must not complete synchronously.  CD-RTOS publishes the new
+     * driver state after this write and requests completion separately. */
+    cdic_write(CDI_CDIC_BASE + 0x25C0, 0x0553, 2); /* level 3, vector $AA */
+    cdic_write(CDI_CDIC_BASE + 0x2584, 0x0008, 2); /* enable AP interrupt */
+    irq_raises = 0;
+    irq_clears = 0;
+    cdic_write(CDI_CDIC_BASE + 0x25A6, 0x0142, 2); /* AP setup */
+    CHECK(irq_raises == 0);
+    CHECK((cdic_read(CDI_CDIC_BASE + 0x25AA, 2) & 0x0080) == 0);
+
+    cdic_write(CDI_CDIC_BASE + 0x25A6, 0x00A0, 2); /* INTNOW */
+    CHECK(irq_raises == 1);
+    CHECK((cdic_read(CDI_CDIC_BASE + 0x25AA, 2) & 0x0080) != 0);
+
+    cdic_write(CDI_CDIC_BASE + 0x25A6, 0x0200, 2); /* acknowledge */
+    CHECK(irq_clears == 1);
+    CHECK((cdic_read(CDI_CDIC_BASE + 0x25AA, 2) & 0x0080) == 0);
+
     if (failures) return 1;
-    puts("CIAP channel-selection tests passed");
+    puts("CIAP channel-selection and AP command tests passed");
     return 0;
 }
