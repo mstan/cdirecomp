@@ -35,25 +35,15 @@ static const uint8_t unlock_bytes[8] = {
 };
 
 typedef struct {
-    int year;              /* full Gregorian year */
-    uint8_t month;         /* 1..12 */
-    uint8_t date;          /* 1..31 */
-    uint8_t weekday;       /* 1=Monday .. 7=Sunday */
-    uint8_t hour;          /* 0..23 */
-    uint8_t minute;
-    uint8_t second;
-    uint8_t hundredth;
-} CivilClock;
-
-typedef struct {
     uint8_t ram[NVRAM_BYTES];
     uint8_t transfer[RTC_REGISTER_COUNT];
-    CivilClock now;
+    CdiRtcTime now;
     uint64_t key_window;
     uint64_t key_value;
     double sub_hundredth_ns;
     uint8_t transfer_bit;
     uint8_t transferring;
+    uint8_t startup_seeded;
 } PhantomClock;
 
 static PhantomClock rtc;
@@ -84,7 +74,7 @@ static unsigned bounded(unsigned value, unsigned low, unsigned high,
     return value >= low && value <= high ? value : fallback;
 }
 
-static void advance_one_second(CivilClock *clock) {
+static void advance_one_second(CdiRtcTime *clock) {
     if (++clock->second < 60) return;
     clock->second = 0;
     if (++clock->minute < 60) return;
@@ -97,6 +87,19 @@ static void advance_one_second(CivilClock *clock) {
     if (++clock->month <= 12) return;
     clock->month = 1;
     clock->year++;
+}
+
+static int valid_time(const CdiRtcTime *time_value) {
+    if (!time_value || time_value->year < 1970 || time_value->year > 2069)
+        return 0;
+    if (time_value->month < 1 || time_value->month > 12 ||
+        time_value->date < 1 ||
+        time_value->date > days_in_month(time_value->year, time_value->month) ||
+        time_value->weekday < 1 || time_value->weekday > 7 ||
+        time_value->hour > 23 || time_value->minute > 59 ||
+        time_value->second > 59 || time_value->hundredth > 99)
+        return 0;
+    return 1;
 }
 
 static void latch_clock_registers(void) {
@@ -193,6 +196,16 @@ void nvram_reset(void) {
     rtc.now.date = 1;
     rtc.now.weekday = 7; /* 1989-01-01 was Sunday. */
     latch_clock_registers();
+}
+
+int nvram_seed_clock_once(const CdiRtcTime *time_value) {
+    if (rtc.startup_seeded) return 0;
+    if (!valid_time(time_value)) return -1;
+    rtc.now = *time_value;
+    rtc.sub_hundredth_ns = 0.0;
+    rtc.startup_seeded = 1;
+    latch_clock_registers();
+    return 1;
 }
 
 void nvram_increment_clock(double nanoseconds) {

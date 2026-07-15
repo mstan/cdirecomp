@@ -111,10 +111,37 @@ def main() -> int:
             event for event in request(args.port, {"cmd": "ikat_events"})["events"]
             if event["seq"] >= ikat_event_start
         ]
+        press_packets = [
+            event for event in new_ikat_events
+            if event["type"] == 2 and event["channel"] == 0
+            and len(event["data"]) == 8
+        ]
+        check(any(int(event["data"][:2], 16) & 0x20
+                  for event in press_packets),
+              "left-button press is encoded in the IKAT packet")
         check(not any(event["type"] == 4 and event["channel"] == 0
                       for event in new_ikat_events),
               "masked channel-A event does not assert the IKAT level-2 line")
+
+        release_event_start = request(args.port, {"cmd": "ikat_events"})["total"]
         request(args.port, {"cmd": "set_input", "mask": 0})
+        release_packets = []
+        deadline = time.monotonic() + 1.0
+        while time.monotonic() < deadline:
+            release_packets = [
+                event for event in request(
+                    args.port, {"cmd": "ikat_events"}
+                )["events"]
+                if event["seq"] >= release_event_start
+                and event["type"] == 2 and event["channel"] == 0
+                and len(event["data"]) == 8
+            ]
+            if release_packets:
+                break
+            time.sleep(0.01)
+        check(any((int(event["data"][:2], 16) & 0x20) == 0
+                  for event in release_packets),
+              "left-button release is encoded in the next IKAT packet")
         print("shell-idle smoke: ALL PASS")
         return 0
     except Exception as exc:

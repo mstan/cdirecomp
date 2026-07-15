@@ -647,8 +647,9 @@ static void resp_video_state(char *out, int outlen) {
  * This only publishes host state. The CPU thread generates a real timed IKAT
  * channel-A packet and IRQ, so tests exercise the guest input driver. */
 static void resp_set_input(const char *line, char *out, int outlen) {
-    uint64_t raw = 0, value = 0;
+    uint64_t raw = 0, value = 0, raw_x = 0, raw_y = 0;
     uint32_t mask = 0;
+    int pending_x, pending_y;
     if (json_int(line, "mask", &raw)) {
         mask = (uint32_t)raw;
     } else {
@@ -660,7 +661,17 @@ static void resp_set_input(const char *line, char *out, int outlen) {
         if (json_int(line, "btn2",  &value) && value) mask |= CDI_INPUT_BTN2;
     }
     cdi_input_set(mask);
-    snprintf(out, outlen, "{\"ok\":true,\"input\":%u}", cdi_input_get());
+    {
+        int have_x = json_int(line, "dx", &raw_x);
+        int have_y = json_int(line, "dy", &raw_y);
+        if (have_x || have_y)
+            cdi_input_add_relative((int)(int64_t)raw_x,
+                                   (int)(int64_t)raw_y);
+    }
+    cdi_input_pending_relative(&pending_x, &pending_y);
+    snprintf(out, outlen,
+             "{\"ok\":true,\"input\":%u,\"pending_dx\":%d,\"pending_dy\":%d}",
+             cdi_input_get(), pending_x, pending_y);
 }
 
 static void resp_ikat_state(char *out, int outlen) {

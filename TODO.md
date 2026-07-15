@@ -88,23 +88,27 @@ IDs are referenced from code comments (`TODO MC-CDI-NNN`).
 
 ## Player-quality enhancements (PLAN Phase D; opt-in, persistent)
 
-- **MC-CDI-027 — Captured host mouse.** Add a launcher-exposed, persistent
+- ✅ **MC-CDI-027 — Captured host mouse.** A launcher-compatible, persistent
   `input.capture_mouse` player preference. While the SDL window is focused,
   hide/capture the host pointer and feed true relative X/Y plus primary/
   secondary button transitions through the timed IKAT pointing-device path.
   Losing focus must immediately release the pointer and restore the host
   cursor. Off remains the faithful/default path; scripted, headless, co-sim,
-  and baseline profiles keep it disabled. See `ENHANCEMENTS.md` for the packet,
-  focus, and acceptance-test contract.
-- **MC-CDI-028 — One-shot host clock seed.** Add a launcher-exposed, persistent
+  and baseline profiles keep it disabled. Focus/button unit coverage and the
+  BIOS navigation smoke cover clamping/remainder, exact relative deltas, guest
+  drain, cursor/framebuffer movement, and RULE 0a.
+- ✅ **MC-CDI-028 — One-shot host clock seed.** A launcher-compatible, persistent
   `rtc.sync_host_on_startup` player preference. When enabled, seed the DS1216
   RTC from host-local civil time once before guest execution; then advance only
   on emulated cycles and honor all guest writes without re-syncing. NVRAM policy
   remains independent, and disabled/oracle runs retain the deterministic
-  1989 seed. See `ENHANCEMENTS.md` for cross-platform and test requirements.
+  1989 seed. Unit coverage proves cycle advancement and no re-seed after guest
+  writes; `tools/rtc_startup_smoke.py` proves the real persistent startup path.
 
 These preferences are user/player configuration, not title policy in
-`game.cfg`, and their values must survive closing and reopening the launcher.
+`game.cfg`. The shared `player.cfg` load/save contract survives process and
+launcher restarts; the current runtime creates it in SDL's user preference
+folder and a future launcher UI can edit the same file/API.
 
 ## Phase 3 — the game (Hotel Mario)
 

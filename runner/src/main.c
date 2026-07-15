@@ -14,6 +14,8 @@
 #include "cosim_state.h"
 #include "cdi_frontend.h"
 #include "cdi_media.h"
+#include "cdi_host_time.h"
+#include "player_config.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -53,6 +55,9 @@ int main(int argc, char *argv[]) {
     const char *cosim_inject_spec = NULL;
     const char *cosim_session = "";
     const char *input_script_spec = NULL;
+    CdiPlayerConfig player_config;
+    char player_config_path[1024] = "";
+    int player_preferences_active;
 
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--port") && i + 1 < argc) port = atoi(argv[++i]);
@@ -88,6 +93,38 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
+    cdi_player_config_defaults(&player_config);
+    player_preferences_active = !headless && !g_stop_seq && !g_stop_frame &&
+                                !input_script_spec && !cosim_inject_spec;
+    if (player_preferences_active) {
+        int loaded;
+        const char *config_override = getenv("CDI_PLAYER_CONFIG_PATH");
+        if (config_override && *config_override) {
+            if (strlen(config_override) >= sizeof player_config_path) {
+                fprintf(stderr, "[config] CDI_PLAYER_CONFIG_PATH is too long\n");
+                return 1;
+            }
+            strcpy(player_config_path, config_override);
+        } else {
+            if (!cdi_player_config_default_path(player_config_path,
+                                                sizeof player_config_path)) {
+                fprintf(stderr, "[config] cannot determine the user preference path\n");
+                return 1;
+            }
+        }
+        loaded = cdi_player_config_load(player_config_path, &player_config);
+        if (loaded < 0) return 1;
+        if (loaded == 0 &&
+            !cdi_player_config_save(player_config_path, &player_config)) {
+            fprintf(stderr, "[config] cannot create %s\n", player_config_path);
+            return 1;
+        }
+        printf("[config] %s (capture_mouse=%s, rtc_sync=%s)\n",
+               player_config_path,
+               player_config.capture_mouse ? "on" : "off",
+               player_config.sync_host_on_startup ? "on" : "off");
+    }
+
     /* ---- load the system ROM ---- */
     FILE *f = fopen(rom_path, "rb");
     if (!f) { fprintf(stderr, "[cdi] cannot open %s\n", rom_path); return 1; }
@@ -119,6 +156,29 @@ int main(int argc, char *argv[]) {
     runtime_init();                 /* zeroes g_cpu */
     periph_reset();                 /* on-chip peripheral power-on state (UART TxRDY) */
     nvram_reset();                  /* DS1216 SmartWatch: SRAM=$FF, clock=1989-01-01 */
+    if (player_preferences_active && player_config.sync_host_on_startup) {
+        CdiRtcTime host_time;
+        int seeded;
+        if (!cdi_host_local_time(&host_time)) {
+            fprintf(stderr, "[rtc] cannot sample host-local civil time\n");
+            return 1;
+        }
+        seeded = nvram_seed_clock_once(&host_time);
+        if (seeded != 1) {
+            fprintf(stderr,
+                    "[rtc] host-local time is outside the DS1216 range: "
+                    "%04d-%02u-%02u %02u:%02u:%02u\n",
+                    host_time.year, host_time.month, host_time.date,
+                    host_time.hour, host_time.minute, host_time.second);
+            return 1;
+        }
+        printf("[rtc] startup seed %04d-%02u-%02u %02u:%02u:%02u.%02u "
+               "(host local; one shot)\n",
+               host_time.year, host_time.month, host_time.date,
+               host_time.hour, host_time.minute, host_time.second,
+               host_time.hundredth);
+    }
+    cdi_input_reset();
     mcd212_video_reset();           /* display parameters + canonical buffers */
     g_cpu.A[7] = reset_ssp;         /* supervisor stack pointer (S=1 → A7 aliases SSP) */
     g_cpu.SSP  = reset_ssp;         /* SSP shadow (used when a user->super swap restores A7) */
@@ -152,7 +212,8 @@ int main(int argc, char *argv[]) {
      * noise. Normal execution opens the physical frontend unless requested
      * otherwise. */
     int frontend_active = !headless && !g_stop_seq && !g_stop_frame;
-    if (frontend_active && !cdi_frontend_init()) return 1;
+    if (frontend_active &&
+        !cdi_frontend_init(player_config.capture_mouse)) return 1;
 
     /* ---- drive execution from the reset entry ----
      * recomp_call_addr looks the entry up in the generated dispatch table and

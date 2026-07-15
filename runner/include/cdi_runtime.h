@@ -265,6 +265,19 @@ enum {
 };
 void     cdi_input_set(uint32_t mask);
 uint32_t cdi_input_get(void);
+void     cdi_input_reset(void);
+void     cdi_input_add_relative(int x, int y);
+void     cdi_input_clear_relative(void);
+void     cdi_input_take_relative(int *x, int *y,
+                                 int min_x, int max_x,
+                                 int min_y, int max_y);
+void     cdi_input_pending_relative(int *x, int *y);
+void     cdi_input_mouse_configure(int enabled);
+void     cdi_input_mouse_focus(int focused);
+int      cdi_input_mouse_active(void);
+void     cdi_input_mouse_motion(int x, int y);
+void     cdi_input_mouse_button(int button, int pressed);
+void     cdi_input_acknowledge_mouse_buttons(void);
 /* Side-effect-free snapshot for the always-on debug surface. Racy but
  * monotonic enough for observation; unlike slave_read(), it never consumes a
  * response byte or clears device state. */
@@ -305,6 +318,18 @@ void     periph_increment_timer(uint32_t cycles);
  * a serial RTC transfer. `dev` is (busaddr-$320000)>>1. Reset uses the
  * deterministic 1989-01-01 test epoch. */
 void    nvram_reset(void);
+typedef struct CdiRtcTime {
+    int year;              /* representable startup range: 1970..2069 */
+    uint8_t month;         /* 1..12 */
+    uint8_t date;          /* 1..31, validated for month/year */
+    uint8_t weekday;       /* 1=Monday .. 7=Sunday */
+    uint8_t hour;          /* 0..23 */
+    uint8_t minute;
+    uint8_t second;
+    uint8_t hundredth;
+} CdiRtcTime;
+/* Returns 1 when applied, 0 if startup was already seeded, -1 if invalid. */
+int     nvram_seed_clock_once(const CdiRtcTime *time_value);
 uint8_t nvram_get_byte(uint16_t dev);    /* GetByte: SRAM, or one serial RTC bit */
 void    nvram_set_byte(uint16_t dev, uint8_t data);
 /* Advance the DS1216 by cycle-derived emulated time, never host wall time.

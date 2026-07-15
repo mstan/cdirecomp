@@ -1,0 +1,10 @@
+# cdirecomp player preferences (persistent, not per-title)
+[input]
+# Capture/hide the host pointer while the player window is focused and send
+# relative motion plus left/right clicks through the CD-i IKAT device.
+capture_mouse = false
+
+[rtc]
+# Sample host-local civil time once before the first guest instruction.
+# Guest writes and emulated-cycle advancement remain authoritative afterward.
+sync_host_on_startup = false

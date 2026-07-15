@@ -54,22 +54,22 @@ divergence vs the faithful path, fix the class. No printf, no eyeballing.
 
 ---
 
-## Planned player-quality enhancements
+## Implemented player-quality enhancements
 
-The BIOS player shell is now bootable, rendered, real-time paced, and physically
-controllable, so the first host-integration enhancements can be specified. These
-are backlog items, not implemented features. Both require a launcher-config
-round-trip test proving that enabled and disabled values survive a launcher
-restart. A deterministic test profile may suppress them for that run, but must
-not overwrite the user's saved choices.
+The BIOS player shell is bootable, rendered, real-time paced, and physically
+controllable. These first host-integration enhancements are implemented through
+the durable per-user `player.cfg` contract. Enabled and disabled values pass
+load/save round trips. A deterministic profile suppresses them for that run but
+does not read, create, or overwrite the user's saved choices. The repository
+does not yet contain a graphical launcher; its eventual UI uses this same
+player-config file/API rather than inventing CLI-only state.
 
 ### Captured host mouse (MC-CDI-027)
 
-Add an opt-in persistent player preference (provisional config key:
-`input.capture_mouse`) that uses the host mouse as the CD-i relative pointing
-device while the SDL window has input focus. The launcher exposes the setting
-and saves it in the user's player config so it survives future launches; it is
-not a command-line-only or per-title option.
+The opt-in persistent `input.capture_mouse` player preference uses the host
+mouse as the CD-i relative pointing device while the SDL window has input
+focus. It is saved in the user's player config so it survives future launches;
+it is not a command-line-only or per-title option.
 
 - On focus gain, hide the host cursor and enable SDL relative-mouse capture. On
   focus loss, shutdown, or capture disable, release capture and restore the host
@@ -86,17 +86,17 @@ not a command-line-only or per-title option.
   controller behavior byte-for-byte. Headless, scripted-input, co-sim, and
   regression runs keep capture off.
 
-Acceptance requires focus-gain/loss and button-transition tests plus an
-end-to-end BIOS navigation smoke proving relative motion, guest drain, visible
-cursor movement, and RULE 0a cleanliness.
+Acceptance is met by `CdiInputTest`, `PlayerConfigTest`, the press/release
+assertions in `tools/shell_idle_smoke.py`, and the end-to-end relative-motion
+path in `tools/bios_navigation_smoke.py` (exact delta, enabled IRQ, guest drain,
+visible cursor/framebuffer movement, STOP return, and RULE 0a cleanliness).
 
 ### One-shot host clock seed (MC-CDI-028)
 
-Add an opt-in persistent player preference (provisional config key:
-`rtc.sync_host_on_startup`) that samples the host's local civil date/time once
-per emulated startup and uses it to seed the CD-i RTC before the first guest
-instruction. The launcher exposes and persists the preference; enabling it does
-not imply continuous synchronization.
+The opt-in persistent `rtc.sync_host_on_startup` player preference samples the
+host's local civil date/time once per emulated startup and uses it to seed the
+CD-i RTC before the first guest instruction. The player config persists the
+preference; enabling it does not imply continuous synchronization.
 
 - Synchronize only the DS1216 clock fields; preserve the faithful NVRAM reset/
   persistence policy independently.
@@ -110,6 +110,8 @@ not imply continuous synchronization.
   `1989-01-01 00:00:00` seed exactly. Co-sim, recorded traces, baseline smokes,
   and oracle comparisons keep synchronization off.
 
-Acceptance requires deterministic unit coverage for the faithful and seeded
-paths plus a startup integration test showing that the sampled value is applied
-once, advances on guest cycles, and is not re-applied after a guest RTC write.
+Acceptance is met by `CdiNvramTest` (faithful seed, valid/invalid host seed,
+cycle rollover, SRAM independence, and no re-seed after a guest RTC write),
+`PlayerConfigTest`, and `tools/rtc_startup_smoke.py`, which boots a real BIOS
+with a temporary enabled persistent config and verifies one host-local sample,
+the canonical shell STOP, and an unchanged config file.

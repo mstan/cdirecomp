@@ -21,6 +21,7 @@ typedef struct {
     uint64_t shown_generation;
     uint64_t next_event_ms;
     int fullscreen;
+    int mouse_captured;
 } Frontend;
 
 static Frontend s;
@@ -47,6 +48,26 @@ static void open_first_controller(void) {
 static void set_fullscreen(int enabled) {
     Uint32 flags = enabled ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0;
     if (SDL_SetWindowFullscreen(s.window, flags) == 0) s.fullscreen = enabled;
+}
+
+static int apply_mouse_capture(void) {
+    int wanted = cdi_input_mouse_active();
+    if (wanted == s.mouse_captured) return 1;
+    if (wanted) {
+        if (SDL_SetRelativeMouseMode(SDL_TRUE) != 0) {
+            fprintf(stderr, "[frontend] cannot capture relative mouse: %s\n",
+                    SDL_GetError());
+            return 0;
+        }
+        SDL_SetWindowGrab(s.window, SDL_TRUE);
+        SDL_ShowCursor(SDL_DISABLE);
+    } else {
+        SDL_SetWindowGrab(s.window, SDL_FALSE);
+        SDL_SetRelativeMouseMode(SDL_FALSE);
+        SDL_ShowCursor(SDL_ENABLE);
+    }
+    s.mouse_captured = wanted;
+    return 1;
 }
 
 static uint32_t input_mask(void) {
@@ -114,7 +135,7 @@ static int present_frame(void) {
     return 1;
 }
 
-int cdi_frontend_init(void) {
+int cdi_frontend_init(int capture_mouse) {
     SDL_SetMainReady();
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "linear");
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER | SDL_INIT_EVENTS) != 0) {
@@ -149,6 +170,13 @@ int cdi_frontend_init(void) {
     s.controller_id = -1;
     SDL_EventState(SDL_DROPFILE, SDL_ENABLE);
     open_first_controller();
+    cdi_input_mouse_configure(capture_mouse);
+    cdi_input_mouse_focus(
+        (SDL_GetWindowFlags(s.window) & SDL_WINDOW_INPUT_FOCUS) != 0);
+    if (!apply_mouse_capture()) {
+        cdi_frontend_shutdown();
+        return 0;
+    }
     s.next_event_ms = SDL_GetTicks64();
     return 1;
 }
@@ -160,7 +188,21 @@ int cdi_frontend_pump(void) {
         s.next_event_ms = now + 4;
         while (SDL_PollEvent(&event)) {
             if (event.type == SDL_QUIT) return 0;
-            if (event.type == SDL_KEYDOWN && !event.key.repeat) {
+            if (event.type == SDL_WINDOWEVENT &&
+                (event.window.event == SDL_WINDOWEVENT_FOCUS_GAINED ||
+                 event.window.event == SDL_WINDOWEVENT_FOCUS_LOST)) {
+                cdi_input_mouse_focus(
+                    event.window.event == SDL_WINDOWEVENT_FOCUS_GAINED);
+                if (!apply_mouse_capture()) return 0;
+            } else if (event.type == SDL_MOUSEMOTION) {
+                cdi_input_mouse_motion(event.motion.xrel, event.motion.yrel);
+            } else if (event.type == SDL_MOUSEBUTTONDOWN ||
+                       event.type == SDL_MOUSEBUTTONUP) {
+                int button = event.button.button == SDL_BUTTON_LEFT ? 1 :
+                             event.button.button == SDL_BUTTON_RIGHT ? 2 : 0;
+                cdi_input_mouse_button(
+                    button, event.type == SDL_MOUSEBUTTONDOWN);
+            } else if (event.type == SDL_KEYDOWN && !event.key.repeat) {
                 if (event.key.keysym.scancode == SDL_SCANCODE_ESCAPE) return 0;
                 if (event.key.keysym.scancode == SDL_SCANCODE_F11 ||
                     (event.key.keysym.scancode == SDL_SCANCODE_RETURN &&
@@ -185,6 +227,9 @@ int cdi_frontend_pump(void) {
 
 void cdi_frontend_shutdown(void) {
     cdi_input_set(0);
+    cdi_input_mouse_focus(0);
+    apply_mouse_capture();
+    cdi_input_mouse_configure(0);
     close_controller();
     free(s.pixels);
     if (s.texture) SDL_DestroyTexture(s.texture);
