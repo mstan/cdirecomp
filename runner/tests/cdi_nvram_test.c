@@ -1,4 +1,5 @@
 #include "cdi_runtime.h"
+#include "cdi_host_time.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -43,6 +44,7 @@ static void write_clock(const uint8_t in[8]) {
 
 int main(void) {
     uint8_t clock[8];
+    CdiRtcTime host_time;
 
     nvram_reset();
     CHECK(nvram_get_byte(0x1234) == 0xFF);
@@ -86,6 +88,48 @@ int main(void) {
     nvram_increment_clock(5000000000.0);
     read_clock(clock);
     CHECK(clock[1] == 0x00);
+
+    nvram_reset();
+    nvram_set_byte(0x1234, 0xA6);
+    host_time = (CdiRtcTime){ 2070, 1, 1, 4, 0, 0, 0, 0 };
+    CHECK(nvram_seed_clock_once(&host_time) == -1);
+    host_time = (CdiRtcTime){ 2024, 2, 29, 4, 23, 59, 58, 50 };
+    CHECK(nvram_seed_clock_once(&host_time) == 1);
+    CHECK(nvram_get_byte(0x1234) == 0xA6); /* Seeding never touches SRAM. */
+    read_clock(clock);
+    CHECK(clock[0] == 0x50);
+    CHECK(clock[1] == 0x58);
+    CHECK(clock[2] == 0x59);
+    CHECK(clock[3] == 0x23);
+    CHECK((clock[4] & 7u) == 4u);
+    CHECK(clock[5] == 0x29);
+    CHECK(clock[6] == 0x02);
+    CHECK(clock[7] == 0x24);
+
+    nvram_increment_clock(1500000000.0);
+    read_clock(clock);
+    CHECK(clock[0] == 0x00);
+    CHECK(clock[1] == 0x00);
+    CHECK(clock[2] == 0x00);
+    CHECK(clock[3] == 0x00);
+    CHECK(clock[5] == 0x01);
+    CHECK(clock[6] == 0x03);
+
+    /* A guest write remains authoritative; startup cannot seed twice. */
+    clock[5] = 0x15;
+    clock[6] = 0x06;
+    clock[7] = 0x01;
+    write_clock(clock);
+    CHECK(nvram_seed_clock_once(&host_time) == 0);
+    read_clock(clock);
+    CHECK(clock[5] == 0x15);
+    CHECK(clock[6] == 0x06);
+    CHECK(clock[7] == 0x01);
+
+    CHECK(cdi_host_local_time(&host_time));
+    CHECK(host_time.year >= 1970 && host_time.year <= 2069);
+    CHECK(host_time.month >= 1 && host_time.month <= 12);
+    CHECK(host_time.weekday >= 1 && host_time.weekday <= 7);
 
     if (failures) {
         fprintf(stderr, "DS1216 tests: %d failure(s)\n", failures);

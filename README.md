@@ -86,9 +86,12 @@ What is verified today:
   polarity and color-key mask equation. At seq 570000 the earlier boot frame
   also remains exact (`bc0c80cbd59d8383`).
 - **Player-facing SDL2 frontend**: resizable 4:3 window, fullscreen toggle,
-  keyboard and game-controller mapping. It only consumes atomically published
-  frames and feeds the timed IKAT input model, so presentation cannot mutate
-  guest state.
+  keyboard and game-controller mapping. Two off-by-default, persistent player
+  preferences add focus-safe relative mouse capture and a one-shot host-local
+  RTC seed. Mouse motion and both button edges traverse the timed IKAT input
+  model; the RTC is sampled only before the first guest instruction and then
+  remains cycle-derived. Deterministic/headless tooling suppresses both without
+  changing the saved choices.
 - **Real media insertion/ejection boundary**: CUE/BIN images are validated and
   retained as sector backing, then observed by IKAT on emulated time. Mount and
   eject each assert the shell's enabled channel-D IRQ and return cleanly to the
@@ -189,6 +192,10 @@ py -3 tools/disc_insert_smoke.py build/runner-release/CdiRuntime.exe `
 # BIOS-only directional navigation; the mounted image is never launched
 py -3 tools/bios_navigation_smoke.py build/runner-release/CdiRuntime.exe `
   bios/cdi490a.rom build/tmp/disc_smoke/fixture.cue
+
+# One-shot host-local RTC integration regression
+py -3 tools/rtc_startup_smoke.py build/runner-release/CdiRuntime.exe `
+  bios/cdi490a.rom
 ```
 
 Player controls: arrows or WASD move the CD-i pointer; Enter, Space, or Z is
@@ -196,6 +203,32 @@ button 1; Backspace or X is button 2; F11 or Alt+Enter toggles fullscreen; Esc
 closes the player. Standard game-controller D-pad/A/B mappings are also live.
 Dropping a CUE or BIN file onto the window performs a real media mount and IKAT
 channel-D insertion event.
+
+## Persistent player preferences
+
+A normal visible run creates `player.cfg` in SDL's per-user preference folder
+and prints its exact path at startup. Copy `player.cfg.example` there or edit
+the generated file:
+
+```ini
+[input]
+capture_mouse = true
+
+[rtc]
+sync_host_on_startup = true
+```
+
+`capture_mouse` hides and captures the host cursor only while the player window
+has input focus. Relative movement controls the CD-i pointer; the left and right
+host buttons map to CD-i buttons 1 and 2. Focus loss, Esc, or shutdown releases
+the host pointer immediately.
+
+`sync_host_on_startup` copies host-local civil time into the DS1216 once before
+guest execution. It never continuously re-syncs, so CD-i software may change
+the clock afterward. Both preferences default to `false`. Headless, scripted,
+fixed-sequence, and co-sim profiles ignore them for determinism without
+overwriting the file. `CDI_PLAYER_CONFIG_PATH` is available to launcher and
+test integrations that need an explicit path; it is not required for players.
 
 ---
 

@@ -53,7 +53,7 @@ screenshot --path p  -> client-side BMP/PPM from video_scanline after an immedia
 get_registers        -> {ok,pc,sr,usp,d0..d7,a0..a7}
 read_mem  addr[,len] -> {ok,addr,bytes:"HEX.."}  side-effect-free (RAM/ROM; "--" for MMIO)
 trace     [count]    -> {ok,total,records:[{seq,pc,sr,a7}..]}  block-trace ring tail
-set_input mask       -> {ok,input}  dev-only host state; IKAT consumes it on emulated time
+set_input mask[,dx,dy] -> {ok,input,pending_dx,pending_dy}  dev-only state/motion; timed IKAT consumes it
 emu_ikat_state       -> {ok,input,pointer_ns,cursor_packets,out_remaining,regs}
 ikat_events          -> {ok,total,events:[{seq,trace_seq,pc,frame,cycles,type,channel,data}...]}
 ciap_events          -> {ok,total,oldest,events:[{seq,trace_seq,pc,frame,cycles,offset,size,write,value}...]}
@@ -86,8 +86,9 @@ always 0 — an interpreter never misses). Both sides capture one trace entry pe
 executed instruction, so the PC streams are index-alignable and
 `tools/first_divergence.py` pages both from seq 0 to find the first mismatch.
 `set_input` is deterministic development instrumentation, separate from the SDL
-player frontend. Both feed the same transport-neutral `CDI_INPUT_*` state and
-timed IKAT protocol path; neither may inject guest RAM or bypass the IKAT IMR.
+player frontend. Optional signed `dx`/`dy` values enter the same accumulated
+relative-motion ABI. Both frontends feed the timed IKAT protocol path; neither
+may inject guest RAM or bypass the IKAT IMR.
 The mirrored `video_state` and `video_frame` queries expose device registers and
 a canonical framebuffer hash without screenshots or side-channel logs. Media
 mutation commands are native-only player-development controls; their guest-

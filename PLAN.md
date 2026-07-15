@@ -243,15 +243,15 @@ Each lands with an oracle diff showing the divergence closed.
   diff vs committed baseline (baseline updates = same commit as the change).
 - `COVERAGE.md`: 68000 instruction-coverage audit for the SCC68070 (port the
   Genesis COVERAGE.md method; note SCC68070-only opcodes).
-- **MC-CDI-027:** extend the transport-neutral host-input ABI from directional
+- ✅ **MC-CDI-027:** extended the transport-neutral host-input ABI from directional
   state to accumulated relative motion, packetize it through the existing
   25-ms IKAT cadence, and add focus-safe SDL mouse capture. Expose the opt-in
-  through a launcher setting persisted in user/player config, not a transient
+  through a setting persisted in user/player config, not a transient
   CLI flag or per-title `game.cfg` entry.
-- **MC-CDI-028:** separate the faithful DS1216 reset seed from an optional
+- ✅ **MC-CDI-028:** separated the faithful DS1216 reset seed from an optional
   one-shot host-local clock seed, while preserving cycle-derived advancement
-  and guest RTC writes after startup. Expose and persist the opt-in through the
-  launcher; deterministic validation profiles force it off.
+  and guest RTC writes after startup. Persist the opt-in through the shared
+  player config; deterministic validation profiles force it off.
 - **MC-CDI-029:** port the sibling's allowlist-based release packager and native
   purity audit to CD-i. The package must reject tools/oracles, ROM/disc images,
   traces, dumps, and build debris, and the native link/include audit must prove
@@ -290,8 +290,8 @@ misses. Zero-input tracing shows passive ready-media detection issues
 BIOS/application boundary is therefore enforced with button-free navigation,
 shell-state assertions, and synthetic fixtures. Continue non-launching
 player-shell screen coverage, settings/memory UI, RTC/NVRAM, and peripheral
-audits. Then land the persistent launcher/player-config paths for captured host
-mouse input (MC-CDI-027) and one-shot host clock seeding (MC-CDI-028), retaining
+audits. The persistent player-config paths for captured host mouse input
+(MC-CDI-027) and one-shot host clock seeding (MC-CDI-028) are now landed with
 faithful defaults. The TCP `set_input` and `mount_disc` commands remain
 development instrumentation; SDL
 drag-and-drop is the player media path.

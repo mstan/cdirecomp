@@ -24,6 +24,9 @@ add_executable(CdiRuntime
     src/mcd212.c
     src/mcd212_video.c
     src/cdi_frontend.c
+    src/player_config.c
+    src/cdi_input.c
+    src/cdi_host_time.c
     src/cdi_media.c
     src/cdic.c
     src/slave.c
@@ -81,6 +84,7 @@ if(BUILD_TESTING)
     add_executable(CdiNvramTest
         tests/cdi_nvram_test.c
         src/cdi_nvram.c
+        src/cdi_host_time.c
     )
     target_include_directories(CdiNvramTest PRIVATE include)
     add_test(NAME cdi_nvram COMMAND CdiNvramTest)
@@ -105,4 +109,19 @@ if(BUILD_TESTING)
     )
     target_include_directories(M68kArithTest PRIVATE include)
     add_test(NAME m68k_arithmetic COMMAND M68kArithTest)
+
+    add_executable(CdiInputTest
+        tests/cdi_input_test.c
+        src/cdi_input.c
+    )
+    target_include_directories(CdiInputTest PRIVATE include)
+    add_test(NAME cdi_input COMMAND CdiInputTest)
+
+    add_executable(PlayerConfigTest
+        tests/player_config_test.c
+        src/player_config.c
+    )
+    target_include_directories(PlayerConfigTest PRIVATE include)
+    target_link_libraries(PlayerConfigTest PRIVATE SDL2::SDL2)
+    add_test(NAME player_config COMMAND PlayerConfigTest)
 endif()

@@ -109,15 +109,23 @@ def moved_as_requested(name: str, before: dict, after: dict) -> bool:
     raise ValueError(f"unknown direction {name}")
 
 
-def packet_moves_as_requested(name: str, event: dict) -> bool:
+def packet_delta(event: dict) -> tuple[int, int] | None:
     """Decode one four-byte Class::Maneuvering report's signed X/Y delta."""
     if event["type"] != 2 or event["channel"] != 0 or len(event["data"]) < 8:
-        return False
+        return None
     packet = bytes.fromhex(event["data"][:8])
     x_raw = ((packet[0] & 0x03) << 6) | (packet[1] & 0x3F)
     y_raw = ((packet[0] & 0x0C) << 4) | (packet[2] & 0x3F)
     x = x_raw - 0x100 if x_raw & 0x80 else x_raw
     y = y_raw - 0x100 if y_raw & 0x80 else y_raw
+    return x, y
+
+
+def packet_moves_as_requested(name: str, event: dict) -> bool:
+    delta = packet_delta(event)
+    if delta is None:
+        return False
+    x, y = delta
     return ((name == "LEFT" and x < 0 and y == 0) or
             (name == "RIGHT" and x > 0 and y == 0) or
             (name == "UP" and y < 0 and x == 0) or
@@ -131,7 +139,9 @@ def events_since(port: int, start: int) -> list[dict]:
 
 def exercise_direction(proc: subprocess.Popen[str], port: int, name: str,
                        mask: int, baseline: dict,
-                       timeout: float) -> tuple[dict, list[dict]]:
+                       timeout: float,
+                       relative: tuple[int, int] | None = None
+                       ) -> tuple[dict, list[dict]]:
     event_start = request(port, {"cmd": "ikat_events"})["total"]
     observed_by_seq: dict[int, dict] = {}
 
@@ -140,7 +150,10 @@ def exercise_direction(proc: subprocess.Popen[str], port: int, name: str,
     # builds can advance many. Query the always-on ring while input is held and
     # release after the first real report + enabled IRQ. The ordinary smoke
     # timeout remains the bounded failure guard.
-    request(port, {"cmd": "set_input", "mask": mask})
+    command = {"cmd": "set_input", "mask": mask}
+    if relative is not None:
+        command.update({"dx": relative[0], "dy": relative[1]})
+    request(port, command)
     hold_deadline = time.monotonic() + timeout
     try:
         while time.monotonic() < hold_deadline:
@@ -248,16 +261,24 @@ def main() -> int:
                 args.timeout)
             navigation_events.extend(observed)
 
+        baseline, mouse_events = exercise_direction(
+            proc, args.port, "RIGHT", 0, baseline, args.timeout,
+            relative=(24, 0))
+        navigation_events.extend(mouse_events)
+        check(any(packet_delta(event) == (24, 0)
+                  for event in mouse_events),
+              "relative mouse motion retained its exact IKAT delta")
+
         pointer_packets = [event for event in navigation_events
                            if event["type"] == 2 and event["channel"] == 0]
         check(pointer_packets and
               all((int(event["data"][:2], 16) & 0x30) == 0
                   for event in pointer_packets),
-              "four-way navigation never activated a player-shell button")
+              "keyboard and mouse navigation never activated a player-shell button")
         final_state = request(args.port, {"cmd": "status"})
         check(final_state.get("miss_count") == 0,
-              "four-way navigation completed with RULE 0a clean")
-        print("BIOS navigation smoke: ALL PASS")
+              "keyboard and mouse navigation completed with RULE 0a clean")
+        print("BIOS keyboard/mouse navigation smoke: ALL PASS")
         return 0
     except Exception as exc:
         print(f"BIOS navigation smoke: FAIL: {exc}", file=sys.stderr)

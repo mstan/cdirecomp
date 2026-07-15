@@ -11,7 +11,6 @@
 #include "debug_server.h"
 
 #include <errno.h>
-#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -70,7 +69,6 @@ typedef struct {
 } InputTransition;
 
 static IkatDevice ikat;
-static atomic_uint host_input;
 static InputTransition input_schedule[INPUT_SCHEDULE_CAPACITY];
 static int input_schedule_count;
 static int input_schedule_position;
@@ -114,16 +112,6 @@ int slave_debug_events(CdiIkatEvent *out, int capacity, uint64_t *total) {
     }
     if (total) *total = end;
     return count;
-}
-
-void cdi_input_set(uint32_t mask) {
-    const uint32_t allowed = CDI_INPUT_LEFT | CDI_INPUT_UP | CDI_INPUT_RIGHT |
-                             CDI_INPUT_DOWN | CDI_INPUT_BTN1 | CDI_INPUT_BTN2;
-    atomic_store_explicit(&host_input, mask & allowed, memory_order_release);
-}
-
-uint32_t cdi_input_get(void) {
-    return atomic_load_explicit(&host_input, memory_order_acquire);
 }
 
 static int parse_transition(char **cursor, InputTransition *transition,
@@ -333,7 +321,6 @@ static void initialize_ikat(void) {
     for (channel = 0; channel < CHANNEL_COUNT; channel++)
         ikat.registers[REG_STATUS_A + channel] = 0x11;
     ikat.media_generation = generation;
-    atomic_store_explicit(&host_input, 0, memory_order_relaxed);
     memset(event_ring, 0, sizeof event_ring);
     event_count = 0;
     ikat.initialized = 1;
@@ -369,6 +356,7 @@ static void emit_pointer_packet(void) {
     int speed;
     int x = 0;
     int y = 0;
+    int mouse_x, mouse_y;
 
     if (directions) ikat.pointer_repeat_count++;
     else ikat.pointer_repeat_count = 0;
@@ -380,18 +368,30 @@ static void emit_pointer_packet(void) {
     if (input & CDI_INPUT_UP) y = -speed;
     else if (input & CDI_INPUT_DOWN) y = speed;
 
-    if (directions || buttons_changed) {
+    /* The IKAT report carries signed eight-bit X/Y split across the header and
+     * payload. Consume only what fits after keyboard/controller motion; any
+     * remaining host-relative movement stays queued for the next 25 ms report. */
+    cdi_input_take_relative(&mouse_x, &mouse_y,
+                            -128 - x, 127 - x, -128 - y, 127 - y);
+    x += mouse_x;
+    y += mouse_y;
+
+    if (directions || x || y || buttons_changed) {
         uint8_t packet[4];
+        uint8_t encoded_x = (uint8_t)(int8_t)x;
+        uint8_t encoded_y = (uint8_t)(int8_t)y;
         packet[0] = (uint8_t)(0x40u |
                     ((input & CDI_INPUT_BTN1) ? 0x20u : 0u) |
                     ((input & CDI_INPUT_BTN2) ? 0x10u : 0u) |
-                    ((y >> 4) & 0x0Cu) | ((x >> 6) & 0x03u));
-        packet[1] = (uint8_t)(x & 0x3F);
-        packet[2] = (uint8_t)(y & 0x3F);
+                    ((encoded_y >> 4) & 0x0Cu) |
+                    ((encoded_x >> 6) & 0x03u));
+        packet[1] = (uint8_t)(encoded_x & 0x3Fu);
+        packet[2] = (uint8_t)(encoded_y & 0x3Fu);
         packet[3] = 0;
         publish_and_interrupt(CHANNEL_A, packet, sizeof packet);
     }
     ikat.previous_input = input;
+    cdi_input_acknowledge_mouse_buttons();
 }
 
 void slave_increment_time(double nanoseconds) {

@@ -151,7 +151,8 @@ filter that history or publish a reviewed clean export before making it public.
 `CdiRuntime` and `CdiRecomp` now build without the removed third-party core.
 The optional CeDImu checkout/oracle stays local and ignored for black-box
 validation only. MC-CDI-027 (persistent captured mouse) and MC-CDI-028
-(persistent one-shot host clock seed) remain the next launcher/config work.
+(persistent one-shot host clock seed) are complete through the shared per-user
+`player.cfg` contract; a future graphical launcher can edit the same file/API.
 
 Key modified/new files in the `4f102d7` baseline commit:
 
@@ -175,12 +176,18 @@ Key modified/new files in the `4f102d7` baseline commit:
   ICA/DCA, decode/composition, cursor, and canonical framebuffer publication.
 - `runner/src/cdi_frontend.c`, `runner/src/cdi_media.c`: SDL presentation/
   physical input plus synchronized real CUE/BIN media backing.
+- `runner/src/cdi_input.c`, `runner/src/player_config.c`,
+  `runner/src/cdi_host_time.c`: focus-safe captured relative mouse state,
+  durable per-user preferences, and one-shot host-local RTC sampling.
 - `runner/src/debug_server.c`, `tools/cdi_debug.py`, `TCP.md`: dev-only input
   injection, side-effect-free `emu_ikat_state`, and query-triggered immediate
   pause at the next already-recorded trace entry.
 - `tools/shell_idle_smoke.py`: persistent-shell/pacing/masked-channel-A regression.
 - `tools/disc_insert_smoke.py`: source-specific channel-D media/IRQ regression.
-- `tools/bios_navigation_smoke.py`: ready-media guest-driver/UI navigation regression.
+- `tools/bios_navigation_smoke.py`: ready-media keyboard/relative-mouse
+  guest-driver/UI navigation regression.
+- `tools/rtc_startup_smoke.py`: enabled persistent-config/host-local RTC boot
+  regression.
 - `README.md`, `PLAN.md`, `TODO.md`: current milestone and remaining work.
 
 ## Next critical path
@@ -189,11 +196,7 @@ Key modified/new files in the `4f102d7` baseline commit:
    settings while keeping every input button boundary explicit and RULE 0a clean.
 2. Audit memory/settings UI behavior plus RTC/NVRAM and peripheral behavior
    without activating Play CD-I.
-3. Add persistent launcher/player preferences for focus-safe host mouse capture
-   through the real IKAT pointer path (MC-CDI-027) and a one-shot host-local RTC
-   seed that never re-syncs after guest execution begins (MC-CDI-028). Both are
-   opt-in and stay off in deterministic validation profiles.
-4. Add the fixed guest-clock RAM/register baseline, SCC68070 instruction-
+3. Add the fixed guest-clock RAM/register baseline, SCC68070 instruction-
    coverage audit, and CI. Game
    loading, module recompilation, and gameplay remain deferred.
 
