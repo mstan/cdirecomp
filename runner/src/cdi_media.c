@@ -106,3 +106,12 @@ int cdi_media_read_sector_form1(uint32_t lba, uint8_t dst[2048]) {
     unlock_media();
     return ok;
 }
+
+int cdi_media_read_sector_body(uint32_t lba, uint8_t dst[2340]) {
+    int ok = 0;
+    lock_media();
+    if (atomic_load_explicit(&s_present, memory_order_relaxed) && s_disc.bin)
+        ok = cdi_read_sector_body(&s_disc, lba, dst);
+    unlock_media();
+    return ok;
+}

@@ -13,7 +13,7 @@ black-box validation tools.
 | DS1216 phantom clock/NVRAM | Analog Devices DS1216 data sheet: serial key, register layout, oscillator, BCD calendar, and SRAM pass-through | `runner/tests/cdi_nvram_test.c` |
 | MCD212 timing, control programs, and video | Philips CD-i Full Functional Specification / Green Book register and image-coding descriptions | `runner/tests/mcd212_video_test.c`, frame hashes, BIOS boot |
 | IKAT input controller | Public CD-i register descriptions plus project-owned BIOS bus traces and scheduled-input tests | navigation and disc-insert smoke tests |
-| CIAP CD interface | BIOS register probes and project-owned access/event traces | disc-insert and BIOS navigation smoke tests |
+| MCD221 CIAP and XA audio | MCD221 documentation, CD-i Mode-2/XA format specifications, BIOS register probes, and project-owned access/event traces | `runner/tests/cdic_test.c`, `runner/tests/cdi_audio_test.c`, Hotel Mario attract gate |
 | CD-i address map and device wiring | Mono-I board documentation, hardware manuals, and BIOS access probes | bus diagnostics, BIOS boot, co-simulation state hashes |
 
 Specification locations used during the rewrite:

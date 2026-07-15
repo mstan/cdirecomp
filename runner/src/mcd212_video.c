@@ -385,10 +385,17 @@ static uint16_t decode_dyuv(int plane, uint32_t address, uint16_t pixels,
     for (i = 0; i < pixels; i += 2) {
         uint8_t first = dram_byte(address + i);
         uint8_t second = dram_byte(address + i + 1);
-        uint8_t next_u = (uint8_t)(u + delta[first >> 4]);
-        uint8_t next_v = (uint8_t)(v + delta[second >> 4]);
-        uint8_t middle_u = (uint8_t)(((unsigned)u + next_u) >> 1);
-        uint8_t middle_v = (uint8_t)(((unsigned)v + next_v) >> 1);
+        int delta_u = (int8_t)delta[first >> 4];
+        int delta_v = (int8_t)delta[second >> 4];
+        int half_u = delta_u >= 0 ? delta_u / 2 : -((-delta_u + 1) / 2);
+        int half_v = delta_v >= 0 ? delta_v / 2 : -((-delta_v + 1) / 2);
+        uint8_t next_u = (uint8_t)(u + delta_u);
+        uint8_t next_v = (uint8_t)(v + delta_v);
+        /* Chroma interpolation follows the signed delta across the 8-bit
+         * wrap point. Averaging the wrapped endpoints turns, for example,
+         * 250 -> 10 into 130 rather than the intended midpoint 2. */
+        uint8_t middle_u = (uint8_t)(u + half_u);
+        uint8_t middle_v = (uint8_t)(v + half_v);
         uint8_t first_y = (uint8_t)(y + delta[first & 15u]);
         uint8_t second_y = (uint8_t)(first_y + delta[second & 15u]);
 
@@ -795,6 +802,8 @@ void mcd212_video_debug_state(Mcd212VideoDebugState *out) {
     if (!out) return;
     memset(out, 0, sizeof *out);
     for (i = 0; i < PLANE_COUNT; i++) {
+        size_t x;
+        out->plane_line_hash[i] = 0x14650FB0739D0383ULL;
         out->coding[i] = r->plane[i].coding;
         out->image_type[i] = r->plane[i].file_type;
         out->bpp[i] = r->plane[i].bits_per_pixel;
@@ -806,6 +815,17 @@ void mcd212_video_debug_state(Mcd212VideoDebugState *out) {
         out->dyuv_start[i] = r->plane[i].dyuv_initial;
         out->transparent_color[i] = r->plane[i].transparent_color;
         out->mask_color[i] = r->plane[i].color_mask;
+        out->plane_line_first[i] = video.decoded[i][0];
+        for (x = 0; x < video.width; x++) {
+            uint32_t pixel = video.decoded[i][x];
+            const uint8_t *bytes = (const uint8_t *)&pixel;
+            size_t byte;
+            if (pixel & 0x00FFFFFFu) out->plane_line_nonblack[i]++;
+            for (byte = 0; byte < sizeof pixel; byte++) {
+                out->plane_line_hash[i] ^= bytes[byte];
+                out->plane_line_hash[i] *= 0x00000100000001B3ULL;
+            }
+        }
     }
     out->clut_bank = r->clut_bank;
     out->backdrop = r->backdrop;
@@ -819,4 +839,8 @@ void mcd212_video_debug_state(Mcd212VideoDebugState *out) {
         out->clut_hash ^= clut_bytes[i];
         out->clut_hash *= 0x00000100000001B3ULL;
     }
+}
+
+void mcd212_video_debug_clut(uint32_t out[256]) {
+    if (out) memcpy(out, video.registers.clut, sizeof video.registers.clut);
 }

@@ -1,11 +1,10 @@
 # cdirecomp TODO / roadmap
 
-**Strategy (decided 2026-05-28, BIOS milestone closed 2026-07-14): recompile
-the entire OS first — the game comes later.** BIOS-first, mirroring psxrecomp
-v4. The whole CD-RTOS / OS-9 system ROM is now statically recompiled and its
-player shell is navigable, persistent, and real-time. The Hotel Mario image was
-used only as a real-media BIOS fixture during that chapter. Phase 3 may now
-begin; game launch and gameplay have not yet been implemented.
+**Strategy (decided 2026-05-28; BIOS closed 2026-07-14; first attract accepted
+2026-07-15): recompile the entire OS first, then promote loaded game code.**
+The whole CD-RTOS / OS-9 ROM is statically recompiled. Hotel Mario now launches
+and runs its attract intro through the clean-room fallback; static game-module
+promotion and gameplay remain open.
 CD-i runs CD-RTOS / OS-9 from a player **system ROM** (the "BIOS"). We do NOT
 hand-write HLE stubs for OS-9 — psxrecomp learned the hard way that stubbing the
 BIOS (faking syscall outputs, mirroring kernel state in C) causes silent drift
@@ -117,11 +116,12 @@ These preferences are user/player configuration, not title policy in
 launcher restarts; the current runtime creates it in SDL's user preference
 folder and a future launcher UI can edit the same file/API.
 
-## Phase 3 — the game (Hotel Mario; now unblocked)
+## Phase 3 — the game (Hotel Mario; attract preview accepted)
 
 The BIOS/player-shell entry criteria are closed; see `BIOS-CLOSEOUT.md`.
-Disc insertion/ejection tests from the BIOS phase were not game progress. The
-next critical item is the relocated OS-9 module bridge.
+The real shell now launches Hotel Mario, and the title/background/audio path is
+accepted through LBA 4650+. The next critical item is promoting the observed
+relocated module path out of the interpreter fallback into native functions.
 
 - **MC-CDI-024 — OS-9 module loader bridge.** The recompiled CD-RTOS `F$Load`
   relocates a module into RAM; we register that module's *statically recompiled*
@@ -131,12 +131,12 @@ next critical item is the relocated OS-9 module bridge.
 - **MC-CDI-025 — Recompile the game modules.** `cdi_hotel` (boot/main) first,
   then the streamed `L*_s*_sub.o` level modules. Feeds on the disc parser (done)
   + MC-CDI-024.
-- **MC-CDI-013 — CD interface (MCD221 CIAP on Mono-4).** Real CUE/BIN-backed
-  media mount/eject and the enabled IKAT channel-D shell IRQ are present and
-  regression-tested. The shell's passive `E1 00 02 13` detection read is visible
-  in the IKAT ring, but feeding application content through CIAP sector
-  buffers/DMA and CD-i ADPCM audio (levels A/B/C) remains deferred with Phase 3.
-  The legacy `cdic_*` entry-point names still route the Mono-4 CIAP region.
+- ✅ **MC-CDI-013 — CD interface (MCD221 CIAP on Mono-4), attract subset.**
+  Real CUE/BIN media, alternating sector buffers, buffer ownership, selection,
+  IRQ/DMA handoff, and Level A/B/C XA decode carry Hotel Mario through the
+  accepted attract path. File/channel filtering includes EOF/EOR/trigger
+  records, preventing unrelated zero-filled tails from replacing background
+  palettes. Broader commands and titles remain application-driven follow-up.
 
 ## Cross-cutting
 

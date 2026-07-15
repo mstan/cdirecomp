@@ -21,6 +21,8 @@
 #define CDI_RAW_SECTOR_SIZE   2352u
 #define CDI_MODE2_FORM1_DATA   2048u  /* Form-1 user data bytes */
 #define CDI_MODE2_FORM2_DATA   2324u  /* Form-2 user data bytes */
+#define CDI_MODE2_SECTOR_BODY  2340u  /* header(4) + subheader(8) + payload */
+#define CDI_SECTOR_BODY_OFF      12u  /* bytes following the raw sync field */
 #define CDI_SECTOR_DATA_OFF      24u  /* sync(12) + header(4) + subheader(8) */
 #define CDI_VOLUME_DESC_LBA      16u  /* ISO-9660 / CD-i volume descriptor */
 #define OS9_MODULE_SYNC      0x4AFCu  /* M$ID — also the 68K ILLEGAL opcode */
@@ -52,6 +54,12 @@ void cdi_disc_close(CdiDisc *d);
 
 /* Copy the 2048 Form-1 user bytes of sector `lba` into `buf`. */
 bool cdi_read_sector_form1(CdiDisc *d, uint32_t lba, uint8_t buf[CDI_MODE2_FORM1_DATA]);
+
+/* Copy the 2340 bytes presented by the Mono-III/IV CIAP data buffers: the
+ * Mode-2 header, duplicated subheader, payload, and trailing EDC/ECC bytes,
+ * with only the 12-byte raw-sector sync field removed. */
+bool cdi_read_sector_body(CdiDisc *d, uint32_t lba,
+                          uint8_t buf[CDI_MODE2_SECTOR_BODY]);
 
 /* Read + print the volume descriptor at LBA 16 (standard id "CD-I "/"CD001"). */
 bool cdi_read_volume_descriptor(CdiDisc *d);

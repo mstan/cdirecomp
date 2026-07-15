@@ -51,6 +51,8 @@ typedef struct {
     uint8_t clut_bank, backdrop, plane_b_front, mix;
     uint8_t clut_select_high, two_mattes, external_video;
     uint32_t dyuv_start[2], transparent_color[2], mask_color[2];
+    uint32_t plane_line_first[2], plane_line_nonblack[2];
+    uint64_t plane_line_hash[2];
     uint64_t clut_hash;
 } Mcd212VideoDebugState;
 

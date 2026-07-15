@@ -15,6 +15,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+void cdi_request_main_cpu_boot_reset(void);
+void cdi_request_main_cpu_reset(void);
+
 enum { CHANNEL_A, CHANNEL_B, CHANNEL_C, CHANNEL_D, CHANNEL_COUNT };
 enum {
     REG_INPUT_A,
@@ -83,6 +86,10 @@ static const uint8_t reply_f7[] = { 0xA5, 0xF7, 0x00 };
 static const uint8_t reply_f8[] = { 0xA5, 0xF8, 0x00 };
 static const uint8_t reply_b1[] = { 0xB1, 0x00, 0x02, 0x00 };
 static const uint8_t reply_b2[] = { 0xB2, 0x20, 0x00, 0x10 };
+static const uint8_t reply_c2[] = { 0xC2, 0x00, 0x00, 0x00 };
+static const uint8_t reply_c3[] = { 0xC3, 0x00, 0x00, 0x00 };
+static const uint8_t reply_c4[] = { 0xC4, 0x00, 0x00, 0x00 };
+static const uint8_t reply_c5[] = { 0xC5, 0x00, 0x00, 0x00 };
 
 static void record_event(uint8_t type, int channel,
                          const uint8_t *data, unsigned length) {
@@ -265,6 +272,14 @@ static void handle_channel_c(void) {
 
     record_event(CDI_IKAT_COMMAND, CHANNEL_C, channel->command,
                  channel->command_length);
+    if (channel->command[0] == 0x88) {
+        /* The application warm-reset stub asks IKAT to restart the SCC68070
+         * through the board boot vectors. RAM and external devices remain
+         * powered. */
+        channel->command_length = 0;
+        cdi_request_main_cpu_boot_reset();
+        return;
+    }
     if (channel->command[0] == 0xF6) {
         const uint8_t video_reply[4] = { 0xA5, 0xF6, 0x01, 0xFF };
         channel->command_length = 0;
@@ -283,8 +298,22 @@ static void handle_channel_c(void) {
 }
 
 static int four_byte_command(uint8_t command) {
-    return command == 0xA1 || command == 0xB0 || command == 0xB2 ||
+    return command == 0xA1 || command == 0xA6 || command == 0xB0 ||
+           command == 0xB2 || command == 0xC2 || command == 0xC3 ||
+           command == 0xC4 || command == 0xC5 ||
            command == 0xE0 || command == 0xE1;
+}
+
+static unsigned bcd_value(uint8_t value) {
+    return ((unsigned)value >> 4) * 10u + (value & 0x0Fu);
+}
+
+static uint32_t absolute_msf_lba(const uint8_t command[4]) {
+    unsigned minute = bcd_value(command[1]);
+    unsigned second = bcd_value(command[2]);
+    unsigned frame = bcd_value(command[3]);
+    uint32_t absolute = (uint32_t)((minute * 60u + second) * 75u + frame);
+    return absolute >= 150u ? absolute - 150u : 0u;
 }
 
 static void handle_channel_d(void) {
@@ -307,6 +336,24 @@ static void handle_channel_d(void) {
         break;
     case 0xB2:
         defer_response(CHANNEL_D, reply_b2, sizeof reply_b2);
+        break;
+    case 0xC2:
+        defer_response(CHANNEL_D, reply_c2, sizeof reply_c2);
+        break;
+    case 0xC3:
+        defer_response(CHANNEL_D, reply_c3, sizeof reply_c3);
+        break;
+    case 0xC4:
+        defer_response(CHANNEL_D, reply_c4, sizeof reply_c4);
+        break;
+    case 0xC5:
+        defer_response(CHANNEL_D, reply_c5, sizeof reply_c5);
+        break;
+    case 0xE0:
+        cdic_set_drive_position(absolute_msf_lba(channel->command), 1);
+        break;
+    case 0xE1:
+        cdic_set_drive_position(absolute_msf_lba(channel->command), 0);
         break;
     default:
         break;

@@ -13,3 +13,4 @@ uint32_t cdi_media_sector_count(void);
 int  cdi_media_track_mode(void);
 void cdi_media_path(char *dst, uint32_t capacity);
 int  cdi_media_read_sector_form1(uint32_t lba, uint8_t dst[2048]);
+int  cdi_media_read_sector_body(uint32_t lba, uint8_t dst[2340]);

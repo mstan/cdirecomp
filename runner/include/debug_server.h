@@ -72,6 +72,10 @@ typedef struct {
 } CdiCiapEvent;
 int cdic_debug_events(CdiCiapEvent *out, int capacity, uint64_t from,
                       uint64_t *total, uint64_t *oldest);
+void cdic_debug_state(uint32_t *drive_lba, uint32_t *last_lba,
+                      uint8_t *file, uint8_t *channel, uint8_t *submode,
+                      uint8_t *coding, int *selected, int *running,
+                      int *waiting_ack);
 
 /* ---- Interpreter-fallback classification (always-on) ----
  * The hybrid interpreter (MC-CDI-011) runs whatever the static recompiler did

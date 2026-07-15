@@ -9,7 +9,7 @@ operating system the games run on. Same spirit and two-tier structure as the
 sibling projects: `nesrecomp`, `snesrecomp`, `segagenesisrecomp`, `psxrecomp`,
 `virtualboyrecomp`.
 
-**Future game #1: Hotel Mario (USA). Current development scope: BIOS only.**
+**First game preview: Hotel Mario (USA), verified through the attract intro.**
 
 ## Why CD-i is different from the Genesis (read this first)
 
@@ -34,10 +34,11 @@ emulate only the hardware chips. Conveniently, the CD-RTOS ROM is a flat 68000
 ROM that boots from its reset vector, so the copied Genesis frontend recompiles
 it directly. **The BIOS ROM is user-provided** (copyrighted) — see `bios/`.
 The BIOS/player-shell chapter—including navigation, settings/storage UI, media
-states, persistence, and real-time behavior—is complete. The game image has so
-far been used only as a real Mode-2 media fixture; the next chapter begins the
-OS-9 loaded-module bridge. See **BIOS-CLOSEOUT.md** for the acceptance boundary
-and **TODO.md** for the remaining roadmap.
+states, persistence, and real-time behavior—is complete. Hotel Mario now boots
+through that real shell and runs its attract intro through the clean-room
+hybrid fallback, with CIAP sector delivery, XA audio, and both video planes
+active. Static promotion of loaded game modules and gameplay certification are
+still open. See **BIOS-CLOSEOUT.md** and **TODO.md**.
 
 ## Current status
 
@@ -52,6 +53,14 @@ What is verified today:
   program module **`cdi_hotel`** (Prog, ~110 KB of 68000 code) plus the
   per-level/scene `L0_s01_sub.o … L8_s15_sub.o` modules the game streams off
   the disc.
+- **Hotel Mario attract preview**: the real player shell opens the user-supplied
+  USA CUE/BIN, CD-RTOS loads the title, and the intro advances beyond LBA 4650
+  with zero native dispatch misses. The Fantasy Factory title card is
+  pixel-exact; later scenes have populated foreground/background planes and
+  sustain real-time field pacing.
+- **Clean-room CIAP/XA path**: alternating 2,340-byte Mode-2 buffers, CD-RTOS
+  ownership/IRQ/DMA handoff, file/channel selection, and Level A/B/C XA decode.
+  The full attract gate decodes bumper and intro audio with zero dropped frames.
 - **The recompiled CD-RTOS boots to its player-shell STOP** at `$40A3E2` with
   `SR=$2000`, matching CeDImu, with zero dispatch misses. The clean-room hybrid
   interpreter handles RAM-built/dispatch-missed code without AGPL/GPL code in
@@ -123,11 +132,12 @@ What is verified today:
   and `CdiOracle` are not committed, packaged, or required by `CdiRuntime`.
 
 The BIOS/player-shell milestone is closed; its exact evidence and limits are in
-**BIOS-CLOSEOUT.md**. What is **not** done yet is the game/application chapter:
-CIAP content delivery and audio, the OS-9 relocated-module bridge, Hotel Mario
-module recompilation, and gameplay. Unexercised I2C/DMA/MMU and additional
-exception cases remain platform backlog to implement when those application
-paths demand them. See **TODO.md** and **PLAN.md**.
+**BIOS-CLOSEOUT.md**. The initial game/application bring-up is also complete
+through Hotel Mario's attract intro. What is not done is static native
+promotion of relocated game modules, gameplay/full-playthrough certification,
+or broader title compatibility. Unexercised I2C/MMU and additional exception
+cases remain application-driven platform backlog. See **TODO.md** and
+**PLAN.md**.
 
 Production releases are deliberately runtime-only: `CdiRuntime` plus explicitly
 allowlisted redistributable player dependencies/assets. The recompiler,
@@ -212,6 +222,10 @@ py -3 tools/rtc_startup_smoke.py build/runner-release/CdiRuntime.exe `
 # Fresh-battery persistence plus real Options/Storage/Exit traversal
 py -3 tools/bios_options_smoke.py build/runner-release/CdiRuntime.exe `
   bios/cdi490a.rom build/tmp/disc_smoke/fixture.cue
+
+# Hotel Mario title/background/audio/dispatch/real-time attract gate
+py -3 tools/hotelmario_launch_probe.py build/runner-release/CdiRuntime.exe `
+  bios/cdi490a.rom game.cue --seconds 55 --quick --compact --accept-attract
 ```
 
 Player controls: arrows or WASD move the CD-i pointer; Enter, Space, or Z is

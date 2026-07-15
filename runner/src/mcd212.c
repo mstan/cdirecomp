@@ -50,6 +50,11 @@ typedef struct {
 
 static Mcd212 vdsc;
 
+void mcd212_reset(void) {
+    memset(&vdsc, 0, sizeof vdsc);
+    mcd212_video_reset();
+}
+
 static unsigned plane_dcr(int plane) { return plane ? REG_DCR2 : REG_DCR1; }
 static unsigned plane_vsr(int plane) { return plane ? REG_VSR2 : REG_VSR1; }
 static unsigned plane_ddr(int plane) { return plane ? REG_DDR2 : REG_DDR1; }
@@ -301,6 +306,7 @@ void mcd212_tick(uint32_t cycles) {
     /* Board devices share the same SCC68070 execution quantum. */
     periph_increment_timer(cycles);
     slave_increment_time(elapsed_ns);
+    cdic_increment_time(elapsed_ns);
     nvram_increment_clock(elapsed_ns);
     g_total_cycles += cycles;
 

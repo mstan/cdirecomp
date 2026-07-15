@@ -8,8 +8,8 @@ sits in the family, what's missing, and the order to close the gaps. The
 `MC-CDI-*` tickets; this file sequences them and adds the cross-cutting
 infrastructure the tickets assume.
 
-**2026-07-14 status:** the BIOS/player-shell phase is closed. Its acceptance
-evidence and remaining boundary are in `BIOS-CLOSEOUT.md`; Phase E is now the
+**2026-07-15 status:** the BIOS/player-shell phase is closed and Phase E has an
+accepted Hotel Mario attract preview. Static promotion and gameplay remain the
 active path.
 
 ## 1. The house style (what a mature sibling looks like)
@@ -55,13 +55,12 @@ The non-negotiable maturity markers, in the order siblings acquired them:
 | Independent oracle, same surface   | ✅  | ✅      | ~   | ~   | ✅ CeDImu |
 | Regression smoke harness           | ✅  | ✅      | ✅   | ~   | ✅ shell/UI/media/RTC + co-sim |
 | Device models do real work         | ✅  | ✅      | ✅   | ✅  | ✅ partial |
-| Boots to shell / plays a game      | ✅  | ✅      | ✅   | ✅  | ✅ shell / ❌ game |
+| Boots to shell / plays a game      | ✅  | ✅      | ✅   | ✅  | ✅ shell / attract preview |
 
-cdirecomp is now a **closed BIOS/player-shell implementation and an early game
-recompiler**. The engine is proven on real CD-RTOS code; the runtime has mature
-always-on rings, symmetric oracle instrumentation, deterministic trust gates,
-and player-facing regression smokes. The next bottleneck is connecting code
-relocated by the real OS-9 loader to statically recompiled game modules.
+cdirecomp is now a **closed BIOS/player-shell implementation with an accepted
+Hotel Mario attract preview**. Loaded game modules currently execute through
+the clean-room fallback; the next bottleneck is promoting those relocated
+modules into the static native tier without regressing the accepted path.
 
 ## 3. The 68000 frontend (provenance + reconciliation)
 
@@ -289,15 +288,16 @@ runs). Player mode is now intentionally paced against the SCC68070 guest clock;
 fixed-sequence co-sim remains unpaced. The older 0.361 s measurement predated pixel
 decoding/composition and is not a like-for-like checkpoint.
 
-### Phase E — The game (Hotel Mario) — *active next phase*
+### Phase E — The game (Hotel Mario) — *attract preview accepted*
 
-The BIOS/player-shell navigation goal is complete as of 2026-07-14. Mounting
-the disc for earlier BIOS media-state tests was not game work and is not
-evidence of game launch or gameplay progress.
+The BIOS/player-shell navigation goal is complete. As of 2026-07-15 the real
+shell launches Hotel Mario and its attract intro is accepted through the later
+animated scene, including both video planes, XA audio, and real-time pacing.
 
-Phase 3 in TODO.md: OS-9 module-loader bridge (MC-CDI-024), recompile
-`cdi_hotel` + streamed level modules (MC-CDI-025), CIAP CD/audio (MC-CDI-013),
-gameplay oracle (MAME `cdimono`, MC-CDI-026).
+Phase 3 in TODO.md now continues with OS-9 native module promotion
+(MC-CDI-024), static recompilation of `cdi_hotel` and streamed modules
+(MC-CDI-025), and gameplay/full-playthrough validation. The CIAP/XA subset
+required by the attract path is implemented and regression-gated.
 
 The MCD212 ICA/DCA + pixel/compositing path, SDL physical controller path, and
 real CUE/BIN mount/eject transition on enabled IKAT channel D are complete. The

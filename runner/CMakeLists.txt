@@ -17,6 +17,17 @@ option(CDI_COSIM_BUILD "Build the MC-CDI-016 differential co-simulation instrume
 file(GLOB BIOS_GEN_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/../bios/generated/*.c")
 file(GLOB GAME_GEN_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/../hotelmario/generated/*.c")
 
+# GCC's -O3 expansion of the ~450k-line generated ROM can exhaust the MinGW
+# assembler even on otherwise roomy developer machines. -O2 keeps the runtime
+# optimized while making clean Release builds deterministic and materially
+# smaller at the compiler/assembler boundary.
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    set_source_files_properties(
+        "${CMAKE_CURRENT_SOURCE_DIR}/../bios/generated/cdrtos_full.c"
+        PROPERTIES COMPILE_OPTIONS "-O2"
+    )
+endif()
+
 add_executable(CdiRuntime
     src/main.c
     src/cdi_bus.c
@@ -28,6 +39,7 @@ add_executable(CdiRuntime
     src/cdi_input.c
     src/cdi_host_time.c
     src/cdi_media.c
+    src/cdi_audio.c
     src/cdic.c
     src/slave.c
     src/periph.c
@@ -116,6 +128,20 @@ if(BUILD_TESTING)
     )
     target_include_directories(CdiInputTest PRIVATE include)
     add_test(NAME cdi_input COMMAND CdiInputTest)
+
+    add_executable(CdiAudioTest
+        tests/cdi_audio_test.c
+        src/cdi_audio.c
+    )
+    target_include_directories(CdiAudioTest PRIVATE include)
+    add_test(NAME cdi_audio COMMAND CdiAudioTest)
+
+    add_executable(CdicTest
+        tests/cdic_test.c
+        src/cdic.c
+    )
+    target_include_directories(CdicTest PRIVATE include)
+    add_test(NAME cdic COMMAND CdicTest)
 
     add_executable(PlayerConfigTest
         tests/player_config_test.c

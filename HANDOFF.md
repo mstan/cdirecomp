@@ -1,9 +1,11 @@
 # Session Handoff — cdirecomp
 
-**Date:** 2026-07-14
-**Completed goal:** a navigable, persistent, real-time, LLE-focused BIOS/player
-shell. **Next goal:** the relocated OS-9 module bridge. Hotel Mario has so far
-been only a real-media fixture; game launch and gameplay are not implemented.
+**Date:** 2026-07-15
+**Completed goals:** the navigable persistent BIOS/player shell and a
+regression-gated Hotel Mario attract preview. The real shell launches the game;
+CIAP/XA and both video planes remain clean through LBA 4650+ at real-time pace.
+**Next goal:** promote relocated Hotel Mario modules into the static native tier
+and begin gameplay certification.
 
 ## Non-negotiable architecture
 
@@ -218,11 +220,14 @@ Key modified/new files in the `4f102d7` baseline commit:
 
 ## Next critical path
 
-1. Implement MC-CDI-024: map modules relocated by the real CD-RTOS `F$Load`
-   path to their statically recompiled native functions.
-2. Recompile and connect `cdi_hotel` first (MC-CDI-025), keeping CIAP content
-   delivery changes driven by the first real application boundary reached.
-3. Add the fixed guest-clock RAM/register baseline, SCC68070 instruction-
+1. Preserve `tools/hotelmario_launch_probe.py --accept-attract` as the game
+   bring-up floor: exact title, populated late background, clean XA, zero
+   dispatch misses, and at least 55 fields/second.
+2. Implement MC-CDI-024/025: map modules relocated by the real CD-RTOS load
+   path to statically recompiled `cdi_hotel` functions, then promote streamed
+   modules while measuring interpreter fallback reduction.
+3. Begin gameplay/full-playthrough certification and add the fixed guest-clock
+   RAM/register baseline, SCC68070 instruction-
    coverage audit, and CI as cross-cutting regression work. Fill I2C/DMA/MMU or
    additional exception behavior only when an observed application path needs
    it, with focused evidence.

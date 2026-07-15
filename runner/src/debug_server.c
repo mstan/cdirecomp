@@ -22,11 +22,15 @@
 #include "debug_server.h"
 #include "cosim_state.h"
 #include "cdi_media.h"
+#include "cdi_audio.h"
 #include "mcd212_video.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdatomic.h>
 #include <string.h>
+
+/* Development-only detail kept out of the public renderer interface. */
+void mcd212_video_debug_clut(uint32_t out[256]);
 
 #ifdef _WIN32
   #include <winsock2.h>
@@ -529,6 +533,20 @@ static void resp_video_frame(char *out, int outlen) {
         (unsigned long long)hash);
 }
 
+static void resp_audio_state(char *out, int outlen) {
+    CdiAudioState state;
+    cdi_audio_debug_state(&state);
+    snprintf(out, outlen,
+        "{\"ok\":true,\"rate\":%u,\"channels\":%u,\"sectors\":%llu,"
+        "\"sample_frames\":%llu,\"queued_frames\":%u,"
+        "\"dropped_frames\":%llu,\"pcm_fnv1a\":\"%016llx\"}",
+        CDI_AUDIO_OUTPUT_RATE, CDI_AUDIO_OUTPUT_CHANNELS,
+        (unsigned long long)state.sectors,
+        (unsigned long long)state.sample_frames, state.queued_frames,
+        (unsigned long long)state.dropped_frames,
+        (unsigned long long)state.pcm_fnv1a);
+}
+
 /* Completed-frame history is the video-domain equivalent of the instruction
  * trace ring.  It lets a native/oracle framebuffer mismatch be localized to
  * its first field without repeatedly arming and rerunning either observer. */
@@ -618,7 +636,12 @@ static void resp_video_state(char *out, int outlen) {
         "\"mask_a\":%u,\"mask_b\":%u,"
         "\"hold_enabled_a\":%u,\"hold_enabled_b\":%u,"
         "\"hold_factor_a\":%u,\"hold_factor_b\":%u,"
-        "\"icf_a\":%u,\"icf_b\":%u,\"clut_fnv1a\":\"%016llx\","
+        "\"icf_a\":%u,\"icf_b\":%u,"
+        "\"plane_line_first_a\":%u,\"plane_line_first_b\":%u,"
+        "\"plane_line_nonblack_a\":%u,\"plane_line_nonblack_b\":%u,"
+        "\"plane_line_fnv1a_a\":\"%016llx\","
+        "\"plane_line_fnv1a_b\":\"%016llx\","
+        "\"clut_fnv1a\":\"%016llx\","
         "\"cursor_pattern\":\"",
         csr1r, csr2r, r[0x10], r[0x00], r[0x12], r[0x02],
         r[0x18], r[0x08], r[0x14], r[0x04], r[0x1A], r[0x0A],
@@ -636,10 +659,25 @@ static void resp_video_state(char *out, int outlen) {
         video.mask_color[0], video.mask_color[1],
         video.hold_enabled[0], video.hold_enabled[1],
         video.hold_factor[0], video.hold_factor[1],
-        video.icf[0], video.icf[1], (unsigned long long)video.clut_hash);
+        video.icf[0], video.icf[1],
+        video.plane_line_first[0], video.plane_line_first[1],
+        video.plane_line_nonblack[0], video.plane_line_nonblack[1],
+        (unsigned long long)video.plane_line_hash[0],
+        (unsigned long long)video.plane_line_hash[1],
+        (unsigned long long)video.clut_hash);
     for (int i = 0; i < 16 && n < outlen - 8; i++)
         n += snprintf(out + n, outlen - n, "%04X", cursor.pattern[i]);
     snprintf(out + n, outlen - n, "\"}");
+}
+
+static void resp_video_clut(char *out, int outlen) {
+    uint32_t clut[256];
+    int n;
+    mcd212_video_debug_clut(clut);
+    n = snprintf(out, outlen, "{\"ok\":true,\"colors\":[");
+    for (int i = 0; i < 256 && n < outlen - 24; i++)
+        n += snprintf(out + n, outlen - n, "%s%u", i ? "," : "", clut[i]);
+    snprintf(out + n, outlen - n, "]}");
 }
 
 /* set_input: permanent deterministic controller surface. `mask` uses the
@@ -714,13 +752,38 @@ static void resp_ikat_events(char *out, int outlen) {
 
 static void resp_ciap_events(const char *line, char *out, int outlen) {
     uint64_t from = UINT64_MAX, count = 128;
+    uint64_t filter_offset = UINT64_MAX, frame_min = 0;
     json_int(line, "from", &from);
     json_int(line, "count", &count);
+    json_int(line, "offset", &filter_offset);
+    json_int(line, "frame_min", &frame_min);
     if (count > 256) count = 256;
 
     CdiCiapEvent events[256];
     uint64_t total = 0, oldest = 0;
-    int got = cdic_debug_events(events, (int)count, from, &total, &oldest);
+    int got;
+    if (filter_offset == UINT64_MAX && frame_min == 0) {
+        got = cdic_debug_events(events, (int)count, from, &total, &oldest);
+    } else {
+        CdiCiapEvent page[256];
+        uint64_t cursor;
+        int page_count;
+        got = 0;
+        cdic_debug_events(page, 0, UINT64_MAX, &total, &oldest);
+        cursor = from == UINT64_MAX ? oldest : from;
+        if (cursor < oldest) cursor = oldest;
+        while (cursor < total && got < (int)count) {
+            page_count = cdic_debug_events(page, 256, cursor, NULL, NULL);
+            if (!page_count) break;
+            for (int i = 0; i < page_count && got < (int)count; i++) {
+                if ((filter_offset == UINT64_MAX ||
+                     page[i].offset == filter_offset) &&
+                    page[i].frame >= frame_min)
+                    events[got++] = page[i];
+            }
+            cursor = page[page_count - 1].seq + 1;
+        }
+    }
     int n = snprintf(out, outlen,
         "{\"ok\":true,\"total\":%llu,\"oldest\":%llu,\"events\":[",
         (unsigned long long)total, (unsigned long long)oldest);
@@ -736,6 +799,21 @@ static void resp_ciap_events(const char *line, char *out, int outlen) {
             e->offset, e->size, e->write, e->value);
     }
     snprintf(out + n, outlen - n, "]}");
+}
+
+static void resp_ciap_state(char *out, int outlen) {
+    uint32_t drive_lba, last_lba;
+    uint8_t file, channel, submode, coding;
+    int selected, running, waiting_ack;
+    cdic_debug_state(&drive_lba, &last_lba, &file, &channel, &submode,
+                     &coding, &selected, &running, &waiting_ack);
+    snprintf(out, outlen,
+        "{\"ok\":true,\"drive_lba\":%u,\"last_lba\":%u,"
+        "\"file\":%u,\"channel\":%u,\"submode\":%u,"
+        "\"coding\":%u,\"selected\":%d,\"running\":%d,"
+        "\"waiting_ack\":%d}",
+        drive_lba, last_lba, file, channel, submode, coding, selected,
+        running, waiting_ack);
 }
 
 static void resp_disc_state(char *out, int outlen) {
@@ -990,10 +1068,13 @@ static int handle_line(const char *line, char *out, int outlen) {
     else if (!strcmp(cmd, "emu_ikat_state")) resp_ikat_state(out, outlen);
     else if (!strcmp(cmd, "ikat_events"))    resp_ikat_events(out, outlen);
     else if (!strcmp(cmd, "ciap_events"))    resp_ciap_events(line, out, outlen);
+    else if (!strcmp(cmd, "ciap_state"))     resp_ciap_state(out, outlen);
     else if (!strcmp(cmd, "video_frame"))    resp_video_frame(out, outlen);
+    else if (!strcmp(cmd, "audio_state"))    resp_audio_state(out, outlen);
     else if (!strcmp(cmd, "frame_hashes"))   resp_frame_hashes(line, out, outlen);
     else if (!strcmp(cmd, "video_scanline")) resp_video_scanline(line, out, outlen);
     else if (!strcmp(cmd, "video_state"))    resp_video_state(out, outlen);
+    else if (!strcmp(cmd, "video_clut"))     resp_video_clut(out, outlen);
     else if (!strcmp(cmd, "disc_state"))     resp_disc_state(out, outlen);
     else if (!strcmp(cmd, "mount_disc"))     resp_mount_disc(line, out, outlen);
     else if (!strcmp(cmd, "eject_disc"))     resp_eject_disc(out, outlen);
@@ -1058,7 +1139,7 @@ static void server_loop(void) {
     }
     listen(ls, 1);
     fprintf(stderr, "[dbg] TCP debug server live on 127.0.0.1:%d "
-                    "(ping/status/pause/set_input/emu_ikat_state/ikat_events/video_frame/video_scanline/video_state/"
+                    "(ping/status/pause/set_input/emu_ikat_state/ikat_events/video_frame/video_scanline/video_state/video_clut/"
                     "ciap_events/disc_state/mount_disc/eject_disc/get_registers/read_mem/"
                     "trace/cycle_trace/stores/interp_report/"
                     "dispatch_miss_info"

@@ -93,6 +93,15 @@ bool cdi_read_sector_form1(CdiDisc *d, uint32_t lba, uint8_t buf[CDI_MODE2_FORM1
     return fread(buf, 1, CDI_MODE2_FORM1_DATA, d->bin) == CDI_MODE2_FORM1_DATA;
 }
 
+bool cdi_read_sector_body(CdiDisc *d, uint32_t lba,
+                          uint8_t buf[CDI_MODE2_SECTOR_BODY]) {
+    if (!d || !d->bin || lba >= d->sector_count) return false;
+    long off = (long)lba * CDI_RAW_SECTOR_SIZE + CDI_SECTOR_BODY_OFF;
+    if (fseek(d->bin, off, SEEK_SET) != 0) return false;
+    return fread(buf, 1, CDI_MODE2_SECTOR_BODY, d->bin) ==
+           CDI_MODE2_SECTOR_BODY;
+}
+
 bool cdi_read_volume_descriptor(CdiDisc *d) {
     uint8_t s[CDI_MODE2_FORM1_DATA];
     if (!cdi_read_sector_form1(d, CDI_VOLUME_DESC_LBA, s)) {

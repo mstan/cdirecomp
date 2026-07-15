@@ -170,7 +170,43 @@ uint32_t g_recomp_initial_ssp = 0;
  * the universal instruction-entry safepoint and from the persistent STOP loop. */
 uint32_t g_irq_pending = 0;
 static uint32_t s_irq_onchip_pending = 0;
-void cdi_irq_raise(uint8_t level) { g_irq_pending |= (1u << level); debug_record_irq_raise(level); }
+static uint8_t s_irq_external_vector[8];
+
+void runtime_reset_cpu_interrupt_state(void) {
+    g_irq_pending = 0;
+    s_irq_onchip_pending = 0;
+    memset(s_irq_external_vector, 0, sizeof s_irq_external_vector);
+    g_halted = 0;
+    g_early_return = 0;
+    g_rte_resume = 0;
+    g_redirect_pending = 0;
+    g_redirect_addr = 0;
+    s_rte_pending = 0;
+    s_in_hybrid = 0;
+    s_pending_fallback_reason = FB_NONE;
+    g_cycle_accumulator = 0;
+    g_audio_cycle_counter = 0;
+}
+
+void cdi_irq_raise(uint8_t level) {
+    if (!level || level > 7) return;
+    s_irq_external_vector[level] = 0;
+    g_irq_pending |= (1u << level);
+    debug_record_irq_raise(level);
+}
+
+void cdi_irq_raise_vector(uint8_t level, uint8_t vector) {
+    if (!level || level > 7) return;
+    s_irq_external_vector[level] = vector;
+    g_irq_pending |= (1u << level);
+    debug_record_irq_raise(level);
+}
+
+void cdi_irq_clear(uint8_t level) {
+    if (!level || level > 7) return;
+    g_irq_pending &= ~(1u << level);
+    s_irq_external_vector[level] = 0;
+}
 
 void cdi_irq_raise_onchip(uint8_t input) {
     uint8_t lir = periph_lir();
@@ -280,6 +316,7 @@ void runtime_request_vblank(void)       { /* TODO MC-CDI-007 */ }
 #define CDI_PACE_CHUNK_CYCLES 151049u  /* almost exactly 10 ms */
 
 static int      s_realtime_pacing;
+static double   s_realtime_speed = 1.0;
 static uint64_t s_pace_pending_cycles;
 static double   s_pace_deadline;
 
@@ -341,7 +378,11 @@ static void host_wait_until(double deadline) {
 #endif
 
 void runtime_set_realtime_pacing(int enabled) {
+    const char *speed = getenv("CDI_PACE_SPEED");
     s_realtime_pacing = enabled != 0;
+    s_realtime_speed = speed ? strtod(speed, NULL) : 1.0;
+    if (s_realtime_speed < 1.0 || s_realtime_speed > 32.0)
+        s_realtime_speed = 1.0;
     s_pace_pending_cycles = 0;
     s_pace_deadline = 0.0;
 }
@@ -354,7 +395,8 @@ void runtime_pace_cycles(uint32_t cycles) {
     double now = host_seconds();
     if (s_pace_deadline == 0.0 || now > s_pace_deadline + 0.200)
         s_pace_deadline = now;
-    s_pace_deadline += (double)s_pace_pending_cycles / CDI_CPU_HZ;
+    s_pace_deadline += (double)s_pace_pending_cycles /
+                       (CDI_CPU_HZ * s_realtime_speed);
     s_pace_pending_cycles = 0;
     host_wait_until(s_pace_deadline);
 }
@@ -497,7 +539,9 @@ void recomp_take_irq(void) {
      * build_exception_frame stacks SR, the resume PC (g_cpu.PC — the not-yet-
      * executed instruction at this boundary), and the vector-offset word, enters
      * supervisor, and sets g_cpu.PC = read32(vec<<2) = the OS-9 handler. */
-    uint8_t vec = (uint8_t)((onchip ? 56 : 24) + lvl);
+    uint8_t vec = onchip ? (uint8_t)(56 + lvl) : s_irq_external_vector[lvl];
+    if (!onchip && !vec) vec = (uint8_t)(24 + lvl);
+    if (!onchip) s_irq_external_vector[lvl] = 0;
     build_exception_frame(vec);
     /* Defer the 65-cycle autovector cost into the first ISR instruction. */
     runtime_defer_exception_cycles(65);

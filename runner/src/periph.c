@@ -33,6 +33,12 @@ enum {
     REG_T2H   = 0x80002028u,
     REG_T2L   = 0x80002029u,
     REG_PICR1 = 0x80002045u,
+    REG_DMA1_CSR = 0x80004000u,
+    REG_DMA1_CER = 0x80004001u,
+    REG_DMA1_CCR = 0x80004007u,
+    REG_DMA1_MTC = 0x8000400Au,
+    REG_DMA1_MAR = 0x8000400Cu,
+    REG_DMA2_CSR = 0x80004040u,
     REG_MSR   = 0x80008000u
 };
 
@@ -65,6 +71,20 @@ static uint16_t load_counter(uint32_t high_address) {
 static void store_counter(uint32_t high_address, uint16_t value) {
     *reg_ptr(high_address) = (uint8_t)(value >> 8);
     *reg_ptr(high_address + 1) = (uint8_t)value;
+}
+
+static uint32_t load_long(uint32_t address) {
+    return ((uint32_t)*reg_ptr(address) << 24) |
+           ((uint32_t)*reg_ptr(address + 1u) << 16) |
+           ((uint32_t)*reg_ptr(address + 2u) << 8) |
+           (uint32_t)*reg_ptr(address + 3u);
+}
+
+static void store_long(uint32_t address, uint32_t value) {
+    *reg_ptr(address) = (uint8_t)(value >> 24);
+    *reg_ptr(address + 1u) = (uint8_t)(value >> 16);
+    *reg_ptr(address + 2u) = (uint8_t)(value >> 8);
+    *reg_ptr(address + 3u) = (uint8_t)value;
 }
 
 void periph_reset(void) {
@@ -129,6 +149,35 @@ void periph_increment_timer(uint32_t cycles) {
     while (ticks--) clock_timer_once();
 }
 
+void periph_ciap_dma_request(uint16_t control) {
+    uint16_t words;
+    uint32_t memory_address;
+
+    /* CIAP is wired to SCC68070 DMA channel 1. CD-RTOS programs a word-count,
+     * incrementing memory transfer (CCR $80), then asserts CIAP START. */
+    if (!(control & 0x4000u) || !(*reg_ptr(REG_DMA1_CCR) & 0x80u)) return;
+    words = load_counter(REG_DMA1_MTC);
+    memory_address = load_long(REG_DMA1_MAR);
+    *reg_ptr(REG_DMA1_CSR) |= 0x08u; /* ACT during the request burst */
+    *reg_ptr(REG_DMA1_CER) = 0;
+
+    while (words) {
+        if (control & 0x2000u)
+            m68k_write16(memory_address, cdic_dma_pull_word());
+        else
+            cdic_dma_push_word(m68k_read16(memory_address));
+        memory_address += 2u;
+        words--;
+    }
+
+    store_counter(REG_DMA1_MTC, 0);
+    store_long(REG_DMA1_MAR, memory_address);
+    *reg_ptr(REG_DMA1_CSR) &= (uint8_t)~0x08u;
+    *reg_ptr(REG_DMA1_CSR) |= 0x80u; /* COC: channel operation complete */
+    *reg_ptr(REG_DMA1_CCR) &= (uint8_t)~0x80u;
+    cdic_dma_complete();
+}
+
 static uint8_t read_register(uint32_t address) {
     if (!mapped(address)) return 0;
     if (address == REG_URHR) {
@@ -174,6 +223,13 @@ static void write_register(uint32_t address, uint8_t value) {
         break;
     case REG_TSR:
         *reg_ptr(address) &= (uint8_t)~value; /* write one to clear */
+        break;
+    case REG_DMA1_CSR:
+    case REG_DMA2_CSR:
+        /* DMA channel status is write-one-to-clear. CD-RTOS writes $FF
+         * before every setup; passive storage incorrectly left ACT (bit 3)
+         * asserted forever and wedged the next request in dmad_set(). */
+        *reg_ptr(address) &= (uint8_t)~value;
         break;
     case REG_MSR:
         break; /* read-only */

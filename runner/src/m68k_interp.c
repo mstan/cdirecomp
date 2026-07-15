@@ -37,6 +37,13 @@ static jmp_buf s_bus_env;
 static int     s_bus_armed = 0;
 static uint32_t s_fault_pc = 0;   /* post-fetch PC to stack on the frame */
 
+/* A board-level main-CPU reset can abandon exec_one through the runtime's
+ * depth-zero landing pad. Its private bus-error jmp_buf belongs to that old C
+ * frame and must never survive into the next boot. */
+void m68k_interp_abandon_run(void) {
+    s_bus_armed = 0;
+}
+
 int m68k_interp_bus_error(uint32_t addr) {
     if (!s_bus_armed) return 0;   /* not in an armed interpreter step: fail loud upstream */
     g_fault_addr = addr;          /* TPF = the unmapped data-cycle address */

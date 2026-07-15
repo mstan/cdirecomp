@@ -241,6 +241,11 @@ void     mcd212_tick(uint32_t cycles);
 /* CDIC — CD Interface Controller: sector delivery + ADPCM audio decode. */
 void     cdic_write(uint32_t addr, uint32_t val, int size);
 uint32_t cdic_read (uint32_t addr, int size);
+void     cdic_set_drive_position(uint32_t lba, int audio);
+void     cdic_increment_time(double ns);
+uint16_t cdic_dma_pull_word(void);
+void     cdic_dma_push_word(uint16_t value);
+void     cdic_dma_complete(void);
 
 /* IKAT — input/serial-gate MCU (Mono-2/3/4): pointer/controller input,
  * front-panel, and the boot-time command/response gate (IKAT version, boot
@@ -301,6 +306,8 @@ int      slave_debug_events(CdiIkatEvent *out, int capacity, uint64_t *total);
  * the universal instruction-entry safepoint, or directly from the STOP device
  * loop, and respects the SR interrupt mask. */
 void     cdi_irq_raise(uint8_t level);
+void     cdi_irq_raise_vector(uint8_t level, uint8_t vector);
+void     cdi_irq_clear(uint8_t level);
 void     cdi_irq_raise_onchip(uint8_t input);
 void     cdi_irq_raise_onchip_level(uint8_t level);
 extern uint32_t g_irq_pending;           /* bitmask of pending IRQ levels */
@@ -312,6 +319,7 @@ uint32_t periph_read (uint32_t addr, int size);
 void     periph_reset(void);             /* power-on state (UART TxRDY, etc.) */
 uint8_t  periph_lir(void);                /* side-effect-free LIR snapshot */
 void     periph_increment_timer(uint32_t cycles);
+void     periph_ciap_dma_request(uint16_t control);
 
 /* DS1216 SmartWatch timekeeper + 32 KB NVRAM at $320000. Per the DS1216 data
  * sheet, SRAM access continues until the 64-bit D0 comparison pattern unlocks

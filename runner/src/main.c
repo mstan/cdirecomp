@@ -22,8 +22,34 @@
 #ifdef _WIN32
   #include <windows.h>
 #else
-  #include <time.h>
+#include <time.h>
 #endif
+
+#ifndef CDI_PRODUCT_NAME
+#define CDI_PRODUCT_NAME "CdiRuntime"
+#endif
+
+/* IKAT command $88 asserts the SCC68070 RESET input. It can arrive from deep
+ * inside a recompiled or interpreted CD-RTOS call tree, so it reuses the
+ * proven IRQ depth-zero unwind and distinguishes the landing with this flag. */
+static int g_main_reset_pending;
+static int g_main_reset_boot_vectors;
+
+void cdi_request_main_cpu_reset(void) {
+    g_main_reset_pending = 1;
+    g_main_reset_boot_vectors = 0;
+    if (g_recomp_irq_armed) longjmp(g_recomp_irq_env, 1);
+}
+
+void cdi_request_main_cpu_boot_reset(void) {
+    g_main_reset_pending = 1;
+    g_main_reset_boot_vectors = 1;
+    if (g_recomp_irq_armed) longjmp(g_recomp_irq_env, 1);
+}
+
+void runtime_reset_cpu_interrupt_state(void);
+void m68k_interp_abandon_run(void);
+void mcd212_reset(void);
 
 /* bus ROM loader (cdi_bus.c) */
 void cdi_bus_load_rom(const uint8_t *src, uint32_t n);
@@ -75,7 +101,8 @@ int main(int argc, char *argv[]) {
         else if (argv[i][0] != '-') rom_path = argv[i];
     }
 
-    printf("CdiRuntime — Philips CD-i (SCC68070) static-recomp runtime\n");
+    printf("%s — Philips CD-i (SCC68070) static-recomp runtime\n",
+           CDI_PRODUCT_NAME);
     if (!rom_path) {
         fprintf(stderr, "usage: CdiRuntime <cdrtos.rom> [--disc image.cue] [--port N] [--hold] [--headless] [--exit-on-stop] [--stop-seq N] [--stop-frame N]\n"
                         "                  [--cosim-inject <seq>:<ram|reg>:<idx>:<xorhex>]\n"
@@ -93,6 +120,14 @@ int main(int argc, char *argv[]) {
                         "          immediately after each named completed frame.\n");
         return 1;
     }
+#ifdef CDI_REQUIRE_DISC
+    if (!disc_path) {
+        fprintf(stderr,
+                "[cdi] %s requires both a CD-i BIOS and --disc <Hotel Mario.cue>\n",
+                CDI_PRODUCT_NAME);
+        return 1;
+    }
+#endif
 
     cdi_player_config_defaults(&player_config);
     player_preferences_active = !headless && !g_stop_seq && !g_stop_frame &&
@@ -196,7 +231,7 @@ int main(int argc, char *argv[]) {
                host_time.hundredth);
     }
     cdi_input_reset();
-    mcd212_video_reset();           /* display parameters + canonical buffers */
+    mcd212_reset();                 /* VDSC registers + canonical buffers */
     g_cpu.A[7] = reset_ssp;         /* supervisor stack pointer (S=1 → A7 aliases SSP) */
     g_cpu.SSP  = reset_ssp;         /* SSP shadow (used when a user->super swap restores A7) */
     g_cpu.PC   = reset_pc;
@@ -297,8 +332,43 @@ int main(int argc, char *argv[]) {
         if (setjmp(g_recomp_irq_env) != 0) {
             g_recomp_bus_armed = 1;   /* both pads live for the next dispatch */
             g_recomp_irq_armed = 1;
-            g_redirect_addr    = g_cpu.PC & 0xFFFFFFu;   /* = the interrupt handler */
-            g_redirect_pending = 1;
+            if (g_main_reset_pending) {
+                uint32_t mapped_ssp = m68k_read32(0);
+                uint32_t mapped_pc = m68k_read32(4);
+                uint32_t restart_ssp = g_main_reset_boot_vectors
+                    ? reset_ssp : mapped_ssp;
+                uint32_t restart_pc = g_main_reset_boot_vectors
+                    ? reset_pc : mapped_pc;
+                /* IKAT resets only the main processor and its on-chip
+                 * peripherals. Mounted media, CIAP/IKAT state, video, RAM,
+                 * and battery-backed storage remain powered. The board maps
+                 * RAM at address zero after boot, so the application-supplied
+                 * warm vectors are the reset vectors for this transition. */
+                g_main_reset_pending = 0;
+                g_main_reset_boot_vectors = 0;
+                g_cpu.A[7] = restart_ssp;
+                g_cpu.SSP = restart_ssp;
+                g_cpu.USP = 0;
+                g_cpu.PC = restart_pc;
+                g_cpu.SR = 0x2700;
+                g_recomp_initial_ssp = restart_ssp;
+                m68k_interp_abandon_run();
+                runtime_reset_cpu_interrupt_state();
+                periph_reset();
+                runtime_defer_exception_cycles(43);
+                g_redirect_addr = restart_pc;
+                g_redirect_pending = 1;
+                last_insn = (uint64_t)-1;
+                stuck = 0;
+                fprintf(stderr,
+                        "[cdi] main CPU RESET landed; mapped vectors "
+                        "SSP=$%08X PC=$%08X, restarting at $%08X\n",
+                        mapped_ssp, mapped_pc, restart_pc);
+                fflush(stderr);
+            } else {
+                g_redirect_addr = g_cpu.PC & 0xFFFFFFu;
+                g_redirect_pending = 1;
+            }
         }
 
         for (;;) {

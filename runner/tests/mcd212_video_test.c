@@ -77,6 +77,7 @@ static void test_rl7(void) {
     finish(&a, &b);
     CHECK(a == 2 && b == 0);
     CHECK_PIXEL(0, 0xFF224466u); CHECK_PIXEL(719, 0xFF224466u);
+
 }
 
 static void test_rl3(void) {
@@ -91,6 +92,7 @@ static void test_rl3(void) {
     CHECK(a == 2 && b == 0);
     CHECK_PIXEL(0, 0xFFCC0000u); CHECK_PIXEL(1, 0xFF0000DDu);
     CHECK_PIXEL(718, 0xFFCC0000u); CHECK_PIXEL(719, 0xFF0000DDu);
+
 }
 
 static void test_rgb555(void) {
@@ -114,6 +116,14 @@ static void test_dyuv(void) {
     finish(&a, &b);
     CHECK(a == 360 && b == 0);
     CHECK_PIXEL(0, 0xFF808080u); CHECK_PIXEL(719, 0xFF808080u);
+
+    begin();
+    mcd212_video_control(0, 0xCA80FA80u);
+    mcd212_video_control(0, 0xC0000005u);
+    g_ram0[0] = 0x40; /* U: 250 + 16 -> 10; midpoint wraps to 2. */
+    g_ram0[1] = 0x00;
+    finish(&a, &b);
+    CHECK_PIXEL(0, 0xFF80AA00u);
 }
 
 static void setup_two_planes(void) {

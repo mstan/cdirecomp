@@ -4,6 +4,7 @@
 #include "cdi_frontend.h"
 #include "cdi_runtime.h"
 #include "cdi_media.h"
+#include "cdi_audio.h"
 #include "mcd212_video.h"
 
 #include <stdint.h>
@@ -16,6 +17,7 @@ typedef struct {
     SDL_Texture *texture;
     SDL_GameController *controller;
     SDL_JoystickID controller_id;
+    SDL_AudioDeviceID audio_device;
     uint32_t *pixels;
     uint16_t texture_width, texture_height;
     uint64_t shown_generation;
@@ -135,12 +137,44 @@ static int present_frame(void) {
     return 1;
 }
 
+static void pump_audio(void) {
+    int16_t pcm[2048 * CDI_AUDIO_OUTPUT_CHANNELS];
+    uint32_t queued_frames;
+    uint32_t frames;
+    if (!s.audio_device) return;
+    queued_frames = SDL_GetQueuedAudioSize(s.audio_device) /
+                    (sizeof(int16_t) * CDI_AUDIO_OUTPUT_CHANNELS);
+    if (queued_frames >= CDI_AUDIO_OUTPUT_RATE / 4u) return;
+    frames = cdi_audio_read_frames(pcm, 2048);
+    if (frames && SDL_QueueAudio(s.audio_device, pcm,
+                                frames * sizeof(int16_t) *
+                                CDI_AUDIO_OUTPUT_CHANNELS) != 0)
+        fprintf(stderr, "[frontend] audio queue failed: %s\n", SDL_GetError());
+}
+
 int cdi_frontend_init(int capture_mouse) {
     SDL_SetMainReady();
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "linear");
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER | SDL_INIT_EVENTS) != 0) {
         fprintf(stderr, "[frontend] SDL initialization failed: %s\n", SDL_GetError());
         return 0;
+    }
+    if (SDL_InitSubSystem(SDL_INIT_AUDIO) == 0) {
+        SDL_AudioSpec desired;
+        SDL_zero(desired);
+        desired.freq = CDI_AUDIO_OUTPUT_RATE;
+        desired.format = AUDIO_S16SYS;
+        desired.channels = CDI_AUDIO_OUTPUT_CHANNELS;
+        desired.samples = 1024;
+        s.audio_device = SDL_OpenAudioDevice(NULL, 0, &desired, NULL, 0);
+        if (s.audio_device)
+            SDL_PauseAudioDevice(s.audio_device, 0);
+        else
+            fprintf(stderr, "[frontend] audio output unavailable: %s\n",
+                    SDL_GetError());
+    } else {
+        fprintf(stderr, "[frontend] audio subsystem unavailable: %s\n",
+                SDL_GetError());
     }
     s.window = SDL_CreateWindow("cdirecomp — Philips CD-i",
                                 SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
@@ -222,6 +256,7 @@ int cdi_frontend_pump(void) {
         }
         cdi_input_set(input_mask());
     }
+    pump_audio();
     return present_frame();
 }
 
@@ -231,6 +266,7 @@ void cdi_frontend_shutdown(void) {
     apply_mouse_capture();
     cdi_input_mouse_configure(0);
     close_controller();
+    if (s.audio_device) SDL_CloseAudioDevice(s.audio_device);
     free(s.pixels);
     if (s.texture) SDL_DestroyTexture(s.texture);
     if (s.renderer) SDL_DestroyRenderer(s.renderer);
