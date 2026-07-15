@@ -17,8 +17,8 @@
  *     exactly (same flag formulas, same EA math, same size masking).
  *   - It operates on the SAME runtime ABI the generated C uses: the global
  *     g_cpu (M68KState) and the m68k_read/write{8,16,32} bus.
- *   - It is validated against clown68000 (the AGPL oracle, dev-only) via a
- *     same-state differential before it is trusted — 0 divergences required.
+ *   - Its instruction-state behavior is checked by independent differential
+ *     tests before it is trusted — zero divergences are required.
  *
  * Safety contract (precision over recall): the interpreter is the floor, so
  * it cannot "decline" like a JIT. Any instruction it cannot execute must HALT
@@ -65,14 +65,15 @@ M68kiStatus m68k_interp_run_until_known(uint32_t entry_pc, uint32_t stop_pc);
 /*
  * Execute exactly one instruction at g_cpu.PC and advance g_cpu.PC. Used by
  * the lockstep differential harness (so it can compare register/RAM state
- * after every instruction against clown68000). Returns M68KI_OK or a HALT_*.
+ * after every instruction against a development oracle). Returns M68KI_OK or
+ * a HALT_*.
  */
 M68kiStatus m68k_interp_step(void);
 
 /*
- * Clean-room SCC68070 per-instruction cycle cost (MC-CDI-005). Mirrors the
- * CeDImu oracle's `calcTime` exactly so interpreted code advances device timing
- * (MCD212 DA, timers) in phase with the oracle. Evaluate in the instruction's
+ * SCC68070 per-instruction cycle cost (MC-CDI-005), transcribed from the
+ * processor manual's timing tables so interpreted code advances device timing
+ * (MCD212 DA, timers) consistently. Evaluate in the instruction's
  * ENTRY state: a few costs read entry register/flag/stack state. Also usable
  * standalone for frame pacing.
  */

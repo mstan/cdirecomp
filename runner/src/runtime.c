@@ -119,9 +119,8 @@ void recomp_top_resume(uint32_t addr) {
 M68KState g_cpu;
 uint64_t  g_frame_count       = 0;
 uint64_t  g_total_cycles      = 0;   /* sum of every mcd212_tick input = the SCC68070
-                                      * clock the MCD212 runs on; diff vs CeDImu
-                                      * totalCycleCount per seq to localize a cycle
-                                      * under/over-count (MC-CDI-009 sub-frame drift). */
+                                      * clock the MCD212 runs on; sampled per sequence
+                                      * to localize under/over-counts (MC-CDI-009). */
 uint64_t  g_native_insn_count = 0;
 uint32_t  g_cycle_accumulator = 0;
 uint32_t  g_vblank_threshold  = 0;
@@ -236,12 +235,11 @@ void recomp_push_return(uint32_t ret_addr) {
 /* ---- Runtime init ---- */
 void runtime_init(void) {
     memset(&g_cpu, 0, sizeof g_cpu);
-    /* CeDImu processes the queued reset exception (43 SCC68070 clocks) and
-     * executes the reset-vector instruction in the same first Run(false).
-     * Native seeds the post-reset registers directly, so carry that exception
+    /* SCC68070 reset entry costs 43 processor clocks. Native seeds the
+     * post-reset registers directly, so carry that exception
      * time in the first generated instruction's accumulator: seq 0 remains the
-     * common pre-instruction timestamp, while seq 1 observes reset + opcode
-     * time exactly like the behavioral oracle.  This phase matters to every
+     * pre-instruction timestamp, while seq 1 observes reset + opcode time.
+     * This phase matters to every
      * cycle-driven peripheral, notably the SCC68070 timer. */
     g_cycle_accumulator = 43;
     /* TODO MC-CDI-001: load CD-RTOS system ROM, run the OS-9 module loader to
@@ -259,8 +257,8 @@ void glue_check_vblank(void) {
     g_cycle_accumulator = 0;
 }
 void runtime_defer_exception_cycles(uint32_t cycles) {
-    /* CeDImu executes ProcessException and the handler's first instruction in
-     * one Run(false) quantum. A second exception raised by that first
+    /* The runtime schedules exception entry and the handler's first instruction
+     * in one device-time quantum. A second exception raised by that first
      * instruction belongs to the following quantum, so finish any older batch
      * before replacing it. */
     if (g_cycle_accumulator) glue_check_vblank();
@@ -271,7 +269,7 @@ void glue_yield_for_vblank(void)        { /* TODO MC-CDI-007: fiber yield for fr
 void glue_yield_for_interrupt_poll(void){ /* TODO MC-CDI-007 */ }
 void runtime_request_vblank(void)       { /* TODO MC-CDI-007 */ }
 
-/* Player pacing (MC-CDI-007). CeDImu advances a stopped SCC68070 in 25-cycle
+/* Player pacing (MC-CDI-007). A stopped SCC68070 is serviced in 25-cycle
  * quanta, and timer IRQs periodically wake the shell into active execution.
  * Pace the complete cycle stream rather than only STOP quanta; otherwise those
  * active bursts make the display/RTC run faster than wall time. The deadline
@@ -387,38 +385,36 @@ void genesis_stop_until_interrupt(uint16_t sr_imm) {
     g_halted = 1;   /* the top-level trampoline stops here; MC-CDI-007 will
                      * wake on an IRQ above the I-mask and clear this. */
 }
-/* SCC68070 exception processing (faithful port of CeDImu ProcessException):
- * enter supervisor, push the exception stack frame, then point PC at the
- * (RAM-resident) handler the kernel installed in the vector table at boot.
- * Returns the handler address; does NOT dispatch it. */
+/* SCC68070 exception entry. Frame offsets follow the 68070 hardware manual,
+ * section 2.8.2. Build the final frame in ascending address order after one
+ * stack reservation instead of reproducing another emulator's push sequence. */
 static uint32_t build_exception_frame(uint8_t vec) {
-    /* TPF = CeDImu's lastAddress, captured BEFORE our own frame pushes (which go
-     * through m68k_write and would clobber g_last_access_addr). For a bus error
-     * this is the unmapped address the faulting access set; for the boot's odd-
-     * JMP address error it is the last data EA before the jump (NOT the odd
-     * target — CeDImu's GetWord throws AddressError without updating lastAddress). */
-    uint32_t tpf = g_last_access_addr;
+    const int access_fault = vec == 2 || vec == 3;
+    const uint32_t transfer_program_fault = g_last_access_addr;
     uint16_t sr = g_cpu.SR;
-    m68k_set_sr(g_cpu.SR | SR_S);   /* enter supervisor; swap A7 user->SSP if needed
-                                     * so the frame is pushed on the supervisor stack */
+    uint32_t frame;
 
-    if (vec == 2 || vec == 3) {   /* bus error / address error → long (format $F) frame */
-        g_cpu.A[7] -= 2; m68k_write16(g_cpu.A[7], 0);            /* internal information */
-        g_cpu.A[7] -= 2; m68k_write16(g_cpu.A[7], g_fault_opcode); /* IRC = faulting opcode */
-        g_cpu.A[7] -= 2; m68k_write16(g_cpu.A[7], g_fault_opcode); /* IR  = faulting opcode */
-        g_cpu.A[7] -= 4; m68k_write32(g_cpu.A[7], 0);            /* DBIN */
-        g_cpu.A[7] -= 4; m68k_write32(g_cpu.A[7], tpf);         /* TPF = lastAddress */
-        g_cpu.A[7] -= 4; m68k_write32(g_cpu.A[7], 0);            /* TPD */
-        g_cpu.A[7] -= 2; m68k_write16(g_cpu.A[7], 0);            /* internal */
-        g_cpu.A[7] -= 2; m68k_write16(g_cpu.A[7], 0);            /* internal */
-        g_cpu.A[7] -= 2; m68k_write16(g_cpu.A[7], 0);            /* Current Move Multiple Mask */
-        g_cpu.A[7] -= 2; m68k_write16(g_cpu.A[7], 0);            /* Special Status Word */
-        g_cpu.A[7] -= 2; m68k_write16(g_cpu.A[7], (uint16_t)(0xF000u | ((uint16_t)vec << 2)));
-    } else {                      /* short (format 0) frame */
-        g_cpu.A[7] -= 2; m68k_write16(g_cpu.A[7], (uint16_t)((uint16_t)vec << 2));
+    m68k_set_sr((uint16_t)(g_cpu.SR | SR_S));
+    g_cpu.A[7] -= access_fault ? 34u : 8u;
+    frame = g_cpu.A[7];
+
+    m68k_write16(frame + 0, sr);
+    m68k_write32(frame + 2, g_cpu.PC);
+    m68k_write16(frame + 6, (uint16_t)((access_fault ? 0xF000u : 0u) |
+                                       ((uint16_t)vec << 2)));
+
+    if (access_fault) {
+        m68k_write16(frame + 8, 0);                    /* special status word */
+        m68k_write16(frame + 10, 0);                   /* MOVEM progress mask */
+        m68k_write16(frame + 12, 0);                   /* internal information */
+        m68k_write16(frame + 14, 0);                   /* internal information */
+        m68k_write32(frame + 16, 0);                   /* transfer pipe data */
+        m68k_write32(frame + 20, transfer_program_fault);
+        m68k_write32(frame + 24, 0);                   /* data input buffer */
+        m68k_write16(frame + 28, g_fault_opcode);      /* instruction register */
+        m68k_write16(frame + 30, g_fault_opcode);      /* instruction register C */
+        m68k_write16(frame + 32, 0);                   /* internal information */
     }
-    g_cpu.A[7] -= 4; m68k_write32(g_cpu.A[7], g_cpu.PC);         /* push PC (post-fetch) */
-    g_cpu.A[7] -= 2; m68k_write16(g_cpu.A[7], sr);              /* push SR */
 
     uint32_t handler = m68k_read32((uint32_t)vec << 2);
     g_cpu.PC = handler;
@@ -445,8 +441,8 @@ int recomp_bus_error(uint32_t addr) {
 
     uint32_t tpf = g_last_access_addr;    /* the unmapped address (TPF), set by the accessor */
 
-    /* CeDImu stacks the post-fetch PC and currentOpcode. g_cpu.PC holds the
-     * faulting instruction's address (set at its entry in the generated code);
+    /* The SCC68070 long frame contains the post-fetch PC and current opcode.
+     * g_cpu.PC holds the faulting instruction's address at generated-code entry;
      * decode it to recover its length and opcode. If undecodable, stack the
      * instruction address itself rather than fabricate a length. */
     M68KInstr ins;
@@ -457,8 +453,7 @@ int recomp_bus_error(uint32_t addr) {
     g_last_access_addr = tpf;             /* restore TPF (decode read through the bus) */
     g_cpu.PC = post_fetch;                /* stacked PC = post-fetch PC */
     build_exception_frame(2);             /* long frame; sets g_cpu.PC = handler */
-    /* CeDImu applies exception time together with the handler's first
-     * instruction on the next Run(false). */
+    /* Apply exception time with the handler's first instruction. */
     runtime_defer_exception_cycles(158);
     s_pending_fallback_reason = FB_BUS_HANDLER;  /* the handler runs in the interpreter next */
     longjmp(g_recomp_bus_env, 1);
@@ -486,20 +481,16 @@ void recomp_take_irq(void) {
     int lvl = recomp_pending_irq_level();
     if (lvl <= 0) return;
     int ipm = (g_cpu.SR >> 8) & 7;
-    /* CeDImu Interpreter(): an autovector with level != 7 and level <= IPM is
-     * deferred (re-queued), not taken. Level 7 is non-maskable. */
+    /* Mask levels at or below IPM; level 7 is non-maskable. */
     if (lvl != 7 && lvl <= ipm) return;
     if (!g_recomp_irq_armed) return;   /* no landing pad → cannot deliver safely */
 
-    /* Consume the pending edge BEFORE delivering — CeDImu pops the exception off
-     * m_exceptions, and IPM is NOT raised by ProcessException, so a level that
-     * stayed asserted would otherwise re-take at the handler's first instruction.
-     * The device re-raises (re-queues) only on a new interrupt condition. */
+    /* Consume the pending edge before delivery. The device re-raises it only
+     * on a new interrupt condition, preventing an immediate duplicate entry. */
     int onchip = (s_irq_onchip_pending & (1u << lvl)) != 0;
     if (onchip) s_irq_onchip_pending &= ~(1u << lvl);
     else g_irq_pending &= ~(1u << lvl);
-    /* ProcessException clears the SCC68070 STOP latch for any external/on-chip
-     * interrupt. Do this at the same boundary before abandoning the idle loop. */
+    /* Any accepted external or on-chip interrupt clears the STOP latch. */
     g_halted = 0;
 
     /* External autovector = 24 + level (vector 26 for the IKAT level-2 line).
@@ -508,8 +499,7 @@ void recomp_take_irq(void) {
      * supervisor, and sets g_cpu.PC = read32(vec<<2) = the OS-9 handler. */
     uint8_t vec = (uint8_t)((onchip ? 56 : 24) + lvl);
     build_exception_frame(vec);
-    /* Defer the 65-cycle autovector cost into the first ISR instruction, which
-     * is the single device-time quantum CeDImu executes after waking STOP. */
+    /* Defer the 65-cycle autovector cost into the first ISR instruction. */
     runtime_defer_exception_cycles(65);
     s_pending_fallback_reason = FB_EXCEPTION;   /* the ISR runs in the interpreter next */
     longjmp(g_recomp_irq_env, 1);
@@ -524,7 +514,7 @@ void m68k_trap_vector(uint8_t vec) {
      * the kernel's F$ dispatcher reads the code there and RTEs past it. */
     uint32_t handler = build_exception_frame(vec);
     /* Address/bus errors reaching this common path queue their 158-cycle
-     * ProcessException cost for the handler's first instruction. TRAP #0 does
+     * exception-entry cost for the handler's first instruction. TRAP #0 does
      * not add anything here: the generated/interpreted TRAP site already queues
      * its 52-cycle cost. */
     if (vec == 2 || vec == 3)

@@ -1,9 +1,13 @@
-﻿Source: F:\Projects\segagenesisrecomp\SonicTheHedgehogRecomp\segagenesisrecomp
-Branch: dev
-Commit: 5aa0c4f (sonic3: add Sonic 3 (USA) standalone mode)
-Copied: recompiler/src/* (68000 frontend) + clownmdemu-core/libraries/{clown68000,clowncommon}
-Date:   2026-05-28
-Note:   Frontend copied VERBATIM to preserve provenance for the future shared-m68k-module
-        extraction. main_genesis.c kept as unmodified upstream reference; main_cdi.c is the
-        CD-i adaptation actually compiled. GenesisRom type retained as-is (rename deferred to
-        the shared-module extraction).
+Ancestor: F:\Projects\segagenesisrecomp\SonicTheHedgehogRecomp\segagenesisrecomp
+Branch:   dev
+Commit:   5aa0c4f (sonic3: add Sonic 3 (USA) standalone mode)
+Copied:   author-owned recompiler/src 68000 frontend
+Date:     2026-05-28
+
+The frontend came from another repository by the same author and has since
+diverged for CD-i. GenesisRom naming remains pending shared-module extraction.
+
+On 2026-07-14 the unused clown68000 cycle probe and all vendored clown68000 /
+clowncommon files were removed from the tracked tree and every recompiler target.
+CD-i cycle emission uses the project's SCC68070 timing model, transcribed from
+the SCC68070 User Manual. No third-party CPU core is compiled, linked, or needed.

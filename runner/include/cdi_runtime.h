@@ -56,7 +56,7 @@ void m68k_set_sr(uint16_t new_sr);
 
 /* ====================================================================== */
 /*  CD-i memory map (Mono-I/II class player)                              */
-/*  Addresses verified against CeDImu src/CDI/boards/Mono2/Bus.cpp.       */
+/*  Physical addresses follow the Mono board map and cdi490 ROM probes.   */
 /*  The SCC68070 has an on-chip MMU; CD-RTOS may remap — these are the    */
 /*  power-on physical decodes the bus uses by default.                    */
 /* ====================================================================== */
@@ -132,21 +132,19 @@ void m68k_trap_vector(uint8_t vec);              /* TRAP #N, TRAPV, CHK, ILLEGAL
 /* Build the exception stack frame for `vec` and point PC at the handler, but do
  * NOT dispatch it (no recursive call_by_address). Used by the interpreter, which
  * raises a bus/address error mid-instruction and then continues its own loop
- * into the (RAM-resident) handler — mirroring CeDImu, which sets PC and falls
- * through to its main loop rather than recursing. */
+ * into the RAM-resident handler without recursive host calls. */
 void m68k_raise_exception_frame(uint8_t vec);
-/* Opcode of the instruction that faulted, for the bus/address-error frame's
- * IRC/IR fields (CeDImu stacks `currentOpcode` there; the OS-9 handler reads
- * it). The generator sets this right before raising an address error. */
+/* Opcode of the instruction that faulted, for the SCC68070 long frame's IRC/IR
+ * fields. The generator sets this right before raising an address error. */
 extern uint16_t g_fault_opcode;
-/* Faulting DATA address for the bus/address-error frame's TPF field (CeDImu
- * stacks `lastAddress` there). For a bus error this is the unmapped address the
+/* Faulting data address for the bus/address-error frame's TPF field. For a bus
+ * error this is the unmapped address the
  * instruction tried to touch; for the boot's deliberate JMP-to-odd address
  * error it is the odd target. Distinct from the stacked PC (which is the
  * instruction's post-fetch PC). */
 extern uint32_t g_fault_addr;
-/* Last operand effective address accessed (CeDImu SCC68070::lastAddress). The
- * bus/address-error long frame stacks this as TPF. Set by every m68k_read/write
+/* Last operand effective address accessed. The bus/address-error long frame
+ * stacks this as TPF. Set by every m68k_read/write
  * in cdi_bus.c; captured at exception entry (build_exception_frame) before our
  * own frame pushes overwrite it. For an ADDRESS error this is the last data EA
  * before the faulting odd jump (e.g. $000510), NOT the odd target. */
@@ -185,10 +183,8 @@ int  recomp_bus_error(uint32_t addr);
  * per-instruction ENTRY safepoint (debug_trace_block, in BOTH tiers) calls
  * recomp_take_irq() at an instruction boundary; if an unmasked interrupt is
  * pending (level 7, or level > SR IPM) it builds the autovector frame (short
- * frame, stacked PC = g_cpu.PC = the not-yet-executed instruction = faithful
- * resume PC, exactly as CeDImu checks m_exceptions at the top of its Interpreter
- * iteration), consumes the pending edge (CeDImu pops the exception queue; IPM is
- * NOT raised, matching ProcessException), points PC at the handler from the
+ * frame, stacked PC = g_cpu.PC = the not-yet-executed instruction), consumes
+ * the pending edge, points PC at the handler from the
  * vector table, and longjmps to the trampoline's IRQ landing pad, which
  * dispatches it. Returns without effect when disarmed or nothing is deliverable. */
 extern jmp_buf g_recomp_irq_env;
@@ -251,8 +247,8 @@ uint32_t cdic_read (uint32_t addr, int size);
  * mode, video standard, disc status). "slave" naming is Mono-1/2 legacy. */
 void     slave_write(uint32_t addr, uint32_t val, int size);
 uint32_t slave_read (uint32_t addr, int size);
-/* Advance the IKAT HLE on the same emulated-time edge as CeDImu. This drives
- * both its 25 ms maneuvering-device packet cadence and its frame-delayed disc
+/* Advance IKAT on the board's emulated-time edge. This drives both its 25 ms
+ * maneuvering-device packet cadence and its frame-delayed disc
  * responses. `ns` is derived from SCC68070 cycles, never host wall-clock. */
 void     slave_increment_time(double ns);
 
@@ -304,18 +300,15 @@ void     periph_reset(void);             /* power-on state (UART TxRDY, etc.) */
 uint8_t  periph_lir(void);                /* side-effect-free LIR snapshot */
 void     periph_increment_timer(uint32_t cycles);
 
-/* DS1216 SmartWatch timekeeper + 32 KB NVRAM at $320000 (Mono-IV/Mono3). Faithful
- * port of CeDImu's DS1216 core: NVRAM passthrough until a 64-bit magic pattern
- * (written to bit 0) unlocks the serial RTC. `dev` is the chip address
- * (busaddr-$320000)>>1 (the chip is wired to even bytes). nvram_reset() seeds the
- * SRAM to $FF and the clock from 1989-01-01 (IRTC::defaultTime), as CeDImu does. */
+/* DS1216 SmartWatch timekeeper + 32 KB NVRAM at $320000. Per the DS1216 data
+ * sheet, SRAM access continues until the 64-bit D0 comparison pattern unlocks
+ * a serial RTC transfer. `dev` is (busaddr-$320000)>>1. Reset uses the
+ * deterministic 1989-01-01 test epoch. */
 void    nvram_reset(void);
 uint8_t nvram_get_byte(uint16_t dev);    /* GetByte: SRAM, or one serial RTC bit */
 void    nvram_set_byte(uint16_t dev, uint8_t data);
-/* Advance the DS1216's internal clock by `ns` of emulated (cycle-derived, never
- * host wall-clock) time — CeDImu DS1216::IncrementClock. Driven by mcd212_tick()
- * once per instruction so the RTC ticks on the same deterministic schedule the
- * oracle's Interpreter drives via CDI::IncrementTime. */
+/* Advance the DS1216 by cycle-derived emulated time, never host wall time.
+ * mcd212_tick() supplies the board's common device-time quantum. */
 void    nvram_increment_clock(double ns);
 
 /* ====================================================================== */
@@ -328,8 +321,8 @@ extern uint32_t g_cycle_accumulator;     /* 68070 cycles since frame start */
 extern uint32_t g_vblank_threshold;
 extern uint32_t g_audio_cycle_counter;
 void glue_check_vblank(void);
-/* Queue one CeDImu ProcessException cost for the handler's first instruction.
- * If an older exception batch is pending, finish that Run(false) quantum first. */
+/* Queue exception-entry periods for the handler's first instruction. If an
+ * older exception batch is pending, finish that device-time quantum first. */
 void runtime_defer_exception_cycles(uint32_t cycles);
 
 /* RTE / early-return propagation (see genesis_runtime.h rationale). */

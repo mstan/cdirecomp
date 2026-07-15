@@ -42,8 +42,8 @@ ordering live in **TODO.md**.
 
 What is verified today:
 
-- **Shared 68000 frontend** copied verbatim from `segagenesisrecomp` (decoder,
-  validator, code generator, function finder, cycle probe). Builds clean as
+- **Shared 68000 frontend** inherited from the author's `segagenesisrecomp`
+  (decoder, validator, code generator, function finder, SCC68070 cycle model). Builds clean as
   `CdiRecomp`. See `recompiler/PROVENANCE.txt`.
 - **CD-i disc + OS-9 module inventory** (`recompiler/src/disc_parser.c`). Run
   against Hotel Mario it reports: 156100 sectors, MODE2, volume id `"CD-I "`,
@@ -100,9 +100,9 @@ What is verified today:
   navigation boundary is therefore proved by button-free input packets,
   persistent shell STOP, and a synthetic media fixture—not by forbidding drive
   reads.
-- **Oracle parity** (`oracle/cdi_oracle.cpp`): a headless driver linking the
-  wxWidgets-free CeDImu core and serving the matching trace surface on :4381.
-  CeDImu is the behavioral oracle; Ghidra in 68000 mode is the literal oracle.
+- **Oracle parity** (`oracle/cdi_oracle.cpp`): a local-only headless driver
+  serving the matching trace surface on :4381. It is a black-box behavioral
+  comparator, never an implementation source or production dependency.
 - **Local-only oracle**: an optional, git-ignored CeDImu developer checkout in
   `external/CeDImu` has independent `SCC68070`, `MCD212`, `OS9`, and `HLE`
   implementations used as behavioral reference. CeDImu, local oracle changes,
@@ -123,9 +123,10 @@ ever distributed, it will live in a separate tooling repository/release with
 complete AGPL compliance; it will not be added to the native player package.
 MC-CDI-029 tracks mechanical packaging and native-link enforcement, following
 the author-owned release-audit patterns in the sibling `segagenesisrecomp`.
-MC-CDI-030 separately audits source provenance for runtime code historically
-described as a CeDImu/clown68000 "port"; excluding a library from the link does
-not by itself establish independent implementation.
+MC-CDI-030's independent rewrite/source audit is complete; see
+`PROVENANCE.md`. The obsolete AGPL cycle probe and vendored clown trees are no
+longer tracked or referenced by any build target. Existing Git history must be
+filtered or replaced by a reviewed clean export before public publication.
 
 ## Layout
 
@@ -137,7 +138,7 @@ cdirecomp/
 ├── runner/            # CdiRuntime: hardware + native/interpreted guest execution
 │   ├── include/       #   cdi_runtime.h (the generated-code <-> runner contract), game_extras.h
 │   └── src/           #   cdi_bus, runtime, mcd212, cdic, slave, debug_server, main
-├── external/          # clown68000 (cycle probe), clowncommon, CeDImu (oracle)
+├── external/          # optional ignored local validation checkouts only
 ├── hotelmario/        # game.cfg + generated/ (CdiRecomp output)
 ├── tools/  tests/  docs/
 └── PRINCIPLES.md  CLAUDE.md  DEBUG.md  TCP.md  TODO.md

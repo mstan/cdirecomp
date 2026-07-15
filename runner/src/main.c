@@ -41,7 +41,7 @@ int main(int argc, char *argv[]) {
 
     const char *rom_path = NULL;
     const char *disc_path = NULL;
-    int port = 4380;   /* native; oracle (CeDImu) on +1 — see TCP.md */
+    int port = 4380;   /* native; optional development oracle on +1 — see TCP.md */
     int hold = 0;      /* keep the rings queryable after the run ends */
     int exit_on_stop = 0; /* diagnostic one-shot; normal runtime keeps devices live */
     int headless = 0;  /* deterministic tools and unattended environments */
@@ -234,9 +234,9 @@ int main(int argc, char *argv[]) {
                 target = g_redirect_addr;
             } else if (g_halted) {
                 if (exit_on_stop) break;
-                /* CeDImu's stopped SCC68070 consumes 25 cycles per interpreter
-                 * iteration and advances every device. No instruction is traced
-                 * while stopped. A real device event raises g_irq_pending; the
+                /* Service a stopped SCC68070 in 25-cycle device-time quanta.
+                 * No instruction is traced while stopped. A device event raises
+                 * g_irq_pending; the
                 * standard IRQ path clears STOP, builds the autovector frame and
                  * longjmps to the landing pad above. */
                 mcd212_tick(25);

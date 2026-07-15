@@ -31,6 +31,7 @@ add_executable(CdiRuntime
     src/cdi_nvram.c
     src/debug_server.c
     src/cosim_state.c
+    src/m68k_arith.c
     src/m68k_interp.c
     # Clean-room hybrid interpreter (MC-CDI-011) reuses the recompiler's own
     # decoder for parity-by-construction with the static C emitter.
@@ -77,10 +78,31 @@ endif()
 
 include(CTest)
 if(BUILD_TESTING)
+    add_executable(CdiNvramTest
+        tests/cdi_nvram_test.c
+        src/cdi_nvram.c
+    )
+    target_include_directories(CdiNvramTest PRIVATE include)
+    add_test(NAME cdi_nvram COMMAND CdiNvramTest)
+
+    add_executable(PeriphTest
+        tests/periph_test.c
+        src/periph.c
+    )
+    target_include_directories(PeriphTest PRIVATE include)
+    add_test(NAME scc68070_peripherals COMMAND PeriphTest)
+
     add_executable(Mcd212VideoTest
         tests/mcd212_video_test.c
         src/mcd212_video.c
     )
     target_include_directories(Mcd212VideoTest PRIVATE include)
     add_test(NAME mcd212_video COMMAND Mcd212VideoTest)
+
+    add_executable(M68kArithTest
+        tests/m68k_arith_test.c
+        src/m68k_arith.c
+    )
+    target_include_directories(M68kArithTest PRIVATE include)
+    add_test(NAME m68k_arithmetic COMMAND M68kArithTest)
 endif()

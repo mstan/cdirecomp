@@ -18,6 +18,8 @@ bios/generated/*.log
 # CeDImu is an optional local-only development oracle (MC-CDI-017).
 # Never commit, submodule, package, or publish its tree/local modifications.
 /external/CeDImu/
+/external/clown68000/
+/external/clowncommon/
 
 # Python bytecode
 __pycache__/

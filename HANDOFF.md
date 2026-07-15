@@ -11,7 +11,8 @@ until the BIOS goal is complete.
   hand-written HLE stubs.
 - Keep the clean-room hybrid interpreter for RAM-resident and dispatch-missed
   guest code. Do not link clown68000/AGPL or CeDImu/GPL into the shipped runtime.
-- CeDImu is the behavioral oracle; Ghidra 68000 mode is the literal oracle.
+- The local emulator is a black-box behavioral comparator; hardware manuals and
+  68000 disassembly are implementation authorities.
 - Never edit generated C. Codegen changes require BIOS regeneration.
 - Debug only through the always-on rings/TCP surface. Free-run observers and
   query their rings; never pause/step two observers into apparent alignment.
@@ -108,14 +109,21 @@ until the BIOS goal is complete.
 
 ## Internal 0.0.1 checkpoint
 
-The Phase-C/player-shell baseline is committed locally as `4f102d7` (`runtime:
-complete real-time CD-i BIOS player shell`); `master` is one commit ahead of
-`origin/master`, and no release tag exists yet. A fresh 2026-07-14 verification
-rebuilt the recompiler, debug runner, oracle, and Release runner; passed both
-runner CTests, all 10 co-sim self-tests, the function-alias regression, every
-20k native/oracle trust gate, the Release shell-idle smoke at 60.00 fps, the
-Mode-2 insertion/ejection smoke, and four-way BIOS navigation with RULE 0a
-clean. This commit is ready for an internal 0.0.1 runtime/binary checkpoint.
+The Phase-C/player-shell baseline is `4f102d7`; rollback checkpoint `7a715c1`
+captures the burndown/config/provenance policy immediately before the clean
+rewrite. The rewrite independently replaces the flagged production components,
+removes the AGPL cycle-probe link and tracked vendor trees, and adds focused
+tests plus `PROVENANCE.md`. No release tag has been created.
+
+A fresh 2026-07-14 verification regenerated the BIOS with zero unsupported
+events; built the recompiler, Debug runner, local oracle, and non-co-sim Release
+runner; passed four runner CTests, all 10 co-sim self-tests, the function-alias
+regression, every 20k trust gate, and a 659,998-transition near-full-boot cycle
+audit with zero skipped records, resyncs, timing mismatches, or cycle drift.
+The exact final Release binary reached STOP after 662032 instructions at
+`PC=$40A3E6 SR=$2000`, passed the shell smoke at 61 fps, mounted/ejected the
+Mode-2 fixture, and rendered all four BIOS navigation directions RULE 0a clean.
+This is ready for an internal 0.0.1 runtime/binary checkpoint.
 
 MC-CDI-017 deliberately keeps the oracle outside the release boundary. The
 local `external/CeDImu` checkout at `6eb8df4`, its four local modifications, and
@@ -124,9 +132,8 @@ keep them git-ignored and do not commit, push, package, or publish them.
 `CdiRuntime` neither links nor requires CeDImu. Public documentation may
 reference the upstream project/base revision and explain the optional local
 oracle boundary; exact reproduction of the private oracle modifications is not
-a production release requirement. Independently audit any shipped source
-described as a CeDImu "port" so production provenance does not depend merely on
-the link boundary.
+a production release requirement. MC-CDI-030 completed the separate shipped-
+source provenance audit; see `PROVENANCE.md`.
 
 Production release policy is runtime-only: package `CdiRuntime` and an explicit
 allowlist of redistributable runtime dependencies/assets, never any recompiler,
@@ -135,21 +142,16 @@ MC-CDI-029 will adapt the author-owned `package_release.py` and
 `audit_runner_purity.py` patterns from `../segagenesisrecomp`. If AGPL-linked
 tooling is ever distributed, it must be built and released from a separate
 tooling repository with complete AGPL compliance; it never joins the player
-release. The sibling's clean-room 68000 interpreter is already the ancestor of
-cdirecomp's adapted fallback and may be reused further with explicit provenance;
-its clownmdemu/clown68000 oracle paths may not cross the production boundary.
-Before a public player release, MC-CDI-030 must also resolve every shipped
-source section described as a CeDImu/clown68000 "port" or "exact port" through
-documented independent/author-owned provenance or an independent rewrite. Link
-purity and source provenance are separate gates.
+release. The obsolete clown68000 probe and vendor trees are now removed from
+all tracked targets. Existing historical commits still contain those blobs, so
+filter that history or publish a reviewed clean export before making it public.
 
-## Current working tree
+## Rewrite boundary
 
-The runtime baseline above is committed. Current uncommitted changes are the
-follow-up burndown/documentation additions for persistent captured-mouse and
-one-shot host-clock preferences plus the local-only CeDImu oracle policy in
-`.gitignore`, `PRINCIPLES.md`, `README.md`, `ENHANCEMENTS.md`, `TODO.md`,
-`PLAN.md`, and this handoff. Inspect `git diff`; do not discard user changes.
+`CdiRuntime` and `CdiRecomp` now build without the removed third-party core.
+The optional CeDImu checkout/oracle stays local and ignored for black-box
+validation only. MC-CDI-027 (persistent captured mouse) and MC-CDI-028
+(persistent one-shot host clock seed) remain the next launcher/config work.
 
 Key modified/new files in the `4f102d7` baseline commit:
 

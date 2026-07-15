@@ -106,7 +106,7 @@ not imply continuous synchronization.
 - Use the portable host-local time APIs on Windows, macOS, and Linux, validate
   the value against the RTC's representable range, and fail clearly rather than
   wrap an invalid date.
-- With the option off, keep the deterministic CeDImu-compatible
+- With the option off, keep the deterministic hardware-model
   `1989-01-01 00:00:00` seed exactly. Co-sim, recorded traces, baseline smokes,
   and oracle comparisons keep synchronization off.
 

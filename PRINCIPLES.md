@@ -6,9 +6,9 @@ than those; CD-i just adds an OS layer.
 
 ## Ground Truth
 
-- The original disc image and a trusted CD-i emulator (**CeDImu**, in
-  `external/CeDImu`) are the behavioral source of truth. Generated C is
-  evidence, not authority.
+- The original disc image and hardware specifications are implementation
+  authorities. An optional CD-i emulator may be used only as a black-box
+  behavioral comparator. Generated C is evidence, not authority.
 - For literal instruction/semantics questions, the disassembly of the OS-9
   module in question (via Ghidra, 68000 mode) is the literal oracle.
 - Before debugging a symptom, confirm which build, generated tree, disc image,
@@ -62,9 +62,10 @@ than those; CD-i just adds an OS layer.
 
 ## Oracle parity
 
-- The oracle is CeDImu embedded in-process, exposing the same ring/TCP surface
-  as the native runtime, so native-vs-oracle diffs reduce to "what is the first
-  divergence" at the frame / instruction / OS-call level.
+- The development oracle exposes the same ring/TCP surface as the native
+  runtime, so black-box diffs reduce to "what is the first divergence" at the
+  frame / instruction / OS-call level. Oracle source is not an implementation
+  input.
 
 ## Validation
 
