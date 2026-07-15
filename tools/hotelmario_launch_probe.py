@@ -254,7 +254,17 @@ def main() -> int:
     parser.add_argument("--compact", action="store_true")
     parser.add_argument("--quick", action="store_true")
     parser.add_argument("--calls-only", action="store_true")
+    parser.add_argument("--async-only", action="store_true")
     parser.add_argument("--stop-on-final-c4", action="store_true")
+    parser.add_argument("--stop-ciap-idle-lba", type=int,
+                        help="pause as soon as the data stream stops at or "
+                             "beyond this LBA")
+    parser.add_argument("--post-idle-frames", type=int, default=0,
+                        help="with --stop-ciap-idle-lba, continue this many "
+                             "fields after the stream first stops")
+    parser.add_argument("--stop-memory-nonzero", type=lambda value: int(value, 0),
+                        help="after --stop-ciap-idle-lba is reached, pause "
+                             "when this guest byte becomes nonzero")
     parser.add_argument("--break-frame", type=int)
     parser.add_argument("--unpaced", action="store_true")
     parser.add_argument("--no-click", action="store_true")
@@ -343,6 +353,7 @@ def main() -> int:
             late_background_observed = None
             latest_audio = None
             latest_ciap = None
+            ciap_idle_frame = None
             while time.monotonic() < deadline and proc.poll() is None:
                 try:
                     state = request(args.port, {"cmd": "status"}, timeout=1.0)
@@ -385,6 +396,24 @@ def main() -> int:
                         if state.get("frame", 0) >= play_frame + 1700:
                             latest_ciap = request(
                                 args.port, {"cmd": "ciap_state"}, timeout=1.0)
+                            if (args.stop_ciap_idle_lba is not None and
+                                    latest_ciap.get("drive_lba", 0) >=
+                                    args.stop_ciap_idle_lba and
+                                    latest_ciap.get("running") == 0):
+                                if ciap_idle_frame is None:
+                                    ciap_idle_frame = state.get("frame", 0)
+                                if args.stop_memory_nonzero is not None:
+                                    memory = request(
+                                        args.port,
+                                        {"cmd": "read_mem",
+                                         "addr": args.stop_memory_nonzero,
+                                         "len": 1}, timeout=1.0)
+                                    if memory.get("bytes") not in (None, "00"):
+                                        break
+                                elif state.get("frame", 0) >= (
+                                        ciap_idle_frame +
+                                        args.post_idle_frames):
+                                    break
                             video_state = request(
                                 args.port, {"cmd": "video_state"}, timeout=1.0)
                             clut = request(
@@ -434,7 +463,7 @@ def main() -> int:
                 except (OSError, ValueError):
                     if proc.poll() is not None:
                         break
-                time.sleep(1.0)
+                time.sleep(0.01 if ciap_idle_frame is not None else 1.0)
 
             if proc.poll() is None:
                 request(args.port, {"cmd": "pause"})
@@ -534,6 +563,67 @@ def main() -> int:
                               "bumper and intro XA audio are clean with zero drops")
                         check(fields_per_second >= 55.0,
                               "attract playback sustains real-time field pacing")
+                    if args.async_only:
+                        for address, length in ((0x4000, 0x180),
+                                                (0x5180, 0x60),
+                                                (0x61E0, 0x40),
+                                                (0x260400, 0x220),
+                                                (0x2751E0, 0x100),
+                                                (0x2760E0, 0x2A0),
+                                                (0x27E870, 0x40),
+                                                (0x27E900, 0x30)):
+                            print("ASYNC_STATE " + json.dumps(request(
+                                args.port,
+                                {"cmd": "read_mem", "addr": address,
+                                 "len": length}), sort_keys=True))
+                        wait_flag_records = []
+                        for address in (0x402A, 0x4124, 0x4128, 0x412C,
+                                        0x4130, 0x4134, 0x4135,
+                                        0x4B52, 0x51AE, 0x61E8,
+                                        0x6204, 0x27E878, 0x27E90A,
+                                        0x27E90C, 0x27E90D, 0x27E90F,
+                                        0x27E910):
+                            stores = request(
+                                args.port,
+                                {"cmd": "stores", "addr": address,
+                                 "count": 64})
+                            print("ASYNC_STORES " + json.dumps(
+                                stores, sort_keys=True))
+                            if address == 0x402A and stores["records"]:
+                                wait_flag_records = stores["records"]
+                        wait_flows = []
+                        for flag in (record for record in wait_flag_records
+                                     if record["val"] == 1):
+                            cursor = max(0, flag["seq"] - 32)
+                            end = flag["seq"] + 50000
+                            interesting = []
+                            while cursor < end:
+                                trace = request(args.port, {
+                                    "cmd": "trace", "from": cursor,
+                                    "count": min(256, end - cursor),
+                                })
+                                records = trace["records"]
+                                for record in records:
+                                    pc = record["pc"]
+                                    if (0x260562 <= pc <= 0x2605E4 or
+                                            0x275BDE <= pc <= 0x275DEC or
+                                            0x276608 <= pc <= 0x27667A or
+                                            0x276336 <= pc <= 0x27639C or
+                                            0x260474 <= pc <= 0x2604FA):
+                                        interesting.append({
+                                            key: record[key] for key in
+                                            ("seq", "pc", "op", "sr", "d0",
+                                             "d1", "d2", "a0", "a1", "a2",
+                                             "a6", "a7", "a7top", "frame")
+                                        })
+                                if not records:
+                                    break
+                                cursor = records[-1]["seq"] + 1
+                            wait_flows.append({"flag": flag,
+                                               "records": interesting})
+                        print("WAIT_FLAG_FLOWS " + json.dumps(
+                            wait_flows, sort_keys=True))
+                        return 0
                     if args.break_frame is None:
                         trace = request(
                             args.port, {"cmd": "trace", "count": 96})
