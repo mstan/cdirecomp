@@ -252,11 +252,13 @@ Each lands with an oracle diff showing the divergence closed.
   one-shot host-local clock seed, while preserving cycle-derived advancement
   and guest RTC writes after startup. Persist the opt-in through the shared
   player config; deterministic validation profiles force it off.
-- **MC-CDI-029:** port the sibling's allowlist-based release packager and native
+- ✅ **MC-CDI-029:** the allowlist-based release packager and native
   purity audit to CD-i. The package must reject tools/oracles, ROM/disc images,
   traces, dumps, and build debris, and the native link/include audit must prove
   no CeDImu or clown68000 boundary crossed. Any future AGPL-linked tooling
-  distribution is a separate repository/release with its own compliance.
+  distribution is a separate repository/release with its own compliance. The
+  runtime-only ZIP, PE-import/marker audit, and SHA-256 output are implemented
+  by `tools/package_runtime_release.py`.
 - ✅ **MC-CDI-030:** the production-source audit and independent rewrite are
   complete. SCC68070 exception/DIV/peripheral, IKAT, DS1216, CIAP, and MCD212
   timing/video code now cites specifications/project-owned experiments, with
@@ -303,9 +305,8 @@ drag-and-drop is the player media path.
 - `external/*` → intentionally optional, git-ignored local validation checkouts;
   reference the upstream project/base revision but never vendor, submodule, or
   publish the local modifications (MC-CDI-017).
-- Port `tools/package_release.py` and `tools/audit_runner_purity.py` from the
-  author-owned `../segagenesisrecomp/segagenesisrecomp` patterns, with CD-i
-  allowlists and forbidden-artifact/link checks (MC-CDI-029).
+- Keep `tools/package_runtime_release.py` synchronized with any future player
+  dependencies; every addition requires an explicit allowlist and notice.
 
 ## 6. What "done" looks like for each phase
 

@@ -124,8 +124,9 @@ allowlisted redistributable player dependencies/assets. The recompiler,
 images, traces, and build outputs are never packaged. If an AGPL-linked tool is
 ever distributed, it will live in a separate tooling repository/release with
 complete AGPL compliance; it will not be added to the native player package.
-MC-CDI-029 tracks mechanical packaging and native-link enforcement, following
-the author-owned release-audit patterns in the sibling `segagenesisrecomp`.
+MC-CDI-029 mechanically enforces that boundary with an explicit five-file
+archive allowlist plus PE import, forbidden-marker, archive-content, and SHA-256
+checks in `tools/package_runtime_release.py`.
 MC-CDI-030's independent rewrite/source audit is complete; see
 `PROVENANCE.md`. The obsolete AGPL cycle probe and vendored clown trees are no
 longer tracked or referenced by any build target. Existing Git history must be
