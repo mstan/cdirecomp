@@ -177,6 +177,36 @@ uint64_t g_stop_frame = 0;
  * so the just-observed history cannot be overwritten while it is queried. */
 static atomic_int s_pause_requested;
 
+/* Set (never cleared — holds are forever) when cdi_fault_hold parks a thread,
+ * so status can report "held":1. Distinct from g_halted, which is the 68k
+ * STOP-instruction flag and toggles constantly while the kernel idles. */
+static volatile int s_debug_held;
+
+/* Armed PC-stops (`stop_pc` over TCP): freeze the run the (skip+1)-th time
+ * execution reaches an armed PC, optionally `delay` further instructions
+ * later so post-context lands in the ring too. This is the deterministic
+ * anchor for windows a poll+pause race can never catch — the interesting
+ * call sits seconds before any pollable state change, so by the time a
+ * poller sees the change the ring has already evicted it. Slots only ever
+ * transition armed->consumed; there is no resume, matching the
+ * pause/fault-hold post-mortem doctrine. */
+#define CDI_STOPPC_MAX 8
+typedef struct { uint32_t pc; uint32_t skip; uint32_t delay; } CdiStopPc;
+static CdiStopPc  s_stoppc[CDI_STOPPC_MAX];
+static atomic_int s_stoppc_armed;   /* count of armed slots — hot-path gate */
+
+static void debug_check_stop_pc(void) {
+    for (int i = 0; i < CDI_STOPPC_MAX; i++) {
+        if (!s_stoppc[i].pc || s_stoppc[i].pc != g_cpu.PC) continue;
+        if (s_stoppc[i].skip) { s_stoppc[i].skip--; continue; }
+        s_stoppc[i].pc = 0;
+        atomic_fetch_sub_explicit(&s_stoppc_armed, 1, memory_order_relaxed);
+        if (s_stoppc[i].delay) g_stop_seq = s_trace_seq + s_stoppc[i].delay;
+        else cdi_fault_hold();
+        return;
+    }
+}
+
 /* Hot path: one per executed block. Kept to a single struct copy. */
 void debug_trace_block(void) {
     /* IRQ delivery safepoint (MC-CDI-007). This runs at EVERY instruction ENTRY
@@ -218,6 +248,8 @@ void debug_trace_block(void) {
     r->ram1_h = 0;
 #endif
     s_trace_seq++;
+    if (atomic_load_explicit(&s_stoppc_armed, memory_order_acquire))
+        debug_check_stop_pc();
     if (atomic_exchange_explicit(&s_pause_requested, 0, memory_order_acq_rel))
         cdi_fault_hold();
     if (g_stop_seq && s_trace_seq >= g_stop_seq) cdi_fault_hold();
@@ -506,12 +538,13 @@ static void resp_registers(char *out, int outlen) {
 static void resp_status(char *out, int outlen) {
     snprintf(out, outlen,
         "{\"ok\":true,\"insns\":%llu,\"blocks\":%llu,\"interp\":%llu,\"frame\":%llu,\"pc\":%u,"
-        "\"halted\":%d,\"input\":%u,\"miss_count\":%u,\"miss_last\":%u,\"irq_pending\":%u,"
+        "\"halted\":%d,\"held\":%d,\"input\":%u,\"miss_count\":%u,\"miss_last\":%u,\"irq_pending\":%u,"
         "\"irq_raises\":%llu,\"irq_first_seq\":%llu}",
         (unsigned long long)g_native_insn_count, (unsigned long long)s_trace_seq,
         (unsigned long long)s_fb_total,
         (unsigned long long)g_frame_count, g_cpu.PC,
-        g_halted, cdi_input_get(), g_miss_count_any, g_miss_last_addr, recomp_pending_irq_mask(),
+        g_halted, s_debug_held, cdi_input_get(), g_miss_count_any, g_miss_last_addr,
+        recomp_pending_irq_mask(),
         (unsigned long long)s_irq_count, (unsigned long long)s_irq_first_seq);
 }
 
@@ -520,6 +553,40 @@ static void resp_pause(char *out, int outlen) {
     snprintf(out, outlen,
              "{\"ok\":true,\"pause_requested\":true,\"seq\":%llu}",
              (unsigned long long)s_trace_seq);
+}
+
+/* stop_pc: arm a PC-stop. Params: pc (required), skip (hits to ignore first,
+ * default 0), delay (extra instructions to run past the hit before holding,
+ * default 0 = hold at the hit, with the armed PC's record already captured
+ * but the instruction not yet executed). {"clear":1} disarms every slot. */
+static void resp_stop_pc(const char *line, char *out, int outlen) {
+    uint64_t clr = 0;
+    if (json_int(line, "clear", &clr) && clr) {
+        for (int i = 0; i < CDI_STOPPC_MAX; i++) s_stoppc[i].pc = 0;
+        atomic_store_explicit(&s_stoppc_armed, 0, memory_order_release);
+        snprintf(out, outlen, "{\"ok\":true,\"cleared\":true}");
+        return;
+    }
+    uint64_t pc = 0, skip = 0, delay = 0;
+    if (!json_int(line, "pc", &pc) || !pc) {
+        snprintf(out, outlen, "{\"ok\":false,\"error\":\"pc required\"}");
+        return;
+    }
+    json_int(line, "skip", &skip);
+    json_int(line, "delay", &delay);
+    for (int i = 0; i < CDI_STOPPC_MAX; i++) {
+        if (s_stoppc[i].pc) continue;
+        s_stoppc[i].skip  = (uint32_t)skip;
+        s_stoppc[i].delay = (uint32_t)delay;
+        s_stoppc[i].pc    = (uint32_t)pc;   /* pc last: scan gate below */
+        atomic_fetch_add_explicit(&s_stoppc_armed, 1, memory_order_release);
+        snprintf(out, outlen,
+                 "{\"ok\":true,\"slot\":%d,\"pc\":%llu,\"skip\":%llu,\"delay\":%llu}",
+                 i, (unsigned long long)pc, (unsigned long long)skip,
+                 (unsigned long long)delay);
+        return;
+    }
+    snprintf(out, outlen, "{\"ok\":false,\"error\":\"no free stop slot\"}");
 }
 
 static void resp_video_frame(char *out, int outlen) {
@@ -1064,6 +1131,7 @@ static int handle_line(const char *line, char *out, int outlen) {
     if (!strcmp(cmd, "ping"))               snprintf(out, outlen, "{\"ok\":true,\"pong\":true,\"session\":\"%s\"}", s_cosim_session);
     else if (!strcmp(cmd, "status"))        resp_status(out, outlen);
     else if (!strcmp(cmd, "pause"))         resp_pause(out, outlen);
+    else if (!strcmp(cmd, "stop_pc"))       resp_stop_pc(line, out, outlen);
     else if (!strcmp(cmd, "set_input"))     resp_set_input(line, out, outlen);
     else if (!strcmp(cmd, "emu_ikat_state")) resp_ikat_state(out, outlen);
     else if (!strcmp(cmd, "ikat_events"))    resp_ikat_events(out, outlen);
@@ -1189,6 +1257,7 @@ void debug_server_poll(void) { /* threaded now — nothing to poll */ }
 int g_hold_on_fault = 0;
 
 void cdi_fault_hold(void) {
+    s_debug_held = 1;   /* status reports "held":1 — distinct from g_halted (STOP) */
     fprintf(stderr, "[fault-hold] frozen at fault; rings live on :%d for inspection. "
                     "Ctrl-C to exit.\n", s_port);
     fflush(stderr);
