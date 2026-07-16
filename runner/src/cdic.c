@@ -21,6 +21,11 @@
 enum {
     CIAP_DATA0 = 0x1200u,
     CIAP_DATA1 = 0x1BC2u,
+    /* Each data buffer is followed by the sector's subcode-Q image (the
+     * "locator" the CD-RTOS record path tracks drive position with):
+     * $1200+$924 = $1B24 and $1BC2+$924 = $24E6. */
+    CIAP_QBUF0 = 0x1B24u,
+    CIAP_QBUF1 = 0x24E6u,
     CIAP_IER = 0x2584u,
     CIAP_ISR = 0x2586u,
     CIAP_TCM1 = 0x258Cu,
@@ -38,11 +43,35 @@ enum {
     CIAP_APERTURE_BYTES = 0x4000u,
     CIAP_SECTOR_BYTES = 2340u,
     CIAP_ISR_DATA = 0x0001u,
+    CIAP_ISR_QREADY = 0x0004u,
+    /* Per-buffer locator-ready interrupt sources. The boot IER ($060B)
+     * enables these while masking the bit-2 summary, and the ROM ISR folds
+     * them into its $0601 data/locator dispatch mask. */
+    CIAP_ISR_Q0 = 0x0200u,
+    CIAP_ISR_Q1 = 0x0400u,
+    CIAP_ISR_QOVERRUN = 0x0800u,
     CIAP_BMAN_DATA0 = 0x0004u,
     CIAP_BMAN_DATA1 = 0x0008u,
+    CIAP_BMAN_Q0 = 0x0010u,
+    CIAP_BMAN_Q1 = 0x0020u,
+    /* Locator/subcode ownership bits ($10/$20/$40/$80) are acknowledged
+     * write-one-to-clear: the ROM ISR always writes back the accumulated
+     * mask of a whole pair ($30 or $C0), unlike the DATA XOR handoff. */
+    CIAP_BMAN_ACK_CLEAR = 0x00F0u,
     CIAP_CCR_ASEL = 0x0008u,
     CIAP_CCR_STARTD = 0x00C4u,
+    /* Locator-reporting stream starts. CD-RTOS arms them behind the IKAT
+     * on-target report: $3000/$0010 for the record path (phase 2) and
+     * $7000/$0044 for the play/read paths (the retry timeouts also re-arm
+     * with $3000/$0094 after RESET); the $3000/$7000 prefixes and the $0080
+     * chaser are stored untouched. */
+    CIAP_CCR_STARTQ_RECORD = 0x0010u,
+    CIAP_CCR_STARTQ_PLAY = 0x0044u,
+    CIAP_CCR_STARTQ_RETRY = 0x0094u,
     CIAP_CCR_RESET = 0x0100u,
+    /* Idle work-ready word the CIAP firmware presents in ISR between core
+     * start (DLOAD exit / power-on) and the first stream arming. */
+    CIAP_ISR_FIRMWARE_IDLE = 0x0009u,
     CIAP_APCR_FINISH = 0x0020u,
     CIAP_APCR_INTNOW = 0x00A0u,
     CIAP_APCR_ACK = 0x0200u,
@@ -69,9 +98,11 @@ typedef struct {
     uint8_t last_coding;
     uint8_t last_selected;
     uint8_t next_data_buffer;
+    uint8_t next_q_buffer;
     uint8_t drive_positioned;
     uint8_t data_running;
     uint8_t data_path_armed;
+    uint8_t q_reporting;
     uint8_t selection_prime_pending;
     uint8_t selection_active;
     uint8_t buffer_waiting_ack;
@@ -108,6 +139,12 @@ static void assert_interrupt_line(void) {
     uint16_t status = read_word(CIAP_ISR);
     unsigned level = interrupt_level();
     unsigned vector = interrupt_vector();
+    /* Locator state (summary, per-buffer, overrun) is status the drivers
+     * read opportunistically from the latch during DATA/AP service; raising
+     * the line for it dispatches the phase>=6 read handlers with no data
+     * buffer behind the interrupt. */
+    status &= (uint16_t)~(CIAP_ISR_QREADY | CIAP_ISR_Q0 | CIAP_ISR_Q1 |
+                          CIAP_ISR_QOVERRUN);
     if ((enabled & status) && level)
         cdi_irq_raise_vector((uint8_t)level, (uint8_t)vector);
 }
@@ -196,11 +233,14 @@ uint32_t cdic_read(uint32_t address, int size) {
     for (i = 0; i < size; i++) {
         uint32_t byte_offset = offset + (uint32_t)i;
         uint8_t value = ciap.memory[byte_offset];
-        /* The initialized CIAP firmware presents $0009 as its idle work-ready
-         * word before the first stream. This is distinct from the live ISR
-         * latch used after STARTD and is required by the cdi490 INIT worker. */
-        if (!ciap.data_path_armed && byte_offset == CIAP_ISR) value = 0;
-        if (!ciap.data_path_armed && byte_offset == CIAP_ISR + 1u) value = 9;
+        /* Until a stream is armed, the firmware presents its $0009 idle
+         * work-ready status word in the ISR read port on top of the event
+         * latch. The latch itself stays genuine: it alone drives the
+         * interrupt line and is what acknowledge-on-read consumes. */
+        if (!ciap.data_path_armed && byte_offset == CIAP_ISR)
+            value |= (uint8_t)(CIAP_ISR_FIRMWARE_IDLE >> 8);
+        if (!ciap.data_path_armed && byte_offset == CIAP_ISR + 1u)
+            value |= (uint8_t)CIAP_ISR_FIRMWARE_IDLE;
         result = (result << 8) | value;
     }
     record_access(offset, result, size, 0);
@@ -216,6 +256,7 @@ uint32_t cdic_read(uint32_t address, int size) {
 
 static void reset_data_path(void) {
     ciap.data_running = 0;
+    ciap.q_reporting = 0;
     ciap.selection_active = 0;
     ciap.next_data_buffer = 0;
     ciap.buffer_waiting_ack = 0;
@@ -235,7 +276,10 @@ static void handle_register_write(uint32_t offset, uint16_t value) {
         break;
     case CIAP_BMAN:
     {
-        uint16_t next = (uint16_t)(read_word(offset) ^ value);
+        uint16_t next = (uint16_t)(read_word(offset) ^
+                                   (value & (CIAP_BMAN_DATA0 |
+                                             CIAP_BMAN_DATA1)));
+        next &= (uint16_t)~(value & CIAP_BMAN_ACK_CLEAR);
         store_word(offset, next);
         /* CD-RTOS acknowledges a consumed main-channel buffer by writing
          * DATA0|DATA1. The XOR transition is a one-hot ownership handoff:
@@ -265,10 +309,17 @@ static void handle_register_write(uint32_t offset, uint16_t value) {
                 !(mask & (mask - 1u)))
                 ciap.selection_prime_pending = 1;
         }
-        else if (value == CIAP_CCR_STARTD) {
+        else if (value == CIAP_CCR_STARTD ||
+                 value == CIAP_CCR_STARTQ_RECORD ||
+                 value == CIAP_CCR_STARTQ_PLAY ||
+                 value == CIAP_CCR_STARTQ_RETRY) {
             ciap.data_path_armed = 1;
             ciap.data_running = 1;
             ciap.sector_elapsed_ns = 0;
+            /* Locator reporting is a mode armed explicitly by the $0010/
+             * $0044/$0094 starts; a plain STARTD stream (boot module loads)
+             * never acknowledges the locator buffers. */
+            ciap.q_reporting = (value != CIAP_CCR_STARTD);
         }
         break;
     case CIAP_APCR:
@@ -393,6 +444,44 @@ static int sector_selected(const uint8_t sector[CIAP_SECTOR_BYTES]) {
     return (mask & (1u << channel)) != 0;
 }
 
+static uint8_t to_bcd(uint32_t v) {
+    return (uint8_t)(((v / 10u) << 4) | (v % 10u));
+}
+
+/* Write the sector's position locator behind its data buffer (subcode-Q
+ * shaped, big-endian words).  The CD-RTOS consumers pin the contract: the
+ * type nibble of byte 0 must be 1 and its bit 6 flags end-of-chain
+ * ($429A84); byte 1 must be 0 in the program area, $AA meaning lead-out
+ * ($42B844/$429A98); bytes 7-9 carry the absolute BCD MSF the drivers
+ * compare against their target ($428D8A). */
+static void write_q_locator(unsigned offset, uint32_t lba, uint8_t submode) {
+    const uint32_t real = lba + 150u;
+    uint8_t q[12];
+    uint16_t crc = 0;
+    int i;
+
+    q[0] = (uint8_t)(0x01u | ((submode & CD_I_SUBMODE_EOF) ? 0x40u : 0));
+    q[1] = 0x00u;
+    q[2] = 0x01u;
+    q[3] = to_bcd(real / 4500u);
+    q[4] = to_bcd((real / 75u) % 60u);
+    q[5] = to_bcd(real % 75u);
+    q[6] = 0;
+    q[7] = q[3];
+    q[8] = q[4];
+    q[9] = q[5];
+    for (i = 0; i < 10; i++) {
+        int b;
+        crc ^= (uint16_t)(q[i] << 8);
+        for (b = 0; b < 8; b++)
+            crc = (uint16_t)((crc & 0x8000u) ? (crc << 1) ^ 0x1021u
+                                             : (crc << 1));
+    }
+    q[10] = (uint8_t)(~crc >> 8);
+    q[11] = (uint8_t)~crc;
+    memcpy(ciap.memory + offset, q, sizeof q);
+}
+
 static void deliver_one_sector(void) {
     uint8_t sector[CIAP_SECTOR_BYTES];
     uint16_t bman;
@@ -409,6 +498,10 @@ static void deliver_one_sector(void) {
 
     uint32_t lba = ciap.drive_lba;
     if (!cdi_media_read_sector_body(lba, sector)) {
+        fprintf(stderr,
+                "[ciap] media read failed at LBA %u; data path stopped\n",
+                lba);
+        debug_dump_fault_trail("CIAP media read failure");
         ciap.data_running = 0;
         return;
     }
@@ -418,6 +511,28 @@ static void deliver_one_sector(void) {
     ciap.last_submode = sector[6];
     ciap.last_coding = sector[7];
     ciap.last_selected = (uint8_t)sector_selected(sector);
+    /* Drive-position locators are selection-independent: the drivers'
+     * seek-confirm ($428D8A) must see the sectors approaching a target even
+     * when no channel selects them, so every sector passing the head
+     * reports, alternating the locator pair on its own. */
+    if (ciap.q_reporting) {
+        unsigned qi = ciap.next_q_buffer;
+        uint16_t qbit = qi ? CIAP_BMAN_Q1 : CIAP_BMAN_Q0;
+        uint16_t qbman = read_word(CIAP_BMAN);
+        ciap.next_q_buffer = (uint8_t)(qi ^ 1u);
+        write_q_locator(qi ? CIAP_QBUF1 : CIAP_QBUF0, lba, sector[6]);
+        /* An unconsumed locator being overwritten is a real overrun the
+         * record path checks for (latched ISR bit 11), not a state to
+         * hide. */
+        if (qbman & qbit)
+            store_word(CIAP_ISR,
+                       (uint16_t)(read_word(CIAP_ISR) | CIAP_ISR_QOVERRUN));
+        store_word(CIAP_BMAN, (uint16_t)(qbman | qbit));
+        store_word(CIAP_ISR,
+                   (uint16_t)(read_word(CIAP_ISR) | CIAP_ISR_QREADY |
+                              (qi ? CIAP_ISR_Q1 : CIAP_ISR_Q0)));
+        assert_interrupt_line();
+    }
     if (!ciap.last_selected) {
         ciap.drive_lba++;
         return;

@@ -63,6 +63,11 @@ typedef struct {
     uint64_t pointer_elapsed_ns;
     uint32_t previous_input;
     int pointer_repeat_count;
+    /* Drive-state reporting (CD-RTOS `(D8)` handshake): a seek arms a
+     * busy($10)->on-target($0E) B0 report chain that the ROM's IKAT ISR
+     * consumes to (re)arm the CIAP stream. */
+    uint8_t seek_report_pending;
+    uint8_t ready_report_pending;
     int initialized;
 } IkatDevice;
 
@@ -328,6 +333,18 @@ static void handle_channel_d(void) {
     switch (command) {
     case 0xA1:
     case 0xB0:
+        /* After a seek the drive answers the play/status request with a
+         * busy state ($10) and follows up unsolicited with on-target ($0E)
+         * once positioned; the ROM's IKAT ISR advances its (D8) handshake
+         * on exactly that byte-3 sequence and only then arms the CIAP
+         * stream. Outside a seek this stays the plain disc status. */
+        if (ikat.seek_report_pending) {
+            static const uint8_t busy_status[4] = { 0xB0, 0x00, 0x02, 0x10 };
+            ikat.seek_report_pending = 0;
+            ikat.ready_report_pending = 1;
+            defer_response(CHANNEL_D, busy_status, sizeof busy_status);
+            break;
+        }
         make_disc_status(disc_status);
         defer_response(CHANNEL_D, disc_status, sizeof disc_status);
         break;
@@ -347,13 +364,17 @@ static void handle_channel_d(void) {
         defer_response(CHANNEL_D, reply_c4, sizeof reply_c4);
         break;
     case 0xC5:
+        ikat.seek_report_pending = 0;
+        ikat.ready_report_pending = 0;
         defer_response(CHANNEL_D, reply_c5, sizeof reply_c5);
         break;
     case 0xE0:
         cdic_set_drive_position(absolute_msf_lba(channel->command), 1);
+        ikat.seek_report_pending = 1;
         break;
     case 0xE1:
         cdic_set_drive_position(absolute_msf_lba(channel->command), 0);
+        ikat.seek_report_pending = 1;
         break;
     default:
         break;
@@ -468,6 +489,13 @@ void slave_increment_time(double nanoseconds) {
             publish_and_interrupt(channel, queue->deferred, queue->deferred_length);
             queue->deferred_pending = 0;
             queue->deferred_frame = 0;
+            /* Chain the unsolicited on-target report behind the busy reply
+             * once the ROM has consumed it; our seeks settle instantly. */
+            if (channel == CHANNEL_D && ikat.ready_report_pending) {
+                static const uint8_t on_target[4] = { 0xB0, 0x00, 0x02, 0x0E };
+                ikat.ready_report_pending = 0;
+                defer_response(CHANNEL_D, on_target, sizeof on_target);
+            }
         }
     }
 }
