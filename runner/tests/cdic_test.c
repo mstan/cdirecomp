@@ -113,6 +113,20 @@ int main(void) {
     CHECK(irq_clears == 1);
     CHECK((cdic_read(CDI_CDIC_BASE + 0x25AA, 2) & 0x0080) == 0);
 
+    /* Bit-8 (interrupt-enable) transport commands complete asynchronously
+     * too: the CD driver writes $142 at SS_Play submit ($428674) and parks
+     * in status 8 until ISR bit 3 arrives; a $142 that never completes
+     * gates the PCL processor off forever. */
+    cdic_write(CDI_CDIC_BASE + 0x25A6, 0x0142, 2); /* play-continue + IE */
+    CHECK(irq_raises == 1);
+    CHECK((cdic_read(CDI_CDIC_BASE + 0x25AA, 2) & 0x0080) == 0);
+    cdic_increment_time(25000.0);
+    CHECK(irq_raises == 2);
+    CHECK((cdic_read(CDI_CDIC_BASE + 0x25AA, 2) & 0x0080) != 0);
+    cdic_write(CDI_CDIC_BASE + 0x25A6, 0x0200, 2); /* acknowledge */
+    CHECK(irq_clears == 2);
+    CHECK((cdic_read(CDI_CDIC_BASE + 0x25AA, 2) & 0x0080) == 0);
+
     if (failures) return 1;
     puts("CIAP channel-selection and AP command tests passed");
     return 0;

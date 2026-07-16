@@ -43,6 +43,9 @@ enum {
     CIAP_APERTURE_BYTES = 0x4000u,
     CIAP_SECTOR_BYTES = 2340u,
     CIAP_ISR_DATA = 0x0001u,
+    /* Trigger-sector event (submode $10). Folded into the ROM ISR's $2002
+     * PCL dispatch mask ($429450) and enabled in the boot IER ($060B). */
+    CIAP_ISR_TRIGGER = 0x0002u,
     CIAP_ISR_QREADY = 0x0004u,
     /* Per-buffer locator-ready interrupt sources. The boot IER ($060B)
      * enables these while masking the bit-2 summary, and the ROM ISR folds
@@ -74,6 +77,10 @@ enum {
     CIAP_ISR_FIRMWARE_IDLE = 0x0009u,
     CIAP_APCR_FINISH = 0x0020u,
     CIAP_APCR_INTNOW = 0x00A0u,
+    /* Interrupt-enable command modifier: the driver's transport commands
+     * ($142 play-continue, $140 record-engine arm, $101) set bit 8 and wait
+     * for the completion interrupt before advancing their state machine. */
+    CIAP_APCR_IE = 0x0100u,
     CIAP_APCR_ACK = 0x0200u,
     CD_I_SUBMODE_EOF = 0x80u,
     CD_I_SUBMODE_TRIGGER = 0x10u,
@@ -342,7 +349,14 @@ static void handle_register_write(uint32_t offset, uint16_t value) {
             clear_interrupt_line();
             assert_interrupt_line();
         }
-        else if (value == CIAP_APCR_INTNOW || value == CIAP_APCR_FINISH) {
+        else if (value == CIAP_APCR_INTNOW || value == CIAP_APCR_FINISH ||
+                 (value & CIAP_APCR_IE)) {
+            /* Bit 8 asks the audio processor to interrupt when the command
+             * completes. The CD driver's transport ops write $142/$140/$101
+             * and then park in status 8 until ISR bit 3 delivers the
+             * completion ($42940C -> $4294A0); without it the SS_Play state
+             * machine never reaches status 5 and the PCL processor stays
+             * gated off. */
             /* The audio processor executes the command and interrupts
              * LATER. Completing synchronously inside this write re-enters
              * the driver's AP dispatch before the caller reaches its
@@ -590,7 +604,13 @@ static void deliver_one_sector(void) {
     if (!(bman & (CIAP_BMAN_DATA0 | CIAP_BMAN_DATA1)))
         store_word(CIAP_BMAN, (uint16_t)(bman | bit));
     ciap.buffer_waiting_ack = 1;
-    store_word(CIAP_ISR, (uint16_t)(read_word(CIAP_ISR) | CIAP_ISR_DATA));
+    /* A selected trigger sector latches its own event bit alongside DATA;
+     * the ROM ISR reads the combined word and takes the $2002 PCL path
+     * ($429450) from the same invocation once the driver is in status 5. */
+    store_word(CIAP_ISR,
+               (uint16_t)(read_word(CIAP_ISR) | CIAP_ISR_DATA |
+                          ((sector[6] & CD_I_SUBMODE_TRIGGER)
+                               ? CIAP_ISR_TRIGGER : 0u)));
     assert_interrupt_line();
 }
 
