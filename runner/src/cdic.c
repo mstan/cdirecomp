@@ -266,6 +266,12 @@ uint32_t cdic_read(uint32_t address, int size) {
 
 static void reset_data_path(void) {
     ciap.data_running = 0;
+    /* $0100 stop/flush deactivates selection until the next ASEL ($0200):
+     * the boot-module loads re-arm with a bare $0100+$00C4 (no ASEL) and
+     * expect an unfiltered stream, while the play arm ($42BF74) explicitly
+     * re-issues ASEL before its $7000/$0044 locator start. Persisting the
+     * selection across the flush stalls the very first boot-module read
+     * behind a held sector its mask never matches. */
     ciap.selection_active = 0;
     ciap.q_reporting = 0;
     ciap.ap_completion_pending = 0;
