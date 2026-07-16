@@ -299,6 +299,8 @@ static void handle_channel_c(void) {
             return;
         }
     }
+    fprintf(stderr, "[ikat] unmodeled channel-C command $%02X dropped\n",
+            channel->command[0]);
     channel->command_length = 0;
 }
 
@@ -333,11 +335,15 @@ static void handle_channel_d(void) {
     switch (command) {
     case 0xA1:
     case 0xB0:
-        /* After a seek the drive answers the play/status request with a
-         * busy state ($10) and follows up unsolicited with on-target ($0E)
-         * once positioned; the ROM's IKAT ISR advances its (D8) handshake
-         * on exactly that byte-3 sequence and only then arms the CIAP
+        /* B0 is the play request: it (re)starts the transport, which feeds
+         * the armed decoder — reads issued mid-stream carry no CCR arm of
+         * their own. After a seek the drive answers with a busy state
+         * ($10) and follows up unsolicited with on-target ($0E) once
+         * positioned; the ROM's IKAT ISR advances its (D8) handshake on
+         * exactly that byte-3 sequence and only then (re)arms the CIAP
          * stream. Outside a seek this stays the plain disc status. */
+        if (command == 0xB0)
+            cdic_transport_resume();
         if (ikat.seek_report_pending) {
             static const uint8_t busy_status[4] = { 0xB0, 0x00, 0x02, 0x10 };
             ikat.seek_report_pending = 0;
@@ -361,9 +367,16 @@ static void handle_channel_d(void) {
         defer_response(CHANNEL_D, reply_c3, sizeof reply_c3);
         break;
     case 0xC4:
+        /* The transport takes real time to resume; applying it when the
+         * deferred reply lands puts the restart AFTER the decoder reset
+         * the completion teardown issues right after this command
+         * (C4 resume -> CCR $0100 flush -> stream continues). */
         defer_response(CHANNEL_D, reply_c4, sizeof reply_c4);
         break;
     case 0xC5:
+        /* C5 ends an operation but does NOT stop the transport: the boot
+         * module loads keep consuming the running stream right through it
+         * with no resume command of their own. */
         ikat.seek_report_pending = 0;
         ikat.ready_report_pending = 0;
         defer_response(CHANNEL_D, reply_c5, sizeof reply_c5);
@@ -486,6 +499,8 @@ void slave_increment_time(double nanoseconds) {
     for (channel = 0; channel < CHANNEL_COUNT; channel++) {
         IkatChannel *queue = &ikat.channel[channel];
         if (queue->deferred_pending && g_frame_count >= queue->deferred_frame) {
+            if (channel == CHANNEL_D && queue->deferred[0] == 0xC4)
+                cdic_transport_resume();
             publish_and_interrupt(channel, queue->deferred, queue->deferred_length);
             queue->deferred_pending = 0;
             queue->deferred_frame = 0;

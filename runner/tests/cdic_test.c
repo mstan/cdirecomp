@@ -98,7 +98,14 @@ int main(void) {
     CHECK(irq_raises == 0);
     CHECK((cdic_read(CDI_CDIC_BASE + 0x25AA, 2) & 0x0080) == 0);
 
+    /* INTNOW/FINISH complete ASYNCHRONOUSLY: the AP executes the command
+     * and interrupts later. CD-RTOS arms its notify flag right after the
+     * APCR write ($428836/$42883A); a synchronous interrupt preempts that
+     * arm and strands the client wake. */
     cdic_write(CDI_CDIC_BASE + 0x25A6, 0x00A0, 2); /* INTNOW */
+    CHECK(irq_raises == 0);
+    CHECK((cdic_read(CDI_CDIC_BASE + 0x25AA, 2) & 0x0080) == 0);
+    cdic_increment_time(25000.0); /* > the 20 us AP command latency */
     CHECK(irq_raises == 1);
     CHECK((cdic_read(CDI_CDIC_BASE + 0x25AA, 2) & 0x0080) != 0);
 

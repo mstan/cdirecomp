@@ -242,6 +242,8 @@ void     mcd212_tick(uint32_t cycles);
 void     cdic_write(uint32_t addr, uint32_t val, int size);
 uint32_t cdic_read (uint32_t addr, int size);
 void     cdic_set_drive_position(uint32_t lba, int audio);
+void     cdic_transport_pause(void);
+void     cdic_transport_resume(void);
 void     cdic_increment_time(double ns);
 uint16_t cdic_dma_pull_word(void);
 void     cdic_dma_push_word(uint16_t value);

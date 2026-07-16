@@ -100,12 +100,15 @@ typedef struct {
     uint8_t next_data_buffer;
     uint8_t next_q_buffer;
     uint8_t drive_positioned;
+    uint8_t audio_positioned;
     uint8_t data_running;
     uint8_t data_path_armed;
     uint8_t q_reporting;
     uint8_t selection_prime_pending;
     uint8_t selection_active;
     uint8_t buffer_waiting_ack;
+    uint8_t ap_completion_pending;
+    uint64_t ap_completion_delay_ns;
     int initialized;
 } CiapDevice;
 
@@ -256,8 +259,10 @@ uint32_t cdic_read(uint32_t address, int size) {
 
 static void reset_data_path(void) {
     ciap.data_running = 0;
-    ciap.q_reporting = 0;
     ciap.selection_active = 0;
+    ciap.q_reporting = 0;
+    ciap.ap_completion_pending = 0;
+    ciap.ap_completion_delay_ns = 0;
     ciap.next_data_buffer = 0;
     ciap.buffer_waiting_ack = 0;
     ciap.selection_prime_pending = 0;
@@ -338,11 +343,17 @@ static void handle_register_write(uint32_t offset, uint16_t value) {
             assert_interrupt_line();
         }
         else if (value == CIAP_APCR_INTNOW || value == CIAP_APCR_FINISH) {
-            store_word(CIAP_ASTAT,
-                       (uint16_t)(read_word(CIAP_ASTAT) | 0x0080u));
-            store_word(CIAP_ISR,
-                       (uint16_t)(read_word(CIAP_ISR) | 0x0008u));
-            assert_interrupt_line();
+            /* The audio processor executes the command and interrupts
+             * LATER. Completing synchronously inside this write re-enters
+             * the driver's AP dispatch before the caller reaches its
+             * BSET #6 notify arm four instructions after the APCR store
+             * ($428836/$42883A), stranding the client wake forever. */
+            /* Long enough to let the caller finish arming its notify state
+             * (a handful of instructions), short enough that the ROM's
+             * bounded completion polls (e.g. the 400-iteration wait at
+             * $429214) still observe it. */
+            ciap.ap_completion_pending = 1;
+            ciap.ap_completion_delay_ns = 20000u; /* 20 us guest time */
         }
         break;
     case CIAP_TCM1:
@@ -406,10 +417,33 @@ void cdic_write(uint32_t address, uint32_t value, int size) {
     }
 }
 
+/* The IKAT's play/resume commands (B0/C4) restart sector delivery after a
+ * decoder reset: the drivers reset the CIAP around a completed operation
+ * and then resume (C4) expecting the stream to keep flowing into the armed
+ * sector handlers — the attract's next scene starts at the very next
+ * sector. */
+void cdic_transport_pause(void) {
+    ensure_initialized();
+    ciap.data_running = 0;
+}
+
+void cdic_transport_resume(void) {
+    ensure_initialized();
+    /* An audio play (E0 positioning) keeps the data path parked; resuming
+     * it would flood DATA interrupts into a driver phase that expects
+     * none. */
+    if (ciap.data_path_armed && ciap.drive_positioned &&
+        !ciap.audio_positioned) {
+        ciap.data_running = 1;
+        ciap.sector_elapsed_ns = 0;
+    }
+}
+
 void cdic_set_drive_position(uint32_t lba, int audio) {
     ensure_initialized();
     ciap.drive_lba = lba;
     ciap.drive_positioned = 1;
+    ciap.audio_positioned = (uint8_t)(audio != 0);
     /* STARTA is intentionally not decoded yet; retain the mode distinction so
      * the audio path can attach here without changing the IKAT contract. */
     if (audio) ciap.data_running = 0;
@@ -563,6 +597,20 @@ static void deliver_one_sector(void) {
 void cdic_increment_time(double nanoseconds) {
     const uint64_t sector_period_ns = 1000000000ull / 75ull;
     ensure_initialized();
+    if (ciap.ap_completion_pending) {
+        uint64_t step = (uint64_t)nanoseconds;
+        if (step >= ciap.ap_completion_delay_ns) {
+            ciap.ap_completion_pending = 0;
+            ciap.ap_completion_delay_ns = 0;
+            store_word(CIAP_ASTAT,
+                       (uint16_t)(read_word(CIAP_ASTAT) | 0x0080u));
+            store_word(CIAP_ISR,
+                       (uint16_t)(read_word(CIAP_ISR) | 0x0008u));
+            assert_interrupt_line();
+        } else {
+            ciap.ap_completion_delay_ns -= step;
+        }
+    }
     if (!ciap.data_running) return;
     ciap.sector_elapsed_ns += (uint64_t)nanoseconds;
     while (ciap.sector_elapsed_ns >= sector_period_ns) {
