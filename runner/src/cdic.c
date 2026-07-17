@@ -294,26 +294,25 @@ static void handle_register_write(uint32_t offset, uint16_t value) {
         break;
     case CIAP_BMAN:
     {
-        uint16_t next = (uint16_t)(read_word(offset) ^
-                                   (value & (CIAP_BMAN_DATA0 |
-                                             CIAP_BMAN_DATA1)));
-        next &= (uint16_t)~(value & CIAP_BMAN_ACK_CLEAR);
+        /* All BMAN ownership bits are write-one-to-clear acknowledges: the
+         * ROM ISR always writes back the full accumulated mask of what it
+         * serviced ($0C for the data pair, $30/$C0 for locator pairs) —
+         * the driver's buffer picker ($4292F0) reads the SET bits to find
+         * the delivered buffer, so a delivery must set its own bit and an
+         * acknowledge must clear it.  (The previous XOR "ownership
+         * handoff" reading desynced under the positioning handler's
+         * ack-everything flushes: alternation stuck, both-set/none-set
+         * states appeared, and a fresh sector overwrote an un-acked
+         * buffer — consumed stale EOR = the attract scene-swap stall.)
+         * Which buffer the CIAP fills next is the CIAP's own business:
+         * deliver_one_sector alternates at delivery time. */
+        uint16_t next = (uint16_t)(read_word(offset) &
+                                   ~(value & (CIAP_BMAN_DATA0 |
+                                              CIAP_BMAN_DATA1 |
+                                              CIAP_BMAN_ACK_CLEAR)));
         store_word(offset, next);
-        /* CD-RTOS acknowledges a consumed main-channel buffer by writing
-         * DATA0|DATA1. The XOR transition is a one-hot ownership handoff:
-         * 01 -> 10 or 10 -> 01. The selected bit names the buffer CIAP fills
-         * on the next DATA interrupt; it is not a pair of independent FIFO
-         * occupancy flags. */
-        if ((next & (CIAP_BMAN_DATA0 | CIAP_BMAN_DATA1)) ==
-            CIAP_BMAN_DATA0) {
-            ciap.next_data_buffer = 0;
+        if (value & (CIAP_BMAN_DATA0 | CIAP_BMAN_DATA1))
             ciap.buffer_waiting_ack = 0;
-        }
-        else if ((next & (CIAP_BMAN_DATA0 | CIAP_BMAN_DATA1)) ==
-                 CIAP_BMAN_DATA1) {
-            ciap.next_data_buffer = 1;
-            ciap.buffer_waiting_ack = 0;
-        }
         break;
     }
     case CIAP_CCR:
@@ -606,10 +605,14 @@ static void deliver_one_sector(void) {
     bit = buffer ? CIAP_BMAN_DATA1 : CIAP_BMAN_DATA0;
     offset = buffer ? CIAP_DATA1 : CIAP_DATA0;
     memcpy(ciap.memory + offset, sector, sizeof sector);
+    /* The delivery owns its BMAN bit (the ROM's picker reads the set bit to
+     * find the buffer) and the CIAP alternates fill buffers itself.  A real
+     * DATA interrupt also satisfies any pending re-selection poke. */
     bman = read_word(CIAP_BMAN);
-    if (!(bman & (CIAP_BMAN_DATA0 | CIAP_BMAN_DATA1)))
-        store_word(CIAP_BMAN, (uint16_t)(bman | bit));
+    store_word(CIAP_BMAN, (uint16_t)(bman | bit));
+    ciap.next_data_buffer = (uint8_t)(buffer ^ 1u);
     ciap.buffer_waiting_ack = 1;
+    ciap.selection_prime_pending = 0;
     /* A selected trigger sector latches its own event bit alongside DATA;
      * the ROM ISR reads the combined word and takes the $2002 PCL path
      * ($429450) from the same invocation once the driver is in status 5. */
@@ -641,7 +644,18 @@ void cdic_increment_time(double nanoseconds) {
     ciap.sector_elapsed_ns += (uint64_t)nanoseconds;
     while (ciap.sector_elapsed_ns >= sector_period_ns) {
         ciap.sector_elapsed_ns -= sector_period_ns;
-        if (ciap.selection_prime_pending && !ciap.buffer_waiting_ack) {
+        /* Re-selection poke: plain transport reads ($C4 STARTD, no locator
+         * reporting) re-arm selection mid-stream and wait on a DATA event
+         * to re-evaluate — the boot module loads hang without it.  It must
+         * NEVER fire on a locator-armed play ($0010/$0044/$0094): those
+         * flows count DELIVERIES through the driver's positioning
+         * transition handler, and a synthesized DATA with no delivery
+         * behind it spends the transition's single discard-one-delivery
+         * step, letting the previous record's EOR sector fall through to
+         * the record engine one slot early — the attract scene-swap
+         * stall. */
+        if (ciap.selection_prime_pending && !ciap.q_reporting &&
+            !ciap.buffer_waiting_ack) {
             ciap.selection_prime_pending = 0;
             store_word(CIAP_ISR,
                        (uint16_t)(read_word(CIAP_ISR) | CIAP_ISR_DATA));
