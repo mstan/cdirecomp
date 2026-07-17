@@ -455,6 +455,21 @@ void cdic_transport_resume(void) {
         !ciap.audio_positioned) {
         ciap.data_running = 1;
         ciap.sector_elapsed_ns = 0;
+        /* A resume means the host is (re)consuming the stream.  If a
+         * delivered sector is still sitting un-acknowledged, its DATA
+         * announcement may have been consumed while the driver was
+         * idle (the completion teardown's deferred C4 restarts the
+         * transport and one sector lands before anyone is ready) —
+         * re-announce it, exactly as the persistent buffer status on
+         * the real part would re-interrupt the armed handler.  Without
+         * this, a mid-stream read that carries no CCR arm of its own
+         * waits forever on a DATA event for a buffer that is already
+         * full (the real-time-pace game-load wedge). */
+        if (ciap.buffer_waiting_ack) {
+            store_word(CIAP_ISR,
+                       (uint16_t)(read_word(CIAP_ISR) | CIAP_ISR_DATA));
+            assert_interrupt_line();
+        }
     }
 }
 
