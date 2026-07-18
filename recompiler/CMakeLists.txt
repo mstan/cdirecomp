@@ -3,14 +3,15 @@ project(CdiRecomp C)
 
 set(CMAKE_C_STANDARD 11)
 
+set(M68K_RECOMP_CORE_DIR
+    "${CMAKE_CURRENT_SOURCE_DIR}/../external/m68k-recomp-core")
+include("${M68K_RECOMP_CORE_DIR}/cmake/M68kRecompCore.cmake")
+m68k_recomp_core_sources(M68K_RECOMP_CORE_SOURCES scc68070)
+m68k_recomp_core_include_dirs(M68K_RECOMP_CORE_INCLUDE_DIRS scc68070)
+
 set(CDI_FRONTEND_SOURCES
     src/rom_parser.c
-    src/m68k_decoder.c
-    src/m68k_validator.c
-    src/function_finder.c
-    src/code_generator.c
-    src/codegen_diag.c
-    src/annotations.c
+    ${M68K_RECOMP_CORE_SOURCES}
     src/game_config.c
     src/toml.c
 )
@@ -20,7 +21,7 @@ add_executable(CdiRecomp
     src/disc_parser.c
     ${CDI_FRONTEND_SOURCES}
 )
-target_include_directories(CdiRecomp PRIVATE src)
+target_include_directories(CdiRecomp PRIVATE src ${M68K_RECOMP_CORE_INCLUDE_DIRS})
 
 set_target_properties(CdiRecomp PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
@@ -38,7 +39,7 @@ add_executable(CdiRecompBios
     src/disc_parser.c
     ${CDI_FRONTEND_SOURCES}
 )
-target_include_directories(CdiRecompBios PRIVATE src)
+target_include_directories(CdiRecompBios PRIVATE src ${M68K_RECOMP_CORE_INCLUDE_DIRS})
 set_target_properties(CdiRecompBios PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
 )
@@ -54,7 +55,7 @@ add_executable(CdiRecompFrontendFixture EXCLUDE_FROM_ALL
     src/main_genesis.c
     ${CDI_FRONTEND_SOURCES}
 )
-target_include_directories(CdiRecompFrontendFixture PRIVATE src)
+target_include_directories(CdiRecompFrontendFixture PRIVATE src ${M68K_RECOMP_CORE_INCLUDE_DIRS})
 set_target_properties(CdiRecompFrontendFixture PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
 )

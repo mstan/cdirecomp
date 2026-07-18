@@ -50,7 +50,7 @@ add_executable(CdiRuntime
     src/m68k_interp.c
     # Clean-room hybrid interpreter (MC-CDI-011) reuses the recompiler's own
     # decoder for parity-by-construction with the static C emitter.
-    "${CMAKE_CURRENT_SOURCE_DIR}/../recompiler/src/m68k_decoder.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../external/m68k-recomp-core/common/m68k_decoder.c"
     "${CMAKE_CURRENT_SOURCE_DIR}/../recompiler/src/rom_parser.c"
     "${CMAKE_CURRENT_SOURCE_DIR}/../recompiler/src/disc_parser.c"
     ${BIOS_GEN_SRCS}
@@ -59,6 +59,7 @@ add_executable(CdiRuntime
 
 target_include_directories(CdiRuntime PRIVATE
     include
+    "${CMAKE_CURRENT_SOURCE_DIR}/../external/m68k-recomp-core/common"
     "${CMAKE_CURRENT_SOURCE_DIR}/../recompiler/src"
     "${CMAKE_CURRENT_SOURCE_DIR}/../bios/generated"
     "${CMAKE_CURRENT_SOURCE_DIR}/../hotelmario/generated"
