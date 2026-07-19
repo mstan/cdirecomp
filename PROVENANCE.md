@@ -41,11 +41,13 @@ player or recompiler targets and are never packaged.
 The formerly vendored AGPL clown68000/clowncommon trees and their cycle-probe
 adapter were removed on 2026-07-14. Neither `CdiRuntime` nor `CdiRecomp` now
 includes, links, or requires them. Local historical checkouts remain ignored.
+Ahead of this repository's public release the entire `external/clown68000` and
+`external/clowncommon` history was stripped with `git filter-repo`, so no
+vendored third-party emulator source remains in any commit.
 
-Production packaging is runtime-only. Before publishing this repository's
-existing Git history, remove the historical vendor blobs from that history or
-publish from a reviewed clean export; deleting them from the current tree does
-not erase earlier commits.
+Production packaging is runtime-only. The recompiler, oracle, development
+tools, user-supplied ROM/disc images, traces, and build outputs are never
+packaged into a runtime release.
 
 ## Audit rule
 
