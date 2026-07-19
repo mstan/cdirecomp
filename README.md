@@ -5,7 +5,8 @@
 > perform a **very basic boot of a CD-i title** — *Hotel Mario* reaches its
 > title card. **Gameplay is not yet reachable.** Expect rough edges, missing
 > features, incomplete hardware coverage, and breaking changes. This is a
-> research project shared in the open, not a finished emulator or player.
+> research project shared in the open, not a finished product — and it is a
+> static recompiler, **not an emulator**.
 
 **cdirecomp** is a **static recompiler** for the **Philips CD-i**. It lifts the
 console's **Motorola 68000-family** machine code (CPU: **SCC68070**) into
@@ -74,7 +75,7 @@ What works today:
   real-time clock from your **Windows host clock** once at startup (opt-in), and
   the player's on-screen **Time & Date** settings screen is functional.
 - **Working mouse control on Windows.** The host mouse drives the CD-i pointer
-  directly through the emulated IKAT input path — **including inside Hotel
+  directly through the runtime's IKAT input model — **including inside Hotel
   Mario**, not just the shell.
 - **Clean-room device models** for the MCD212 video pipeline (bitmap, CLUT,
   RGB555, DYUV, RL7/RL3, mosaic, transparency/matte compositing, cursor), the
