@@ -649,6 +649,44 @@ static void resp_frame_hashes(const char *line, char *out, int outlen) {
  * expose one canonical scanline at a time.  The copy comes from the same
  * atomically published front buffer consumed by the SDL frontend; querying it
  * never advances or mutates the guest. */
+/* Raw decoded plane rows and per-pixel composition verdicts (always-on
+ * snapshots from compose_line): {"cmd":"video_plane","plane":0|1,"y":N} ->
+ * argb hex row; plane 2 -> verdict byte hex row. */
+static void resp_video_plane(const char *line, char *out, int outlen) {
+    static uint32_t row[MCD212_VIDEO_MAX_WIDTH];
+    static uint8_t verdict[MCD212_VIDEO_MAX_WIDTH];
+    uint64_t plane = 0, y = 0;
+    unsigned width;
+    json_int(line, "plane", &plane);
+    if (!json_int(line, "y", &y)) {
+        snprintf(out, outlen, "{\"ok\":false,\"error\":\"y required\"}");
+        return;
+    }
+    if (plane == 2) {
+        width = mcd212_video_debug_verdict_row((unsigned)y, verdict,
+                                               MCD212_VIDEO_MAX_WIDTH);
+        int n = snprintf(out, outlen,
+                         "{\"ok\":true,\"plane\":2,\"y\":%llu,\"width\":%u,\"verdict\":\"",
+                         (unsigned long long)y, width);
+        for (unsigned x = 0; x < width && n < outlen - 8; x++)
+            n += snprintf(out + n, outlen - n, "%02X", verdict[x]);
+        snprintf(out + n, outlen - n, "\"}");
+        return;
+    }
+    width = mcd212_video_debug_plane_row((int)plane, (unsigned)y, row,
+                                         MCD212_VIDEO_MAX_WIDTH);
+    if (!width) {
+        snprintf(out, outlen, "{\"ok\":false,\"error\":\"bad plane/y\"}");
+        return;
+    }
+    int n = snprintf(out, outlen,
+                     "{\"ok\":true,\"plane\":%llu,\"y\":%llu,\"width\":%u,\"argb\":\"",
+                     (unsigned long long)plane, (unsigned long long)y, width);
+    for (unsigned x = 0; x < width && n < outlen - 12; x++)
+        n += snprintf(out + n, outlen - n, "%08X", row[x]);
+    snprintf(out + n, outlen - n, "\"}");
+}
+
 static void resp_video_scanline(const char *line, char *out, int outlen) {
     static uint32_t frame[MCD212_VIDEO_MAX_WIDTH * MCD212_VIDEO_MAX_HEIGHT];
     uint16_t width = 0, height = 0;
@@ -1141,6 +1179,7 @@ static int handle_line(const char *line, char *out, int outlen) {
     else if (!strcmp(cmd, "audio_state"))    resp_audio_state(out, outlen);
     else if (!strcmp(cmd, "frame_hashes"))   resp_frame_hashes(line, out, outlen);
     else if (!strcmp(cmd, "video_scanline")) resp_video_scanline(line, out, outlen);
+    else if (!strcmp(cmd, "video_plane"))    resp_video_plane(line, out, outlen);
     else if (!strcmp(cmd, "video_state"))    resp_video_state(out, outlen);
     else if (!strcmp(cmd, "video_clut"))     resp_video_clut(out, outlen);
     else if (!strcmp(cmd, "disc_state"))     resp_disc_state(out, outlen);

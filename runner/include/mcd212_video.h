@@ -64,3 +64,12 @@ void mcd212_video_debug_cursor(Mcd212VideoCursorState *out);
 /* Persistent control-program state used by the pixel decoder.  This is a
  * read-only diagnostic snapshot; it never changes display timing or state. */
 void mcd212_video_debug_state(Mcd212VideoDebugState *out);
+
+/* Always-on per-plane composition snapshots: raw decoded plane pixels and
+ * the per-pixel composition verdict (bit0 transparent_a, bit1 transparent_b,
+ * bit2 front shown, bit3 back shown, bit4 backdrop, bit5 mixed).  Read-only
+ * diagnostics captured by every composed line. */
+unsigned mcd212_video_debug_plane_row(int plane, unsigned y,
+                                      uint32_t *out, unsigned capacity);
+unsigned mcd212_video_debug_verdict_row(unsigned y, uint8_t *out,
+                                        unsigned capacity);

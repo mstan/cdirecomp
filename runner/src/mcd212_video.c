@@ -74,6 +74,14 @@ typedef struct {
     uint32_t decoded[PLANE_COUNT][MCD212_VIDEO_MAX_WIDTH];
     uint8_t contribution_lut[64][256];
     uint32_t frame[2][MCD212_VIDEO_MAX_WIDTH * MCD212_VIDEO_MAX_HEIGHT];
+    /* Always-on per-plane debug snapshots (ring-buffer doctrine: the probe
+     * queries state that is captured continuously, never armed).  Raw
+     * decoded plane pixels before composition, plus a per-pixel verdict
+     * mask: bit0 transparent_a, bit1 transparent_b, bit2 output-was-front,
+     * bit3 output-was-back, bit4 output-was-backdrop, bit5 mixed. */
+    uint32_t plane_frame[PLANE_COUNT][MCD212_VIDEO_MAX_WIDTH *
+                                      MCD212_VIDEO_MAX_HEIGHT];
+    uint8_t verdict_frame[MCD212_VIDEO_MAX_WIDTH * MCD212_VIDEO_MAX_HEIGHT];
     uint16_t width;
     uint16_t height;
     uint16_t published_width;
@@ -638,8 +646,15 @@ static void compose_line(uint16_t line) {
     uint32_t backdrop;
     unsigned x;
 
+    uint32_t *snap_a;
+    uint32_t *snap_b;
+    uint8_t *verdict;
+
     if (line >= video.height) return;
     destination = &video.frame[video.drawing_buffer][(uint32_t)line * video.width];
+    snap_a = &video.plane_frame[PLANE_A][(uint32_t)line * video.width];
+    snap_b = &video.plane_frame[PLANE_B][(uint32_t)line * video.width];
+    verdict = &video.verdict_frame[(uint32_t)line * video.width];
     backdrop = yrgb_color(r->backdrop);
     initialize_matte_state(&matte);
 
@@ -666,14 +681,23 @@ static void compose_line(uint16_t line) {
         front_transparent = r->plane_b_front ? transparent_b : transparent_a;
         back_transparent = r->plane_b_front ? transparent_a : transparent_b;
 
-        if (r->mixing && !transparent_a && !transparent_b)
+        snap_a[x] = raw_a | 0xFF000000u;
+        snap_b[x] = raw_b | 0xFF000000u;
+        verdict[x] = (uint8_t)((transparent_a ? 1u : 0u) |
+                               (transparent_b ? 2u : 0u));
+        if (r->mixing && !transparent_a && !transparent_b) {
             destination[x] = add_planes(a, b);
-        else if (!front_transparent)
+            verdict[x] |= 0x20u;
+        } else if (!front_transparent) {
             destination[x] = front | 0xFF000000u;
-        else if (!back_transparent)
+            verdict[x] |= 0x04u;
+        } else if (!back_transparent) {
             destination[x] = back | 0xFF000000u;
-        else
+            verdict[x] |= 0x08u;
+        } else {
             destination[x] = backdrop;
+            verdict[x] |= 0x10u;
+        }
     }
     draw_cursor(destination, line);
 }
@@ -843,4 +867,26 @@ void mcd212_video_debug_state(Mcd212VideoDebugState *out) {
 
 void mcd212_video_debug_clut(uint32_t out[256]) {
     if (out) memcpy(out, video.registers.clut, sizeof video.registers.clut);
+}
+
+/* Debug: raw decoded plane rows and per-pixel composition verdicts, captured
+ * always-on by compose_line (never armed).  plane 0/1 = decoded pixels;
+ * verdict bits: 1 transparent_a, 2 transparent_b, 4 front shown, 8 back
+ * shown, 16 backdrop shown, 32 mixed. */
+unsigned mcd212_video_debug_plane_row(int plane, unsigned y,
+                                      uint32_t *out, unsigned capacity) {
+    unsigned width = video.width;
+    if (!out || plane < 0 || plane >= (int)PLANE_COUNT) return 0;
+    if (y >= video.height || width > capacity) return 0;
+    memcpy(out, &video.plane_frame[plane][(size_t)y * width],
+           (size_t)width * sizeof *out);
+    return width;
+}
+
+unsigned mcd212_video_debug_verdict_row(unsigned y, uint8_t *out,
+                                        unsigned capacity) {
+    unsigned width = video.width;
+    if (!out || y >= video.height || width > capacity) return 0;
+    memcpy(out, &video.verdict_frame[(size_t)y * width], width);
+    return width;
 }
