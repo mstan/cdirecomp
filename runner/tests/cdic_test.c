@@ -127,6 +127,32 @@ int main(void) {
     CHECK(irq_clears == 2);
     CHECK((cdic_read(CDI_CDIC_BASE + 0x25AA, 2) & 0x0080) == 0);
 
+    /* Mid-stream re-selection (ASEL while the transport runs) arms the
+     * re-evaluation poke, but the poke must only ride ticks whose sector
+     * produces no DATA delivery.  A selected sector arriving right after
+     * the ASEL must deliver normally (one DATA with its BMAN bit set) —
+     * a deliveryless DATA ahead of it would spend the record path's
+     * positioning-transition discard ($4286D0) and let the previous
+     * record's EOR reach the record engine (the attract/title-background
+     * play-pump stall). */
+    (void)cdic_read(CDI_CDIC_BASE + 0x2586, 2);    /* clear ISR */
+    cdic_write(CDI_CDIC_BASE + 0x2594, 0x000C, 2); /* ack data buffers */
+    cdic_write(CDI_CDIC_BASE + 0x2596, 0x0008, 2); /* ASEL mid-stream */
+    make_sector(15, 0x62);                         /* selected video */
+    cdic_increment_time(14000000.0);
+    CHECK((cdic_read(CDI_CDIC_BASE + 0x2586, 2) & 0x0001) != 0);
+    CHECK((cdic_read(CDI_CDIC_BASE + 0x2594, 2) & 0x000C) != 0);
+
+    /* The boot-load shape still needs the poke: ASEL mid-stream with only
+     * unselected sectors passing must synthesize one DATA (no BMAN bit)
+     * so the driver wakes and re-evaluates its selection. */
+    cdic_write(CDI_CDIC_BASE + 0x2594, 0x000C, 2); /* ack data buffers */
+    cdic_write(CDI_CDIC_BASE + 0x2596, 0x0008, 2); /* ASEL mid-stream */
+    make_sector(3, 0x62);                          /* unselected channel */
+    cdic_increment_time(14000000.0);
+    CHECK((cdic_read(CDI_CDIC_BASE + 0x2586, 2) & 0x0001) != 0);
+    CHECK((cdic_read(CDI_CDIC_BASE + 0x2594, 2) & 0x000C) == 0);
+
     if (failures) return 1;
     puts("CIAP channel-selection and AP command tests passed");
     return 0;

@@ -113,7 +113,6 @@ typedef struct {
     uint8_t q_reporting;
     uint8_t selection_prime_pending;
     uint8_t selection_active;
-    uint8_t buffer_waiting_ack;
     uint8_t ap_completion_pending;
     uint64_t ap_completion_delay_ns;
     int initialized;
@@ -129,6 +128,17 @@ static uint16_t read_word(unsigned offset) {
 static void store_word(unsigned offset, uint16_t value) {
     ciap.memory[offset] = (uint8_t)(value >> 8);
     ciap.memory[offset + 1u] = (uint8_t)value;
+}
+
+/* The CIAP is double-buffered: each data buffer is owned by the host from
+ * delivery (its BMAN bit set) until the write-one-to-clear acknowledge.
+ * The transport only stalls when BOTH buffers are still owned — a single
+ * stray un-acked buffer must never park the drive: the next sector lands
+ * in the other buffer and its fresh DATA edge wakes the driver, whose ISR
+ * picker ($4292F0) drains whichever buffer is ready. */
+static int data_buffers_full(void) {
+    return (read_word(CIAP_BMAN) & (CIAP_BMAN_DATA0 | CIAP_BMAN_DATA1))
+           == (CIAP_BMAN_DATA0 | CIAP_BMAN_DATA1);
 }
 
 static unsigned interrupt_level(void) {
@@ -218,7 +228,7 @@ void cdic_debug_state(uint32_t *drive_lba, uint32_t *last_lba,
     *coding = ciap.last_coding;
     *selected = ciap.last_selected;
     *running = ciap.data_running;
-    *waiting_ack = ciap.buffer_waiting_ack;
+    *waiting_ack = data_buffers_full();
 }
 
 static void unknown_read(uint32_t address, uint32_t offset, int size) {
@@ -277,7 +287,6 @@ static void reset_data_path(void) {
     ciap.ap_completion_pending = 0;
     ciap.ap_completion_delay_ns = 0;
     ciap.next_data_buffer = 0;
-    ciap.buffer_waiting_ack = 0;
     ciap.selection_prime_pending = 0;
     ciap.sector_elapsed_ns = 0;
     store_word(CIAP_BMAN, 0);
@@ -311,8 +320,6 @@ static void handle_register_write(uint32_t offset, uint16_t value) {
                                               CIAP_BMAN_DATA1 |
                                               CIAP_BMAN_ACK_CLEAR)));
         store_word(offset, next);
-        if (value & (CIAP_BMAN_DATA0 | CIAP_BMAN_DATA1))
-            ciap.buffer_waiting_ack = 0;
         break;
     }
     case CIAP_CCR:
@@ -455,21 +462,16 @@ void cdic_transport_resume(void) {
         !ciap.audio_positioned) {
         ciap.data_running = 1;
         ciap.sector_elapsed_ns = 0;
-        /* A resume means the host is (re)consuming the stream.  If a
-         * delivered sector is still sitting un-acknowledged, its DATA
-         * announcement may have been consumed while the driver was
-         * idle (the completion teardown's deferred C4 restarts the
-         * transport and one sector lands before anyone is ready) —
-         * re-announce it, exactly as the persistent buffer status on
-         * the real part would re-interrupt the armed handler.  Without
-         * this, a mid-stream read that carries no CCR arm of its own
-         * waits forever on a DATA event for a buffer that is already
-         * full (the real-time-pace game-load wedge). */
-        if (ciap.buffer_waiting_ack) {
-            store_word(CIAP_ISR,
-                       (uint16_t)(read_word(CIAP_ISR) | CIAP_ISR_DATA));
-            assert_interrupt_line();
-        }
+        /* No re-announce of an un-acked buffer here.  A stray delivery no
+         * longer parks the transport (double-buffered ownership: only
+         * both-buffers-owned holds the drive), so the next real sector's
+         * DATA edge wakes the driver by itself — the failure the old
+         * re-announce papered over (the real-time-pace game-load wedge).
+         * Re-announcing was also indistinguishable from a fresh delivery
+         * while the driver was MID-SERVICE on that same buffer: it made
+         * the ROM consume the sector twice, running its per-op DMA
+         * destination chain one sector ahead into a NULL pointer (payload
+         * DMA over the vector table at $0). */
     }
 }
 
@@ -550,6 +552,29 @@ static void write_q_locator(unsigned offset, uint32_t lba, uint8_t submode) {
     memcpy(ciap.memory + offset, q, sizeof q);
 }
 
+/* Re-selection poke: plain transport reads ($C4 STARTD) re-arm selection
+ * mid-stream (TCM1/ASEL) and then wait on a DATA event to re-evaluate — the
+ * boot module loads hang without it.  It must only ride a tick whose sector
+ * does NOT produce a real DATA delivery (unselected or audio): the record
+ * path's handover also re-issues ASEL ($428664 CCR $0008) with the play
+ * pipeline sector in flight, and a synthesized DATA arriving ahead of that
+ * selected sector spends the positioning transition's single
+ * discard-one-delivery step ($4286D0) — the previous record's EOR then falls
+ * through to the record engine, ends the op on the stale record (PCB_Rec
+ * 1->0 at the wrong EOR), and the game's play pump starves: the attract
+ * scene-swap / title-background-rotation stall.  A real selected delivery
+ * satisfies the re-selection wait by itself (and clears the pending flag at
+ * delivery time). */
+static void emit_selection_prime_poke(void) {
+    if (ciap.selection_prime_pending && !ciap.q_reporting &&
+        !data_buffers_full()) {
+        ciap.selection_prime_pending = 0;
+        store_word(CIAP_ISR,
+                   (uint16_t)(read_word(CIAP_ISR) | CIAP_ISR_DATA));
+        assert_interrupt_line();
+    }
+}
+
 static void deliver_one_sector(void) {
     uint8_t sector[CIAP_SECTOR_BYTES];
     uint16_t bman;
@@ -558,11 +583,10 @@ static void deliver_one_sector(void) {
     unsigned offset;
 
     if (!ciap.drive_positioned || !cdi_media_present()) return;
-    /* Our current CIAP model exposes one completed sector at a time.  Hold
-     * the drive position until the host returns that buffer; advancing here
-     * loses the next selected sector whenever software services DATA later
-     * than the 75 Hz sector interval. */
-    if (ciap.buffer_waiting_ack) return;
+    /* Double-buffered flow control: the drive holds position only while the
+     * host still owns BOTH buffers.  One stray un-acked buffer must not park
+     * the transport (see data_buffers_full). */
+    if (data_buffers_full()) return;
 
     uint32_t lba = ciap.drive_lba;
     if (!cdi_media_read_sector_body(lba, sector)) {
@@ -603,20 +627,36 @@ static void deliver_one_sector(void) {
     }
     if (!ciap.last_selected) {
         ciap.drive_lba++;
+        emit_selection_prime_poke();
         return;
     }
-    /* Audio sectors are consumed by the CIAP's audio processor and never take
-     * ownership of a host data buffer. Treating them as DATA stalls the
-     * realtime stream behind BMAN and prevents the application handoff. */
+    /* Audio payloads are consumed by the CIAP's audio processor, not the
+     * host data buffers — but the host still needs the record accounting:
+     * an audio sector flagged EOR/EOF/trigger closes a play RECORD, and the
+     * driver's record engine must see it (PCB_Rec counting, PCB_Stat bit2
+     * audio-last-read, per-record F$Send).  The Hotel Mario title screen
+     * rotates its backgrounds off exactly one such event: the menu-music
+     * loop's audio EOR record completion is the game's cue to re-mask and
+     * consume the next background image record riding the same stream —
+     * swallowing it froze the title background forever. */
     if (sector[6] & CD_I_SUBMODE_AUDIO) {
-        ciap.drive_lba++;
         cdi_audio_decode_sector(sector);
-        return;
+        if (!(sector[6] & (CD_I_SUBMODE_EOR | CD_I_SUBMODE_EOF |
+                           CD_I_SUBMODE_TRIGGER))) {
+            ciap.drive_lba++;
+            emit_selection_prime_poke();
+            return;
+        }
+        /* flagged audio sector: fall through to the data delivery path */
     }
 
     ciap.drive_lba++;
 
     buffer = ciap.next_data_buffer;
+    /* Never overwrite a buffer the host still owns: fill the free one. */
+    if (read_word(CIAP_BMAN) &
+        (buffer ? CIAP_BMAN_DATA1 : CIAP_BMAN_DATA0))
+        buffer ^= 1u;
     bit = buffer ? CIAP_BMAN_DATA1 : CIAP_BMAN_DATA0;
     offset = buffer ? CIAP_DATA1 : CIAP_DATA0;
     memcpy(ciap.memory + offset, sector, sizeof sector);
@@ -626,7 +666,6 @@ static void deliver_one_sector(void) {
     bman = read_word(CIAP_BMAN);
     store_word(CIAP_BMAN, (uint16_t)(bman | bit));
     ciap.next_data_buffer = (uint8_t)(buffer ^ 1u);
-    ciap.buffer_waiting_ack = 1;
     ciap.selection_prime_pending = 0;
     /* A selected trigger sector latches its own event bit alongside DATA;
      * the ROM ISR reads the combined word and takes the $2002 PCL path
@@ -659,24 +698,9 @@ void cdic_increment_time(double nanoseconds) {
     ciap.sector_elapsed_ns += (uint64_t)nanoseconds;
     while (ciap.sector_elapsed_ns >= sector_period_ns) {
         ciap.sector_elapsed_ns -= sector_period_ns;
-        /* Re-selection poke: plain transport reads ($C4 STARTD, no locator
-         * reporting) re-arm selection mid-stream and wait on a DATA event
-         * to re-evaluate — the boot module loads hang without it.  It must
-         * NEVER fire on a locator-armed play ($0010/$0044/$0094): those
-         * flows count DELIVERIES through the driver's positioning
-         * transition handler, and a synthesized DATA with no delivery
-         * behind it spends the transition's single discard-one-delivery
-         * step, letting the previous record's EOR sector fall through to
-         * the record engine one slot early — the attract scene-swap
-         * stall. */
-        if (ciap.selection_prime_pending && !ciap.q_reporting &&
-            !ciap.buffer_waiting_ack) {
-            ciap.selection_prime_pending = 0;
-            store_word(CIAP_ISR,
-                       (uint16_t)(read_word(CIAP_ISR) | CIAP_ISR_DATA));
-            assert_interrupt_line();
-            break;
-        }
+        /* The re-selection poke (see emit_selection_prime_poke) rides the
+         * delivery path: it fires only from ticks whose sector produces no
+         * DATA delivery, never in place of one. */
         deliver_one_sector();
         if (!ciap.data_running) break;
     }
