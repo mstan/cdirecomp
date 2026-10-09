@@ -296,8 +296,17 @@ def main() -> int:
                     # Retain their other evidence without treating an unsupported
                     # read-only query as a guest failure.
                     capability = request(args.port, {"cmd": "module_targets", "count": 0})
-                    evidence["module_targets"] = (collect_module_targets(args.port)
-                        if capability.get("ok") else capability)
+                    try:
+                        evidence["module_targets"] = (collect_module_targets(args.port)
+                            if capability.get("ok") else capability)
+                    except RuntimeError as error:
+                        # Failed coverage is still a failed gate. Retain the
+                        # framebuffer, device state and RAM needed to diagnose
+                        # it instead of discarding every other capture.
+                        evidence["module_targets"] = dict(capability, ok=False, error=str(error))
+                        result["capture_error"] = str(error)
+                        result["ok"] = False
+                        result["reason"] = f"evidence capture failed: {error}; scenario: {result['reason']}"
                     evidence["video_frame"] = request(args.port, {"cmd": "video_frame"})
                     fatal = guest_failure(args.port, evidence["status"], evidence["video_frame"])
                     if fatal:

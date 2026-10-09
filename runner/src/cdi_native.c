@@ -31,8 +31,13 @@ static CdiNativeState stats;
 static uint64_t epoch,event_count;
 enum { EVENT_CAPACITY=1024 };
 static CdiNativeEvent events[EVENT_CAPACITY];
-enum { TARGET_CAPACITY=16384 };
+/* Coverage is cumulative across streamed images, not a trace ring. A hash
+ * index keeps repeated interpreter entries independent of the ledger length;
+ * the dense records still provide stable pagination and first-seen provenance.
+ * Half-full indexing bounds collision chains. Exhaustion remains explicit. */
+enum { TARGET_CAPACITY=262144, TARGET_INDEX_CAPACITY=TARGET_CAPACITY*2 };
 static CdiNativeTarget targets[TARGET_CAPACITY];
+static uint32_t target_indices[TARGET_INDEX_CAPACITY];
 static uint32_t target_count;
 static uint64_t target_dropped;
 static void event(const Binding *b,uint8_t type) {
@@ -61,6 +66,7 @@ void cdi_native_reset(void) {
     /* Tokens remain unique across warm resets with retained guest RAM. */
     event_count=0;
     target_count=0;target_dropped=0;
+    memset(target_indices,0,sizeof target_indices);
     /* Resetting CPU bookkeeping need not clear RAM (e.g. a warm reset). */
     cdi_native_notify_write(CDI_RAM0_BASE,CDI_RAM0_SIZE);
     cdi_native_notify_write(CDI_RAM1_BASE,CDI_RAM1_SIZE);
@@ -178,11 +184,16 @@ void cdi_native_record_target(uint32_t address) {
     if (!b) return;
     uint32_t module=(uint32_t)(b->module-g_cdi_native_modules),offset=address-b->base;
     if (b->module->has_offset(offset)) return;
-    for (uint32_t i=0;i<target_count;i++) {
-        CdiNativeTarget *t=&targets[i];
+    uint32_t hash=module*0x9e3779b9u ^ (offset>>1)*0x85ebca6bu;
+    hash^=hash>>16;
+    uint32_t slot=hash&(TARGET_INDEX_CAPACITY-1);
+    while (target_indices[slot]) {
+        CdiNativeTarget *t=&targets[target_indices[slot]-1];
         if (t->module==module && t->offset==offset) { t->hits++;return; }
+        slot=(slot+1)&(TARGET_INDEX_CAPACITY-1);
     }
     if (target_count==TARGET_CAPACITY) { target_dropped++;return; }
+    target_indices[slot]=target_count+1;
     targets[target_count++]=(CdiNativeTarget){.module=module,.offset=offset,.base=b->base,
         .epoch=b->epoch,.frame=g_frame_count,.trace_seq=debug_trace_sequence(),.hits=1};
 }

@@ -18,7 +18,9 @@ def collect(port: int) -> dict:
     while total is None or len(targets) < total:
         page = request(port, {"cmd": "module_targets", "from": len(targets), "count": 128})
         if not page.get("ok") or page.get("dropped", 0):
-            raise RuntimeError(f"module entry ledger is unavailable or incomplete: {page}")
+            raise RuntimeError("module entry ledger is unavailable or incomplete: "
+                               f"ok={page.get('ok')}, total={page.get('total')}, "
+                               f"dropped={page.get('dropped')}")
         total = page["total"]
         if len(targets) < total and not page["targets"]:
             raise RuntimeError("module entry ledger did not advance")
