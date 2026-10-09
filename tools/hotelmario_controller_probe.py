@@ -14,8 +14,10 @@ when gds+0x52A reaches zero. The actor collision boxes come from mario_coll_det.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
+import sys
 import time
 
 from bios_options_smoke import request
@@ -73,6 +75,8 @@ def snapshot(port: int, status: dict) -> dict | None:
               "x": u16(sprite, 0x10E), "y": u16(sprite, 0x110),
               "floor": u16(sprite, 0x112), "state": u16(sprite, 0x11A),
               "substate": u16(sprite, 0x11E), "death": u16(data, 0x53A),
+              "facing": u16(sprite, 0x122), "movement_type": u16(sprite, 0x12E),
+              "jump_block": u16(sprite, 0x13A),
               "xs": [u16(data, 0x4A6 + i * 2) for i in range(7)],
               "progress": progress, "players": players, "player": player,
               "two_players": u16(data, 0x598),
@@ -182,17 +186,23 @@ class Controller:
                     self.jump_direction = mask & (LEFT | RIGHT)
                     self.jump_enemy = min(threats, key=lambda e: abs((e["left"] + e["right"]) / 2 - (x + 16)))["id"]
         elif state == 3:
-            if self.jump_direction is None:
-                self.jump_direction = mask & (LEFT | RIGHT)
+            # jump_rise preserves the takeoff facing (+0x122). For running
+            # jumps, an opposite direction sets +0x13A and stops horizontal
+            # travel; neutral input continues it. It cannot reverse in midair.
+            travel = LEFT if record["facing"] & 1 else RIGHT
+            brake = RIGHT if travel == LEFT else LEFT
             overhead = [e for e in enemies if e["floor"] == floor - 1 and e["right"] > x - 20 and e["left"] < x + 55]
-            if overhead or x < 28 and self.jump_direction == LEFT or x > 320 and self.jump_direction == RIGHT:
-                self.jump_direction = 0
-            if not overhead and substate >= 2:
+            horizontal = travel if record["movement_type"] == 1 else 0
+            if overhead or x < 32 and travel == LEFT or x > 312 and travel == RIGHT:
+                horizontal = brake
+            elif substate >= 2:
                 landing = next((e for e in enemies if e["id"] == self.jump_enemy and e["floor"] == floor), None)
                 if landing:
                     delta = (landing["left"] + landing["right"]) / 2 - (x + 16)
-                    self.jump_direction = RIGHT if delta > 9 else LEFT if delta < -9 else 0
-            mask = self.jump_direction | (JUMP if substate < 3 and not overhead else 0)
+                    ahead = delta if travel == RIGHT else -delta
+                    if ahead < 28:
+                        horizontal = brake
+            mask = horizontal | (JUMP if substate < 3 and not overhead else 0)
         if state == 0 and (x < 32 and mask & LEFT or x > 328 and mask & RIGHT):
             mask = RIGHT if x < 32 else LEFT
         return mask
@@ -208,15 +218,33 @@ def main() -> int:
     if args.seconds <= 0 or args.minimum_field < 0:
         parser.error("duration must be positive; minimum field cannot be negative")
     args.output.mkdir(parents=True, exist_ok=True)
+    with (args.output / "controller-runs.jsonl").open("a") as runs:
+        runs.write(json.dumps({"started_unix_seconds": time.time(), "argv": sys.argv,
+                               "source_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest()}) + "\n")
     controller = Controller()
     deadline = time.monotonic() + args.seconds
     previous = None
+    next_devices = 0
+    reason = "observation duration completed"
+    fault = False
     try:
-        with (args.output / "controller.jsonl").open("a") as log:
+        with (args.output / "controller.jsonl").open("a") as log, \
+                (args.output / "controller-devices.jsonl").open("a") as devices:
             while time.monotonic() < deadline:
                 status = request(args.port, {"cmd": "status"})
                 if status["held"] or status["miss_count"] or status["pc"] == 0x260466:
+                    fault = bool(status["miss_count"] or status["pc"] == 0x260466)
+                    reason = "guest fault" if fault else "guest held; inspect scenario capture"
                     break
+                if time.monotonic() >= next_devices:
+                    observed = {"host_monotonic_ns": time.monotonic_ns(),
+                                "host_unix_seconds": time.time(), "status": status}
+                    for command in ("ciap_state", "native_state", "audio_state", "video_frame"):
+                        observed[command] = request(args.port, {"cmd": command})
+                    observed["module_targets"] = request(args.port, {"cmd": "module_targets", "count": 0})
+                    devices.write(json.dumps(observed) + "\n")
+                    devices.flush()
+                    next_devices = time.monotonic() + 1
                 if status["frame"] < args.minimum_field:
                     time.sleep(0.03)
                     continue
@@ -225,7 +253,8 @@ def main() -> int:
                     request(args.port, {"cmd": "set_input", "mask": 0})
                     time.sleep(0.03)
                     continue
-                mask = controller.steer(record)
+                record["stale"] = record["observed_through_field"] - record["frame"] > 12
+                mask = 0 if record["stale"] else controller.steer(record)
                 record["mask"] = mask
                 record["target_column"] = controller.target
                 request(args.port, {"cmd": "set_input", "mask": mask})
@@ -242,7 +271,8 @@ def main() -> int:
             request(args.port, {"cmd": "set_input", "mask": 0})
         except (OSError, ValueError):
             pass
-    return 0
+    print(json.dumps({"reason": reason, "fault": fault, "campaign_certificate": False}), flush=True)
+    return 1 if fault else 0
 
 
 if __name__ == "__main__":

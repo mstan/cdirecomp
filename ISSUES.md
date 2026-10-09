@@ -3,6 +3,43 @@
 Updated 2026-10-09. Work is tracked in central Beads under the framework epic
 `beads-ttbl` and game epic `beads-ssy9`.
 
+## Owner-requested checkpoint
+
+Implementation and testing stopped on 2026-10-09 at the owner's request.
+All Hotel Mario probes and controllers are stopped. The remaining production
+player was closed normally after releasing input and recording its state, so
+the original battery file could be flushed. No further work is authorized
+until the owner explicitly resumes it. Issues remain open.
+
+The latest default LLE build passed 30/30 headless cold launches. Its two
+windowed batches remain failed: launch 4 in the first batch and launch 15 in
+the second exited with code 0 before their required capture. The DirectSound
+attract run lost its connection after the last recorded field 68067 and failed
+its evidence gate; three complete circuits are not certified. Earlier 30/30
+windowed success belongs to the preceding executable.
+
+Normal-speed one-player input on the indexed default build reached Hotel 1
+Stage 4 at field 51281, clearing the first three stages. The separate seeded
+two-player build reached Stage 3 for Mario and Stage 5 for Luigi. Its final
+checkpoint at field 145679 had zero guest resets and dispatch misses. These
+are partial campaign results. All hotels, bosses, ending, correct restored
+stage, sustained audio and performance acceptance remain unverified.
+
+All six compiler and eleven runtime component checks passed before stopping.
+The final controller helper edits record source identity/device history,
+discard stale observations, and implement the original game's midair brake
+semantics. They are checkpointed development tooling, not campaign or input
+quality certification. No HLE or guest progress writes were introduced.
+
+Framework integration is on `hotel-mario-lle`, including `10859e5`,
+`ae8485d` and `2bdd5c5`; the core is pinned to `ddfa4e1`. Product commit
+`30d5081` pins the indexed coverage implementation `ae8485d`. The local
+preview archive predates that coverage fix and is not a final release.
+Evidence remains in ignored `build/tmp/` directories, including
+`indexed-lle-headless-matrix-20261009`, both indexed windowed matrix batches,
+`indexed-lle-windowed-attract-20261009`, `indexed-lle-oneplayer-20261009`, and
+`normal-production-save-20261009/user-stop-checkpoint.json`.
+
 ## Corrected bring-up failures
 
 - **Intro backgrounds (`beads-bcha`).** Scene markers on file 1/channel 0
@@ -77,8 +114,9 @@ tokens. Generation fails for unsupported instructions and module fall-off.
   `SS.Pos` current through filtered physical-sector headers. The subsequent
   120000-field windowed and 160000-field headless runs had no observed guest
   resets or dispatch misses, but their final coverage ledgers overflowed and
-  both evidence gates failed. They are not accepted runs. A fresh normal-speed
-  DirectSound run exercises the indexed coverage build.
+  both evidence gates failed. They are not accepted runs. The fresh normal-speed
+  DirectSound run of the indexed coverage build also ended before acceptance,
+  as recorded at the checkpoint above.
   `hotelmario_attract_gate.py` now identifies actual nine-demo circuits from
   the original AV map and requires a return to demo 1 after each circuit.
 - One-player Stage 1 is reachable through normal shell/menu input. A
@@ -103,8 +141,8 @@ tokens. Generation fails for unsupported instructions and module fall-off.
   dummy audio did drop PCM, so that run does not pass audio acceptance.
 - A named original-game save survived a normal window close and appeared in
   the restore menu after a cold boot using the same 32 KiB battery file.
-  Correct stage restoration still needs validation. Two-player input has
-  cleared the first two stages for both Mario and Luigi in a separate run.
+  Correct stage restoration still needs validation. Two-player input reached
+  Stage 3 for Mario and Stage 5 for Luigi in a separate seeded LLE run.
 - Both legitimate campaigns, all streamed modules/bosses/cutscenes, the
   ending, and original-game save/restore/continue need validation. No guest
   progress writes, forced stages or replacement game logic are permitted.
@@ -112,9 +150,9 @@ tokens. Generation fails for unsupported instructions and module fall-off.
   windowed normal-speed cold boots to the pixel-exact title. Every run retained
   linked-input provenance and all 174 compiled module identities, with three
   active bindings at the title. These launch gates establish startup only.
-  The indexed coverage build is running new launch batches. One windowed
-  batch received a player shutdown before its first guest instruction; that
-  batch remains failed and is separate from the new batch.
+  The indexed coverage build passed its new 30-launch headless batch. Both
+  new windowed batches ended early with exit code 0 and remain failed; their
+  results are retained separately.
 - A local runtime-only HotelMarioRecomp preview archive passed the five-file
   allowlist, Release/COSIM OFF build-graph audit, PE import audit and linked
   input provenance checks. Publication and sustained performance acceptance
