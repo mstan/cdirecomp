@@ -382,3 +382,33 @@ provenance sidecars and development tools remain outside runtime packages.
 The product supplies its Linux build wrapper and AppRun. This packaging work
 does not resume full-campaign or visual-flicker investigation. Actual artifact
 results are recorded after the builds and package boot checks finish.
+
+### Hotel Mario v0.0.2 packaging results (2026-10-09)
+
+Fresh Windows and Ubuntu 24.04 x86_64 Release builds linked from engine
+`5d482e772290bf130b118f9c7df28803a9a12c3d`, product
+`6fd6fc1c232a1800866b5f0c10f4a4fc6aedaf38`, and pinned core
+`ddfa4e1b090b643a9ee596050e7eb345b8b276a2`. All 174 default modules were
+regenerated; the full generated BIOS was retained with verified identity.
+No runtime or hardware semantics changed for this release. Final packaging
+helper `6363191` also pins the embedded AppImage runtime, collects dependency
+copyright/common-license notices, and normalizes the desktop file before
+comparing the staged and extracted manifests.
+
+Windows ZIP: SHA-256
+`c22829a59f3668e2bb6a9d5e0baa2907436e539c51f7351ddd0812b700497e83`.
+Linux AppImage: SHA-256
+`ff3e6cdc6c73ac7dfffc857a312d813dc2e29f6ce85cf78c8f4ba0cf5bfaa442`.
+Both passed linked-input provenance and Release/COSIM OFF graph checks. Windows
+passed PE import and five-file audits; Linux passed native ELF/dependency checks,
+37 library notice records and an exact 129-file extracted payload audit.
+Linux passed all eleven runtime and six compiler component tests.
+
+The exact packaged Windows executable passed a speed-1 headless boot to title
+at field 1912. The actual Linux AppImage passed a speed-1 windowed boot under
+Xvfb/WSL using extraction mode at field 1905. Both captured framebuffer
+`1b902b2f985afb5f`, zero native misses and zero guest resets, with 174 compiled
+identities. Audio used SDL dummy; these checks do not certify listening,
+physical Linux desktop/FUSE behavior, gameplay, campaigns, saves, flicker or
+sustained performance. Prior validation issues and `beads-ssy9.1` remain open.
+See the product's `BUILD-0.0.2.md` for artifact identities and evidence paths.

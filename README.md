@@ -120,9 +120,10 @@ What is **not** done yet:
   latest windowed cold-boot batches exited before completion. Long gameplay
   also recorded PCM drops with SDL's dummy consumer. Audio listening quality
   and sustained real-time performance remain unverified.
-- **Save restoration and release acceptance.** The local preview archive
-  passed packaging audits, but predates the latest coverage fix. It is not an
-  end-to-end release.
+- **Save restoration and release acceptance.** Fresh Hotel Mario v0.0.2
+  Windows ZIP and Linux AppImage packages passed packaging audits and short
+  normal-speed boots to the exact title screen. These preview builds include
+  the indexed coverage ledger; complete campaigns remain unverified.
 - Broader title compatibility beyond the current Hotel Mario bring-up.
 - Unexercised I2C/MMU paths and additional exception cases remain platform
   backlog, driven by real applications as they are brought up.
