@@ -81,13 +81,19 @@ tokens. Generation fails for unsupported instructions and module fall-off.
   probe through repeated deaths/restarts and game over without the prior
   audio CIL error. This establishes lifecycle progress, not a cleared stage
   or legitimate full campaign.
+- The current seeded LLE build cleared one-player Hotel 1 Stage 1 through
+  normal-speed windowed controller input. The original open-door count reached
+  zero and the game advanced to Stage 2 at field 31059, with score 2350 and
+  three lives. The development controller reads state and sends timed IKAT
+  input; it never writes guest progress. Its earlier door-state interpretation
+  was reversed and those earlier attempts do not establish level completion.
 - Both legitimate campaigns, all streamed modules/bosses/cutscenes, the
   ending, and original-game save/restore/continue need validation. No guest
   progress writes, forced stages or replacement game logic are permitted.
-- Thirty older headless title launches and 29 older windowed launches passed.
-  The final older windowed launch reached the title but its evidence capture
-  was invalidated by a harness version change. A stable current binary still
-  needs the complete 30 headless + 30 windowed normal-speed acceptance matrix.
+- The current default LLE executable passed all 30 headless and all 30
+  windowed normal-speed cold boots to the pixel-exact title. Every run retained
+  linked-input provenance and all 174 compiled module identities, with three
+  active bindings at the title. These launch gates establish startup only.
 - A local runtime-only HotelMarioRecomp preview archive passed the five-file
   allowlist, Release/COSIM OFF build-graph audit, PE import audit and linked
   input provenance checks. Publication and sustained performance acceptance
