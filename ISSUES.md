@@ -59,6 +59,12 @@ an abandoned call from continuing into an unloaded/replaced image. Exact
 instruction resume maps cover interrupts and OS-9 trap continuations.
 Uncovered code stays on the clean-room interpreter floor. Recorded module
 targets retain image identity and can be promoted by offline regeneration.
+Coverage now uses a hash index and 262144 cumulative image/offset records.
+The previous 16384-record limit lost evidence during sustained attract runs,
+and a linear lookup put growing diagnostic work on the interpreter path.
+First-seen load provenance and stable pagination remain available; exhaustion
+still fails the capture. A 20000-entry regression covers aggregation across
+load bases and replacement epochs, and clearing during warm reset.
 
 Synthetic tests cover two relocation bases, PC-relative reads/calls/jumps,
 32-bit index values, preserved absolute addresses, guest stacks, trap service
@@ -68,10 +74,13 @@ tokens. Generation fails for unsupported instructions and module fall-off.
 ## Remaining playthrough gates (`beads-mq6t`)
 
 - The former attract restart `$FA` failure was corrected by keeping
-  `SS.Pos` current through filtered physical-sector headers. A normal-speed
-  windowed build reached field 120000 without reset, dispatch miss or PCM
-  drops. That evidence predates the latest selection/audio changes; final
-  build acceptance and exact complete-cycle identification remain pending.
+  `SS.Pos` current through filtered physical-sector headers. The subsequent
+  120000-field windowed and 160000-field headless runs had no observed guest
+  resets or dispatch misses, but their final coverage ledgers overflowed and
+  both evidence gates failed. They are not accepted runs. A fresh normal-speed
+  DirectSound run exercises the indexed coverage build.
+  `hotelmario_attract_gate.py` now identifies actual nine-demo circuits from
+  the original AV map and requires a return to demo 1 after each circuit.
 - One-player Stage 1 is reachable through normal shell/menu input. A
   normal-speed windowed run reached field 12000 with working button/direction
   input, zero resets/dispatch misses and zero PCM drops through SDL's dummy
@@ -87,13 +96,25 @@ tokens. Generation fails for unsupported instructions and module fall-off.
   three lives. The development controller reads state and sends timed IKAT
   input; it never writes guest progress. Its earlier door-state interpretation
   was reversed and those earlier attempts do not establish level completion.
+- The same normal-speed seeded run also cleared Stage 2 at field 71116
+  (score 2900, four lives), and Stage 3 at field 125850 (score 800, five lives
+  after original-game continues). It reached field 180000 without resets or
+  dispatch misses, retaining 8473 uncovered entries without loss. Its SDL
+  dummy audio did drop PCM, so that run does not pass audio acceptance.
+- A named original-game save survived a normal window close and appeared in
+  the restore menu after a cold boot using the same 32 KiB battery file.
+  Correct stage restoration still needs validation. Two-player input has
+  cleared the first two stages for both Mario and Luigi in a separate run.
 - Both legitimate campaigns, all streamed modules/bosses/cutscenes, the
   ending, and original-game save/restore/continue need validation. No guest
   progress writes, forced stages or replacement game logic are permitted.
-- The current default LLE executable passed all 30 headless and all 30
+- The preceding default LLE executable passed all 30 headless and all 30
   windowed normal-speed cold boots to the pixel-exact title. Every run retained
   linked-input provenance and all 174 compiled module identities, with three
   active bindings at the title. These launch gates establish startup only.
+  The indexed coverage build is running new launch batches. One windowed
+  batch received a player shutdown before its first guest instruction; that
+  batch remains failed and is separate from the new batch.
 - A local runtime-only HotelMarioRecomp preview archive passed the five-file
   allowlist, Release/COSIM OFF build-graph audit, PE import audit and linked
   input provenance checks. Publication and sustained performance acceptance
