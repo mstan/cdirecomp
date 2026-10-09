@@ -32,6 +32,10 @@ TOOLS = {
         "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage",
         "95cbe7cce9717fce90c484e34052ee7c7f1d7635b33c12525b4776826a7d29b6",
     ),
+    "runtime": (
+        "https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-x86_64",
+        "156f4bdbde9c52d01814600013e0a273f0118dc2de98975f3c8c63427ec79074",
+    ),
 }
 
 
@@ -51,7 +55,7 @@ def audit_elf(path: Path, *, library: bool = False) -> None:
         raise ValueError(f"bundled library has no SONAME: {path}")
 
 
-def audit_appdir(root: Path, product: str) -> dict:
+def audit_appdir(root: Path, product: str, dependency_notices: set[str]) -> dict:
     support = {
         "AppRun", ".DirIcon", f"{product}.desktop", f"{product}.svg",
         f"usr/bin/{product}",
@@ -67,7 +71,8 @@ def audit_appdir(root: Path, product: str) -> dict:
             continue
         relative = path.relative_to(root).as_posix()
         library = bool(re.fullmatch(r"usr/lib/[^/]+\.so(?:\.\d+)*", relative))
-        if relative not in support and not library:
+        notice = bool(re.fullmatch(r"usr/share/cdirecomp/licenses/[A-Za-z0-9_.+-]+\.(?:copyright|txt)", relative))
+        if relative not in support and relative not in dependency_notices and not library and not notice:
             raise ValueError(f"file outside runtime allowlist: {relative}")
         if path.suffix.lower() in FORBIDDEN_SUFFIXES:
             raise ValueError(f"forbidden release file: {relative}")
@@ -100,10 +105,60 @@ def audit_appdir(root: Path, product: str) -> dict:
     return manifest
 
 
+def collect_library_notices(appdir: Path, runtime: Path) -> dict:
+    """Keep the installed Debian/Ubuntu redistribution notices with each ELF."""
+    dependencies = dict(re.findall(r"^\s*(\S+) => (/\S+)", run("ldd", str(runtime)), re.M))
+    licenses = appdir / "usr/share/cdirecomp/licenses"
+    licenses.mkdir()
+    owners = {}
+    for library in sorted((appdir / "usr/lib").glob("*.so*")):
+        if library.is_symlink():
+            continue
+        soname = re.search(r"\(SONAME\).*\[([^]]+)\]", run("readelf", "-d", str(library)))
+        original = Path(dependencies[soname[1]]) if soname and soname[1] in dependencies else None
+        if original is None:
+            raise ValueError(f"bundled library absent from original dependency closure: {library.name}")
+        candidates = [str(original), str(original.resolve())]
+        candidates += [path.removeprefix("/usr") for path in candidates if path.startswith("/usr/")]
+        owner = None
+        for candidate in candidates:
+            result = subprocess.run(["dpkg-query", "-S", candidate], text=True,
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            if result.returncode == 0:
+                owner = result.stdout.splitlines()[0].split(": ", 1)[0]
+                break
+        if owner is None:
+            raise ValueError(f"no installed-package provenance for {original}")
+        files = run("dpkg-query", "-L", owner).splitlines()
+        copyright = next((Path(path) for path in files if path.endswith("/copyright") and Path(path).is_file()), None)
+        if copyright is None:
+            raise ValueError(f"no redistribution notice for {owner}")
+        destination = re.sub(r"[^A-Za-z0-9_.+-]", "-", owner) + ".copyright"
+        shutil.copy2(copyright, licenses / destination)
+        owners[soname[1]] = {"package": owner, "notice": destination,
+                             "system_notice": str(copyright)}
+        text = copyright.read_text(errors="replace")
+        for name in set(re.findall(r"/usr/share/common-licenses/([A-Za-z0-9.+-]+)", text)):
+            name = name.rstrip(".")
+            common = Path("/usr/share/common-licenses") / name
+            if common.is_file():
+                shutil.copy2(common, licenses / f"common-{name}.txt")
+    # linuxdeploy also installs distro notices in their standard locations.
+    # Admit only the exact notice belonging to a library in this closure.
+    allowed = {item["system_notice"].removeprefix("/"): item for item in owners.values()}
+    for notice in (appdir / "usr/share/doc").rglob("*"):
+        if notice.is_dir():
+            continue
+        relative = notice.relative_to(appdir).as_posix()
+        if relative not in allowed or sha256(notice) != sha256(Path("/") / relative):
+            raise ValueError(f"unexpected or altered dependency notice: {relative}")
+    return owners
+
+
 def fetch_tool(name: str, directory: Path) -> Path:
     url, expected = TOOLS[name]
     directory.mkdir(parents=True, exist_ok=True)
-    tool = directory / f"{name}-x86_64.AppImage"
+    tool = directory / ("type2-runtime-x86_64" if name == "runtime" else f"{name}-x86_64.AppImage")
     if not tool.exists() or sha256(tool) != expected:
         temporary = tool.with_suffix(".download")
         urllib.request.urlretrieve(url, temporary)
@@ -157,7 +212,7 @@ def main() -> int:
         "[Desktop Entry]\nType=Application\n"
         f"Name={product}\nComment=CD-i LLE development preview\n"
         f"Exec={product}\nIcon={product}\nCategories=Game;\n"
-        "Terminal=false\nStartupNotify=true\n", encoding="utf-8")
+        f"Terminal=false\nStartupNotify=true\nX-AppImage-Version={version}\n", encoding="utf-8")
     # Original vector badge; no game artwork or disc-derived resource.
     (appdir / f"{product}.svg").write_text(
         '<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">'
@@ -168,24 +223,41 @@ def main() -> int:
     (appdir / ".DirIcon").symlink_to(f"{product}.svg")
     deploy = fetch_tool("linuxdeploy", args.tools_dir)
     appimagetool = fetch_tool("appimagetool", args.tools_dir)
+    appimage_runtime = fetch_tool("runtime", args.tools_dir)
     env = os.environ | {"NO_STRIP": "1", "ARCH": "x86_64"}
     (directory / "linuxdeploy.log").write_text(run(
         str(deploy), "--appimage-extract-and-run", "--appdir", str(appdir),
         "--executable", str(appdir / "usr/bin" / product),
         "--desktop-file", str(appdir / f"{product}.desktop"),
         "--icon-file", str(appdir / f"{product}.svg"), env=env))
-    staged = audit_appdir(appdir, product)
+    # appimagetool rewrites its root desktop file as a regular file. Normalize
+    # linuxdeploy's link before the audit so the final manifest stays exact.
+    desktop = appdir / f"{product}.desktop"
+    if desktop.is_symlink():
+        target = desktop.resolve(strict=True)
+        if not target.is_relative_to(appdir.resolve()):
+            raise ValueError("desktop symlink leaves AppDir")
+        contents = target.read_bytes()
+        desktop.unlink()
+        desktop.write_bytes(contents)
+    library_notices = collect_library_notices(appdir, runtime)
+    dependency_notices = {item["system_notice"].removeprefix("/")
+                          for item in library_notices.values()}
+    staged = audit_appdir(appdir, product, dependency_notices)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     output = args.out.resolve()
     (directory / "appimagetool.log").write_text(run(
-        str(appimagetool), "--appimage-extract-and-run", str(appdir), str(output), env=env))
+        str(appimagetool), "--appimage-extract-and-run", "--runtime-file", str(appimage_runtime),
+        str(appdir), str(output), env=env))
     output.chmod(0o755)
     extracted = directory / "verify-extracted"
     extracted.mkdir()
     run(str(output), "--appimage-extract", cwd=extracted)
-    packaged = audit_appdir(extracted / "squashfs-root", product)
+    packaged = audit_appdir(extracted / "squashfs-root", product, dependency_notices)
     if staged != packaged:
-        raise ValueError("AppImage payload differs from audited AppDir")
+        changed = {path: {"staged": staged.get(path), "packaged": packaged.get(path)}
+                   for path in staged.keys() | packaged.keys() if staged.get(path) != packaged.get(path)}
+        raise ValueError(f"AppImage payload differs from audited AppDir: {changed}")
     versions = run("readelf", "--version-info", str(appdir / "usr/bin" / product))
     required_glibc = sorted(set(re.findall(r"GLIBC_([\d.]+)", versions)),
                             key=lambda version: tuple(map(int, version.split("."))))
@@ -197,6 +269,8 @@ def main() -> int:
         "linked_runtime_sha256": provenance["runtime_sha256"],
         "packaged_runtime_sha256": sha256(appdir / "usr/bin" / product),
         "runtime_glibc_versions": required_glibc, "files": packaged,
+        "bundled_library_notices": library_notices,
+        "packager_sha256": sha256(Path(__file__)),
         "tool_sha256": {name: item[1] for name, item in TOOLS.items()},
     }, indent=2) + "\n", encoding="utf-8")
     print(f"PASS: linked provenance, Release/COSIM OFF graph, ELF/dependency and payload audits ({len(packaged)} files)")
