@@ -12,6 +12,24 @@ the original battery file could be flushed. The owner subsequently authorized
 extensive notes, README updates and default-branch integration only.
 Gameplay implementation and campaign probes remain paused. Issues remain open.
 
+## Owner playtest after integration
+
+On 2026-10-09 the owner requested a manual launch and reported that basic
+gameplay works well and the title-screen background now works. Minor visual
+flickering remains visible and is tracked as `beads-ssy9.1`, an open game bug.
+Its scene, frequency, affected layer, impact and cause have not been
+characterized; no investigation or fix was performed during this closeout.
+This is owner feedback from early manual play, not full-campaign certification.
+
+The launched indexed LLE executable is the recorded `build/playable-lle`
+variant, at speed 1 with DirectSound and the original BIOS/USA CUE. Launch
+metadata and stdout/stderr are retained in the product's ignored
+`build/playable-lle/manual-play-20261009-095749/` directory. The session is
+left under the owner's control; no controller or automated game probe was
+resumed. Documentation and Beads were updated for the final session closeout.
+
+## Automated checkpoint results
+
 The latest default LLE build passed 30/30 headless cold launches. Its two
 windowed batches remain failed: launch 4 in the first batch and launch 15 in
 the second exited with code 0 before their required capture. The DirectSound

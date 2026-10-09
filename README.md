@@ -78,6 +78,9 @@ What works today:
   cleared Hotel 1 Stages 1–3 on the indexed LLE build. A separate seeded
   two-player build reached Stage 3 for Mario and Stage 5 for Luigi. These are
   partial playthrough observations using ordinary game input.
+- **Owner playtest feedback (2026-10-09).** Basic gameplay and the title-screen
+  background are reported working well. Minor visual flickering remains;
+  its cause has not been investigated.
 - **Static native OS-9 modules.** The disc frontend validates file extents,
   header parity and CRC, then emits relocatable C with instruction resume maps.
   Hotel Mario supplies 174 distinct executable images. The runtime binds a
@@ -105,6 +108,8 @@ What works today:
 
 What is **not** done yet:
 
+- **Minor visual flickering**, reported during the owner's manual playtest and
+  tracked as `beads-ssy9.1`.
 - **Full-playthrough certification remains open.** All hotels, bosses,
   campaign cutscenes, both complete player modes and the ending need legitimate
   input-driven validation. Earlier stream-restart and death/restart failures
