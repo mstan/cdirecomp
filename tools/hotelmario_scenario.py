@@ -314,6 +314,8 @@ def main() -> int:
                         (args.output / f"ram-{base:06x}.bin").write_bytes(memory)
                 except Exception as error:
                     result["capture_error"] = str(error)
+                    result["ok"] = False
+                    result["reason"] = f"evidence capture failed: {error}; scenario: {result['reason']}"
                 proc.terminate()
                 try:
                     proc.wait(timeout=5)
