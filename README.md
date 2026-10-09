@@ -2,9 +2,10 @@
 
 > ### ⚠️ Very early development
 > This project boots the real Philips CD-i **system ROM** as native code and can
-> perform a **very basic boot of a CD-i title** — *Hotel Mario* reaches its
-> title card and one-player **Stage 1 with working input**. Full campaigns
-> and save/restore are still unverified. Expect rough edges, missing
+> run the early stages of *Hotel Mario* through the real OS-9 drivers.
+> Normal-speed input has cleared **Hotel 1 Stages 1–3**, reaching Stage 4.
+> Full campaigns, bosses, the ending and correct save restoration remain
+> unverified. Expect rough edges, missing
 > features, incomplete hardware coverage, and breaking changes. This is a
 > research project shared in the open, not a finished product — and it is a
 > static recompiler, **not an emulator**.
@@ -68,17 +69,28 @@ What works today:
 - **Boots the real CD-RTOS system ROM** (user-supplied) to its interactive
   **player shell** — navigation, the Time/Date and storage settings UIs, media
   insert/eject, and persistence — running as native recompiled code.
-- **Hotel Mario boot and initial gameplay.** From the shell you can *Play CD-I* a
+- **Hotel Mario boot and early gameplay.** From the shell you can *Play CD-I* a
   user-supplied *Hotel Mario (USA)* disc; CD-RTOS loads the title, the Philips
   Interactive Media bumper plays with decoded XA audio, and the game reaches its
-  **title card** and one-player Stage 1. Intro background changes now follow
+  **title card** and one-player gameplay. Intro background changes now follow
   the disc's file-wide trigger events. Windowed input and buffered XA playback
-  reach gameplay through the real OS-9 drivers.
+  reach gameplay through the real OS-9 drivers. Normal-speed controller input
+  cleared Hotel 1 Stages 1–3 on the indexed LLE build. A separate seeded
+  two-player build reached Stage 3 for Mario and Stage 5 for Luigi. These are
+  partial playthrough observations using ordinary game input.
 - **Static native OS-9 modules.** The disc frontend validates file extents,
   header parity and CRC, then emits relocatable C with instruction resume maps.
   Hotel Mario supplies 174 distinct executable images. The runtime binds a
   loaded image by its full SHA-256 and revokes that binding on overlapping
-  RAM writes. Uncovered code uses the clean-room interpreter.
+  RAM writes. Uncovered code uses the clean-room interpreter. An indexed,
+  bounded coverage ledger retains executed offsets for offline promotion.
+- **Recorded checks.** All six compiler and eleven runtime component checks
+  passed. The latest indexed build passed 30/30 normal-speed headless cold
+  boots to the exact title; the preceding build also passed 30/30 windowed
+  boots. The latest windowed batches ended early and remain failed.
+- **Original-game persistence observed.** A named save survived a normal
+  window close and appeared in the restore menu after a cold boot. Restoring
+  the correct active stage still needs validation.
 - **Real-time clock (RTC) on Windows.** The runtime can seed the CD-i's DS1216
   real-time clock from your **Windows host clock** once at startup (opt-in), and
   the player's on-screen **Time & Date** settings screen is functional.
@@ -93,16 +105,30 @@ What works today:
 
 What is **not** done yet:
 
-- **Full-playthrough certification remains open.** Longer attract playback
-  currently reaches the game's disc-read error screen on a later stream
-  restart. All levels, both player modes, save/continue, and the ending still
-  need legitimate input-driven validation.
+- **Full-playthrough certification remains open.** All hotels, bosses,
+  campaign cutscenes, both complete player modes and the ending need legitimate
+  input-driven validation. Earlier stream-restart and death/restart failures
+  were corrected, but three complete attract circuits are not yet certified:
+  older long runs overflowed their coverage capture, and the latest DirectSound
+  run ended before its required capture.
+- **Current windowed reliability, audio and performance acceptance.** The
+  latest windowed cold-boot batches exited before completion. Long gameplay
+  also recorded PCM drops with SDL's dummy consumer. Audio listening quality
+  and sustained real-time performance remain unverified.
+- **Save restoration and release acceptance.** The local preview archive
+  passed packaging audits, but predates the latest coverage fix. It is not an
+  end-to-end release.
 - Broader title compatibility beyond the current Hotel Mario bring-up.
 - Unexercised I2C/MMU paths and additional exception cases remain platform
   backlog, driven by real applications as they are brought up.
 
-See `TODO.md`, `PLAN.md`, and `BIOS-CLOSEOUT.md` for the detailed roadmap and the
-BIOS/player-shell milestone evidence.
+The 2026-10-09 checkpoint is committed for default-branch integration.
+Gameplay implementation and campaign probes remain paused. LLE is the default;
+no HLE was added in this work.
+
+See [ISSUES.md](ISSUES.md) for the tested/untested matrix, exact build identities,
+evidence paths, Beads references and resume notes. `TODO.md`, `PLAN.md`, and
+`BIOS-CLOSEOUT.md` cover the roadmap and BIOS/player-shell milestone evidence.
 
 ## What you must supply
 
