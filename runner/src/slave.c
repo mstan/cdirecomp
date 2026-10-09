@@ -53,7 +53,7 @@ typedef struct {
     uint8_t response_position;
     uint8_t deferred_length;
     uint8_t deferred_pending;
-    uint64_t deferred_frame;
+    uint64_t deferred_ns;
 } IkatChannel;
 
 typedef struct {
@@ -242,7 +242,11 @@ static void defer_response(int channel, const uint8_t *bytes, unsigned length) {
     memcpy(queue->deferred, bytes, length);
     queue->deferred_length = (uint8_t)length;
     queue->deferred_pending = 1;
-    queue->deferred_frame = g_frame_count + 2;
+    /* Device replies run on elapsed device time, independently of video.
+     * One millisecond is an inferred controller processing allowance, not
+     * a measured IKAT firmware latency. The previous two-field delay held
+     * status replies across multiple 75 Hz sectors and lost seek buffers. */
+    queue->deferred_ns = 1000000u;
 }
 
 static void make_disc_status(uint8_t status[4]) {
@@ -367,10 +371,9 @@ static void handle_channel_d(void) {
         defer_response(CHANNEL_D, reply_c3, sizeof reply_c3);
         break;
     case 0xC4:
-        /* The transport takes real time to resume; applying it when the
-         * deferred reply lands puts the restart AFTER the decoder reset
-         * the completion teardown issues right after this command
-         * (C4 resume -> CCR $0100 flush -> stream continues). */
+        /* Resume is asynchronous. CIAP independently decides whether its
+         * decoder is still armed when the reply lands; a RESET between the
+         * command and reply cancels host sector delivery. */
         defer_response(CHANNEL_D, reply_c4, sizeof reply_c4);
         break;
     case 0xC5:
@@ -498,12 +501,19 @@ void slave_increment_time(double nanoseconds) {
 
     for (channel = 0; channel < CHANNEL_COUNT; channel++) {
         IkatChannel *queue = &ikat.channel[channel];
-        if (queue->deferred_pending && g_frame_count >= queue->deferred_frame) {
+        if (!queue->deferred_pending) continue;
+        uint64_t step = (uint64_t)nanoseconds;
+        if (step < queue->deferred_ns) {
+            queue->deferred_ns -= step;
+            continue;
+        }
+        queue->deferred_ns = 0;
+        /* An unsolicited seek report must not overwrite unread reply bytes. */
+        if (!response_remaining(channel)) {
             if (channel == CHANNEL_D && queue->deferred[0] == 0xC4)
                 cdic_transport_resume();
             publish_and_interrupt(channel, queue->deferred, queue->deferred_length);
             queue->deferred_pending = 0;
-            queue->deferred_frame = 0;
             /* Chain the unsolicited on-target report behind the busy reply
              * once the ROM has consumed it; our seeks settle instantly. */
             if (channel == CHANNEL_D && ikat.ready_report_pending) {

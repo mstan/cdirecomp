@@ -28,13 +28,16 @@ enum {
     CIAP_QBUF1 = 0x24E6u,
     CIAP_IER = 0x2584u,
     CIAP_ISR = 0x2586u,
+    CIAP_TACS = 0x2588u,
     CIAP_TCM1 = 0x258Cu,
     CIAP_ACM2 = 0x2590u,
     CIAP_FILE = 0x2592u,
     CIAP_BMAN = 0x2594u,
     CIAP_CCR = 0x2596u,
     CIAP_APCR = 0x25A6u,
+    CIAP_A_SHDW = 0x259Au,
     CIAP_ASTAT = 0x25AAu,
+    CIAP_AP_POINTER = 0x25B4u,
     CIAP_ICR = 0x25C0u,
     CIAP_DMACTL = 0x25C2u,
     CIAP_ID = 0x25C4u,
@@ -43,16 +46,12 @@ enum {
     CIAP_APERTURE_BYTES = 0x4000u,
     CIAP_SECTOR_BYTES = 2340u,
     CIAP_ISR_DATA = 0x0001u,
-    /* Trigger-sector event (submode $10). Folded into the ROM ISR's $2002
-     * PCL dispatch mask ($429450) and enabled in the boot IER ($060B). */
-    CIAP_ISR_TRIGGER = 0x0002u,
     CIAP_ISR_QREADY = 0x0004u,
-    /* Per-buffer locator-ready interrupt sources. The boot IER ($060B)
-     * enables these while masking the bit-2 summary, and the ROM ISR folds
-     * them into its $0601 data/locator dispatch mask. */
-    CIAP_ISR_Q0 = 0x0200u,
-    CIAP_ISR_Q1 = 0x0400u,
-    CIAP_ISR_QOVERRUN = 0x0800u,
+    /* The record driver maps bit 9 to its trigger flag and bit 10 to EOF
+     * ($428C1C). They notify the stream handler even when channel selection
+     * routes the payload away from the host; they are NOT Q-buffer bits. */
+    CIAP_ISR_STREAM_TRIGGER = 0x0200u,
+    CIAP_ISR_FILE_END = 0x0400u,
     CIAP_BMAN_DATA0 = 0x0004u,
     CIAP_BMAN_DATA1 = 0x0008u,
     CIAP_BMAN_Q0 = 0x0010u,
@@ -62,6 +61,7 @@ enum {
      * mask of a whole pair ($30 or $C0), unlike the DATA XOR handoff. */
     CIAP_BMAN_ACK_CLEAR = 0x00F0u,
     CIAP_CCR_ASEL = 0x0008u,
+    CIAP_CCR_MEMORY_PLAY = 0x0040u,
     CIAP_CCR_STARTD = 0x00C4u,
     /* Locator-reporting stream starts. CD-RTOS arms them behind the IKAT
      * on-target report: $3000/$0010 for the record path (phase 2) and
@@ -97,6 +97,7 @@ typedef struct {
     CdiCiapEvent events[CIAP_EVENT_CAPACITY];
     uint64_t event_count;
     uint64_t sector_elapsed_ns;
+    uint64_t data_deliveries, locator_deliveries, held_ticks;
     uint32_t drive_lba;
     uint32_t last_lba;
     uint8_t last_file;
@@ -110,11 +111,20 @@ typedef struct {
     uint8_t audio_positioned;
     uint8_t data_running;
     uint8_t data_path_armed;
+    uint8_t firmware_idle;
     uint8_t q_reporting;
-    uint8_t selection_prime_pending;
     uint8_t selection_active;
+    uint8_t selection_header_pending;
     uint8_t ap_completion_pending;
     uint64_t ap_completion_delay_ns;
+    uint64_t audio_remaining_ns;
+    uint64_t audio_duration_ns;
+    uint16_t audio_format[2];
+    uint8_t audio_playing;
+    uint8_t audio_buffer;
+    uint8_t audio_active;
+    uint8_t audio_finish_requested;
+    uint8_t audio_select_pending;
     int initialized;
 } CiapDevice;
 
@@ -130,12 +140,8 @@ static void store_word(unsigned offset, uint16_t value) {
     ciap.memory[offset + 1u] = (uint8_t)value;
 }
 
-/* The CIAP is double-buffered: each data buffer is owned by the host from
- * delivery (its BMAN bit set) until the write-one-to-clear acknowledge.
- * The transport only stalls when BOTH buffers are still owned — a single
- * stray un-acked buffer must never park the drive: the next sector lands
- * in the other buffer and its fresh DATA edge wakes the driver, whose ISR
- * picker ($4292F0) drains whichever buffer is ready. */
+/* Both host buffers owned inhibits payload delivery. The external drive
+ * continues to advance; locators and file events remain independent. */
 static int data_buffers_full(void) {
     return (read_word(CIAP_BMAN) & (CIAP_BMAN_DATA0 | CIAP_BMAN_DATA1))
            == (CIAP_BMAN_DATA0 | CIAP_BMAN_DATA1);
@@ -159,12 +165,6 @@ static void assert_interrupt_line(void) {
     uint16_t status = read_word(CIAP_ISR);
     unsigned level = interrupt_level();
     unsigned vector = interrupt_vector();
-    /* Locator state (summary, per-buffer, overrun) is status the drivers
-     * read opportunistically from the latch during DATA/AP service; raising
-     * the line for it dispatches the phase>=6 read handlers with no data
-     * buffer behind the interrupt. */
-    status &= (uint16_t)~(CIAP_ISR_QREADY | CIAP_ISR_Q0 | CIAP_ISR_Q1 |
-                          CIAP_ISR_QOVERRUN);
     if ((enabled & status) && level)
         cdi_irq_raise_vector((uint8_t)level, (uint8_t)vector);
 }
@@ -173,6 +173,7 @@ static void initialize_ciap(void) {
     memset(&ciap, 0, sizeof ciap);
     cdi_audio_reset();
     store_word(CIAP_ID, 0xCD02u);
+    ciap.firmware_idle = 1;
     ciap.initialized = 1;
 }
 
@@ -240,6 +241,25 @@ static void unknown_read(uint32_t address, uint32_t offset, int size) {
     abort();
 }
 
+void cdic_debug_snapshot(CdiCiapState *out) {
+    ensure_initialized();
+    out->bman = read_word(CIAP_BMAN);
+    out->isr = read_word(CIAP_ISR);
+    out->ier = read_word(CIAP_IER);
+    out->ccr = read_word(CIAP_CCR);
+    out->apcr = read_word(CIAP_APCR);
+    out->astat = read_word(CIAP_ASTAT);
+    out->channel_mask = (uint32_t)read_word(CIAP_TCM1) |
+                       ((uint32_t)read_word(CIAP_ACM2) << 16);
+    out->armed = ciap.data_path_armed;
+    out->q_reporting = ciap.q_reporting;
+    out->selection_active = ciap.selection_active;
+    out->prime_pending = 0; /* retained debug ABI; no synthetic DATA events */
+    out->data_deliveries = ciap.data_deliveries;
+    out->locator_deliveries = ciap.locator_deliveries;
+    out->held_ticks = ciap.held_ticks;
+}
+
 uint32_t cdic_read(uint32_t address, int size) {
     uint32_t offset = address - CDI_CDIC_BASE;
     uint32_t result = 0;
@@ -257,9 +277,9 @@ uint32_t cdic_read(uint32_t address, int size) {
          * work-ready status word in the ISR read port on top of the event
          * latch. The latch itself stays genuine: it alone drives the
          * interrupt line and is what acknowledge-on-read consumes. */
-        if (!ciap.data_path_armed && byte_offset == CIAP_ISR)
+        if (ciap.firmware_idle && byte_offset == CIAP_ISR)
             value |= (uint8_t)(CIAP_ISR_FIRMWARE_IDLE >> 8);
-        if (!ciap.data_path_armed && byte_offset == CIAP_ISR + 1u)
+        if (ciap.firmware_idle && byte_offset == CIAP_ISR + 1u)
             value |= (uint8_t)CIAP_ISR_FIRMWARE_IDLE;
         result = (result << 8) | value;
     }
@@ -276,23 +296,55 @@ uint32_t cdic_read(uint32_t address, int size) {
 
 static void reset_data_path(void) {
     ciap.data_running = 0;
-    /* $0100 stop/flush deactivates selection until the next ASEL ($0200):
+    ciap.data_path_armed = 0;
+    /* $0100 stop/flush deactivates selection until the next ASEL ($0008):
      * the boot-module loads re-arm with a bare $0100+$00C4 (no ASEL) and
      * expect an unfiltered stream, while the play arm ($42BF74) explicitly
      * re-issues ASEL before its $7000/$0044 locator start. Persisting the
      * selection across the flush stalls the very first boot-module read
      * behind a held sector its mask never matches. */
     ciap.selection_active = 0;
+    ciap.selection_header_pending = 0;
     ciap.q_reporting = 0;
-    ciap.ap_completion_pending = 0;
-    ciap.ap_completion_delay_ns = 0;
     ciap.next_data_buffer = 0;
-    ciap.selection_prime_pending = 0;
     ciap.sector_elapsed_ns = 0;
-    store_word(CIAP_BMAN, 0);
-    store_word(CIAP_ISR, 0);
-    store_word(CIAP_ASTAT, 0x0400u);
+    /* CCR resets the CD decoder, not the independent audio processor.
+     * CD-RTOS resets/positions the decoder while a memory sound is playing,
+     * then stops that sound by waiting for its next PCL interrupt ($429FE0).
+     * Cancelling ADPCM here makes that wait time out and leaves audio record
+     * CILs busy. APCR $6 is the separate audio reset. */
+    store_word(CIAP_BMAN, (uint16_t)(read_word(CIAP_BMAN) & 3u));
+    store_word(CIAP_ISR, (uint16_t)(read_word(CIAP_ISR) & 0x000Au));
     clear_interrupt_line();
+    assert_interrupt_line();
+}
+
+static void start_audio_buffer(void) {
+    unsigned buffer = ciap.audio_buffer;
+    if (ciap.audio_select_pending && (read_word(CIAP_BMAN) & 3u)) {
+        if (!(read_word(CIAP_BMAN) & (1u << buffer))) buffer ^= 1u;
+        ciap.audio_buffer = (uint8_t)buffer;
+        ciap.audio_select_pending = 0;
+    }
+    uint16_t bit = (uint16_t)(1u << buffer);
+    if (!ciap.audio_playing || ciap.audio_active || !(read_word(CIAP_BMAN) & bit))
+        return;
+    uint16_t format = ciap.audio_format[buffer];
+    uint8_t coding = (uint8_t)(((format & 0x2000u) ? 0x10u : 0u) |
+                              ((format & 0x1000u) ? 0x04u : 0u) |
+                              ((format & 0x0800u) ? 0x01u : 0u));
+    uint32_t frames = cdi_audio_decode_groups(ciap.memory + buffer * 0x900u, coding);
+    ciap.audio_remaining_ns = ((uint64_t)frames * 1000000000ull) /
+                             CDI_AUDIO_OUTPUT_RATE;
+    ciap.audio_duration_ns = ciap.audio_remaining_ns;
+    ciap.audio_active = 1;
+    store_word(CIAP_AP_POINTER, (uint16_t)(buffer * 0x480u));
+    store_word(CIAP_ASTAT, (uint16_t)(read_word(CIAP_ASTAT) | 0x0040u));
+}
+
+static void request_ap_completion(void) {
+    ciap.ap_completion_pending = 1;
+    ciap.ap_completion_delay_ns = 20000u;
 }
 
 static void handle_register_write(uint32_t offset, uint16_t value) {
@@ -303,41 +355,44 @@ static void handle_register_write(uint32_t offset, uint16_t value) {
         break;
     case CIAP_BMAN:
     {
-        /* All BMAN ownership bits are write-one-to-clear acknowledges: the
-         * ROM ISR always writes back the full accumulated mask of what it
-         * serviced ($0C for the data pair, $30/$C0 for locator pairs) —
-         * the driver's buffer picker ($4292F0) reads the SET bits to find
-         * the delivered buffer, so a delivery must set its own bit and an
-         * acknowledge must clear it.  (The previous XOR "ownership
-         * handoff" reading desynced under the positioning handler's
-         * ack-everything flushes: alternation stuck, both-set/none-set
-         * states appeared, and a fresh sector overwrote an un-acked
-         * buffer — consumed stale EOR = the attract scene-swap stall.)
-         * Which buffer the CIAP fills next is the CIAP's own business:
-         * deliver_one_sector alternates at delivery time. */
+        /* DATA/subcode writes release serviced host buffers. The ROM writes
+         * an entire pair mask even when only one buffer is ready. ADPCM
+         * ownership is a separate XOR handoff below. This is the firmware's
+         * host contract, inferred from $4292F0/$429346; microcode-level BMAN
+         * toggling still needs independent hardware validation. */
         uint16_t next = (uint16_t)(read_word(offset) &
                                    ~(value & (CIAP_BMAN_DATA0 |
                                               CIAP_BMAN_DATA1 |
                                               CIAP_BMAN_ACK_CLEAR)));
         store_word(offset, next);
+        /* The host hands ADPCM buffers to the audio processor by toggling
+         * bits 0/1. Capture each buffer's coding before A_SHDW is reused. */
+        next ^= value & 3u;
+        store_word(offset, next);
+        for (unsigned buffer = 0; buffer < 2; buffer++)
+            if ((value & next) & (1u << buffer))
+                ciap.audio_format[buffer] = read_word(CIAP_A_SHDW);
+        start_audio_buffer();
         break;
     }
     case CIAP_CCR:
         store_word(offset, value);
         if (value == CIAP_CCR_RESET) reset_data_path();
+        else if (value == CIAP_CCR_MEMORY_PLAY) {
+            /* The ROM parks sector decode before memory-backed PCM play
+             * ($429D66). Unlike RESET, this preserves buffer ownership. */
+            ciap.data_running = 0;
+        }
         else if (value == CIAP_CCR_ASEL) {
-            uint32_t mask = (uint32_t)read_word(CIAP_TCM1) |
-                            ((uint32_t)read_word(CIAP_ACM2) << 16);
             ciap.selection_active = 1;
-            if (ciap.data_running && mask != 0u &&
-                !(mask & (mask - 1u)))
-                ciap.selection_prime_pending = 1;
+            ciap.selection_header_pending = 1;
         }
         else if (value == CIAP_CCR_STARTD ||
                  value == CIAP_CCR_STARTQ_RECORD ||
                  value == CIAP_CCR_STARTQ_PLAY ||
                  value == CIAP_CCR_STARTQ_RETRY) {
             ciap.data_path_armed = 1;
+            ciap.firmware_idle = 0;
             ciap.data_running = 1;
             ciap.sector_elapsed_ns = 0;
             /* Locator reporting is a mode armed explicitly by the $0010/
@@ -361,7 +416,45 @@ static void handle_register_write(uint32_t offset, uint16_t value) {
             clear_interrupt_line();
             assert_interrupt_line();
         }
-        else if (value == CIAP_APCR_INTNOW || value == CIAP_APCR_FINISH ||
+        else if (value == 0x0006u) {
+            ciap.ap_completion_pending = 0;
+            ciap.ap_completion_delay_ns = 0;
+            ciap.audio_playing = 0;
+            ciap.audio_active = 0;
+            ciap.audio_finish_requested = 0;
+            ciap.audio_remaining_ns = 0;
+            ciap.audio_duration_ns = 0;
+            ciap.audio_select_pending = 0;
+            store_word(CIAP_AP_POINTER, 0);
+            store_word(CIAP_BMAN, (uint16_t)(read_word(CIAP_BMAN) & ~3u));
+            store_word(CIAP_ASTAT, (uint16_t)(read_word(CIAP_ASTAT) & ~0x00C0u));
+            store_word(CIAP_ISR, (uint16_t)(read_word(CIAP_ISR) & ~0x000Au));
+            clear_interrupt_line();
+            assert_interrupt_line();
+        }
+        else if (value == 0x0040u || value == 0x0140u) {
+            /* PLAY0 starts the buffer consumer. It is not an immediate
+             * completion: the ROM refills through the PCL buffer interrupt. */
+            ciap.audio_playing = 1;
+            /* Plain PLAY0 is also used to replace a sound while the record
+             * engine runs ($429C98). Keep an active buffer's progress; when
+             * idle, the first handed-off buffer starts the new consumer. */
+            if (value == 0x0140u) {
+                ciap.audio_buffer = 0;
+                ciap.audio_select_pending = 0;
+            } else if (!ciap.audio_active) ciap.audio_select_pending = 1;
+            ciap.audio_finish_requested = 0;
+            start_audio_buffer();
+        }
+        else if (value == CIAP_APCR_FINISH) {
+            ciap.audio_finish_requested = 1;
+            if (!ciap.audio_active && !(read_word(CIAP_BMAN) & 3u)) {
+                ciap.audio_playing = 0;
+                ciap.audio_finish_requested = 0;
+                request_ap_completion();
+            }
+        }
+        else if (value == CIAP_APCR_INTNOW ||
                  (value & CIAP_APCR_IE)) {
             /* Bit 8 asks the audio processor to interrupt when the command
              * completes. The CD driver's transport ops write $142/$140/$101
@@ -378,24 +471,9 @@ static void handle_register_write(uint32_t offset, uint16_t value) {
              * (a handful of instructions), short enough that the ROM's
              * bounded completion polls (e.g. the 400-iteration wait at
              * $429214) still observe it. */
-            ciap.ap_completion_pending = 1;
-            ciap.ap_completion_delay_ns = 20000u; /* 20 us guest time */
+            request_ap_completion();
         }
         break;
-    case CIAP_TCM1:
-    case CIAP_ACM2:
-    {
-        uint32_t old_mask = (uint32_t)read_word(CIAP_TCM1) |
-                            ((uint32_t)read_word(CIAP_ACM2) << 16);
-        uint32_t new_mask;
-        store_word(offset, value);
-        new_mask = (uint32_t)read_word(CIAP_TCM1) |
-                   ((uint32_t)read_word(CIAP_ACM2) << 16);
-        if (ciap.data_running && old_mask != new_mask && new_mask != 0u &&
-            !(new_mask & (new_mask - 1u)))
-            ciap.selection_prime_pending = 1;
-        break;
-    }
     case CIAP_DMACTL:
         store_word(offset, value);
         if (value & 0x4000u) periph_ciap_dma_request(value);
@@ -411,7 +489,16 @@ static void handle_register_write(uint32_t offset, uint16_t value) {
          * again before CD-RTOS arms another data stream. */
         if (value & 1u) {
             reset_data_path();
-            ciap.data_path_armed = 0;
+            ciap.ap_completion_pending = 0;
+            ciap.audio_playing = ciap.audio_active = 0;
+            ciap.audio_finish_requested = ciap.audio_select_pending = 0;
+            ciap.audio_remaining_ns = ciap.audio_duration_ns = 0;
+            store_word(CIAP_BMAN, 0);
+            store_word(CIAP_ISR, 0);
+            store_word(CIAP_ASTAT, 0x0400u);
+            store_word(CIAP_AP_POINTER, 0);
+            clear_interrupt_line();
+            ciap.firmware_idle = 1;
         }
         break;
     default:
@@ -443,11 +530,9 @@ void cdic_write(uint32_t address, uint32_t value, int size) {
     }
 }
 
-/* The IKAT's play/resume commands (B0/C4) restart sector delivery after a
- * decoder reset: the drivers reset the CIAP around a completed operation
- * and then resume (C4) expecting the stream to keep flowing into the armed
- * sector handlers — the attract's next scene starts at the very next
- * sector. */
+/* Drive pause preserves the decoder arm. Decoder RESET cancels it: a delayed
+ * IKAT resume must not restart delivery into handlers the ROM has torn down.
+ * A new operation explicitly arms the decoder through CCR. */
 void cdic_transport_pause(void) {
     ensure_initialized();
     ciap.data_running = 0;
@@ -506,9 +591,8 @@ static int sector_selected(const uint8_t sector[CIAP_SECTOR_BYTES]) {
         unsigned selected_file = read_word(CIAP_FILE) & 0xFFu;
         if (selected_file && file != selected_file) return 0;
     }
-    /* Record markers remain part of their file/channel stream.  Bypassing the
-     * channel mask for EOF/EOR/trigger sectors feeds unrelated, commonly
-     * zero-filled record tails into the selected realtime decoder. */
+    /* Selection controls payload delivery. File-wide trigger/EOF events are
+     * handled separately without transferring an unselected payload. */
     mask = (uint32_t)read_word(CIAP_TCM1) |
            ((uint32_t)read_word(CIAP_ACM2) << 16);
     return (mask & (1u << channel)) != 0;
@@ -518,19 +602,14 @@ static uint8_t to_bcd(uint32_t v) {
     return (uint8_t)(((v / 10u) << 4) | (v % 10u));
 }
 
-/* Write the sector's position locator behind its data buffer (subcode-Q
- * shaped, big-endian words).  The CD-RTOS consumers pin the contract: the
- * type nibble of byte 0 must be 1 and its bit 6 flags end-of-chain
- * ($429A84); byte 1 must be 0 in the program area, $AA meaning lead-out
- * ($42B844/$429A98); bytes 7-9 carry the absolute BCD MSF the drivers
- * compare against their target ($428D8A). */
-static void write_q_locator(unsigned offset, uint32_t lba, uint8_t submode) {
+/* CIAP presents the ten Q bytes without CRC. ADR=1 and CONTROL bit 6 marks
+ * this data track (the CD-DA path rejects it at ROM $429A84). Position is
+ * absolute BCD MSF in bytes 7-9. EOF is a mainchannel event, not a Q flag. */
+static void write_q_locator(unsigned offset, uint32_t lba) {
     const uint32_t real = lba + 150u;
-    uint8_t q[12];
-    uint16_t crc = 0;
-    int i;
+    uint8_t q[10];
 
-    q[0] = (uint8_t)(0x01u | ((submode & CD_I_SUBMODE_EOF) ? 0x40u : 0));
+    q[0] = 0x41u;
     q[1] = 0x00u;
     q[2] = 0x01u;
     q[3] = to_bcd(real / 4500u);
@@ -540,39 +619,7 @@ static void write_q_locator(unsigned offset, uint32_t lba, uint8_t submode) {
     q[7] = q[3];
     q[8] = q[4];
     q[9] = q[5];
-    for (i = 0; i < 10; i++) {
-        int b;
-        crc ^= (uint16_t)(q[i] << 8);
-        for (b = 0; b < 8; b++)
-            crc = (uint16_t)((crc & 0x8000u) ? (crc << 1) ^ 0x1021u
-                                             : (crc << 1));
-    }
-    q[10] = (uint8_t)(~crc >> 8);
-    q[11] = (uint8_t)~crc;
     memcpy(ciap.memory + offset, q, sizeof q);
-}
-
-/* Re-selection poke: plain transport reads ($C4 STARTD) re-arm selection
- * mid-stream (TCM1/ASEL) and then wait on a DATA event to re-evaluate — the
- * boot module loads hang without it.  It must only ride a tick whose sector
- * does NOT produce a real DATA delivery (unselected or audio): the record
- * path's handover also re-issues ASEL ($428664 CCR $0008) with the play
- * pipeline sector in flight, and a synthesized DATA arriving ahead of that
- * selected sector spends the positioning transition's single
- * discard-one-delivery step ($4286D0) — the previous record's EOR then falls
- * through to the record engine, ends the op on the stale record (PCB_Rec
- * 1->0 at the wrong EOR), and the game's play pump starves: the attract
- * scene-swap / title-background-rotation stall.  A real selected delivery
- * satisfies the re-selection wait by itself (and clears the pending flag at
- * delivery time). */
-static void emit_selection_prime_poke(void) {
-    if (ciap.selection_prime_pending && !ciap.q_reporting &&
-        !data_buffers_full()) {
-        ciap.selection_prime_pending = 0;
-        store_word(CIAP_ISR,
-                   (uint16_t)(read_word(CIAP_ISR) | CIAP_ISR_DATA));
-        assert_interrupt_line();
-    }
 }
 
 static void deliver_one_sector(void) {
@@ -583,11 +630,6 @@ static void deliver_one_sector(void) {
     unsigned offset;
 
     if (!ciap.drive_positioned || !cdi_media_present()) return;
-    /* Double-buffered flow control: the drive holds position only while the
-     * host still owns BOTH buffers.  One stray un-acked buffer must not park
-     * the transport (see data_buffers_full). */
-    if (data_buffers_full()) return;
-
     uint32_t lba = ciap.drive_lba;
     if (!cdi_media_read_sector_body(lba, sector)) {
         fprintf(stderr,
@@ -603,54 +645,85 @@ static void deliver_one_sector(void) {
     ciap.last_submode = sector[6];
     ciap.last_coding = sector[7];
     ciap.last_selected = (uint8_t)sector_selected(sector);
+    /* The original play arm installs a one-buffer discard callback after
+     * ASEL ($4286D0). The next physical sector must provide that boundary
+     * header even when its file/channel is filtered; otherwise the callback
+     * consumes the first selected payload instead. This is inferred from
+     * the firmware handshake. It never fabricates or repeats a sector. */
+    int selection_header = ciap.selection_header_pending;
+    ciap.selection_header_pending = 0;
+    /* Trigger/EOF are file-wide events, independent of payload channels.
+     * The original intro stream puts scene triggers on channel 0 while its
+     * pictures/audio select channel 15. ROM $428C1C consumes ISR9/10 without
+     * a DATA buffer; delivering channel 0 payload would corrupt the video.
+     * Reject damaged duplicate subheaders before interpreting these bits. */
+    if (sector[3] == 2u && !memcmp(sector + 4, sector + 8, 4) &&
+        (!ciap.selection_active || !read_word(CIAP_FILE) ||
+         (read_word(CIAP_FILE) & 0xFFu) == sector[4]) &&
+        (sector[6] & (CD_I_SUBMODE_TRIGGER | CD_I_SUBMODE_EOF))) {
+        uint16_t events = (sector[6] & CD_I_SUBMODE_TRIGGER)
+                            ? CIAP_ISR_STREAM_TRIGGER : 0;
+        if (sector[6] & CD_I_SUBMODE_EOF) events |= CIAP_ISR_FILE_END;
+        store_word(CIAP_ISR,
+                   (uint16_t)(read_word(CIAP_ISR) | events));
+        assert_interrupt_line();
+    }
     /* Drive-position locators are selection-independent: the drivers'
      * seek-confirm ($428D8A) must see the sectors approaching a target even
      * when no channel selects them, so every sector passing the head
      * reports, alternating the locator pair on its own. */
     if (ciap.q_reporting) {
+        ciap.locator_deliveries++;
         unsigned qi = ciap.next_q_buffer;
         uint16_t qbit = qi ? CIAP_BMAN_Q1 : CIAP_BMAN_Q0;
         uint16_t qbman = read_word(CIAP_BMAN);
         ciap.next_q_buffer = (uint8_t)(qi ^ 1u);
-        write_q_locator(qi ? CIAP_QBUF1 : CIAP_QBUF0, lba, sector[6]);
-        /* An unconsumed locator being overwritten is a real overrun the
-         * record path checks for (latched ISR bit 11), not a state to
-         * hide. */
-        if (qbman & qbit)
-            store_word(CIAP_ISR,
-                       (uint16_t)(read_word(CIAP_ISR) | CIAP_ISR_QOVERRUN));
+        write_q_locator(qi ? CIAP_QBUF1 : CIAP_QBUF0, lba);
+        /* ISR bit 11 reports an invalid Q locator, not host ownership.
+         * These locators are synthesized from a valid disc position. */
         store_word(CIAP_BMAN, (uint16_t)(qbman | qbit));
         store_word(CIAP_ISR,
-                   (uint16_t)(read_word(CIAP_ISR) | CIAP_ISR_QREADY |
-                              (qi ? CIAP_ISR_Q1 : CIAP_ISR_Q0)));
+                   (uint16_t)(read_word(CIAP_ISR) | CIAP_ISR_QREADY));
         assert_interrupt_line();
     }
-    if (!ciap.last_selected) {
+    /* Payload selection must not freeze the file position between selected
+     * channels. The real CDFM SS.Pos reads its driver-maintained offset at
+     * $41553A; $428AA2 advances it from the host sector header. Inferred from
+     * that firmware ABI, regular sectors of the selected file retain a
+     * header-only host notification when their payload channel is filtered.
+     * The ROM's own channel test at $428A72 prevents payload DMA. Record
+     * boundaries stay selected-channel events: never feed an unselected EOR
+     * to the record engine. Unselected trigger/EOF already use ISR9/10 above.
+     * No selection command may invent a delivery without a real sector. */
+    int metadata_only = !ciap.last_selected && sector[3] == 2u &&
+                        !memcmp(sector + 4, sector + 8, 4) &&
+                        (selection_header ||
+                         (!(sector[6] & (CD_I_SUBMODE_EOR | CD_I_SUBMODE_TRIGGER | CD_I_SUBMODE_EOF)) &&
+                          (!read_word(CIAP_FILE) ||
+                           (read_word(CIAP_FILE) & 0xFFu) == sector[4])));
+    if (!ciap.last_selected && !metadata_only) {
         ciap.drive_lba++;
-        emit_selection_prime_poke();
         return;
     }
-    /* Audio payloads are consumed by the CIAP's audio processor, not the
-     * host data buffers — but the host still needs the record accounting:
-     * an audio sector flagged EOR/EOF/trigger closes a play RECORD, and the
-     * driver's record engine must see it (PCB_Rec counting, PCB_Stat bit2
-     * audio-last-read, per-record F$Send).  The Hotel Mario title screen
-     * rotates its backgrounds off exactly one such event: the menu-music
-     * loop's audio EOR record completion is the game's cue to re-mask and
-     * consume the next background image record riding the same stream —
-     * swallowing it froze the title background forever. */
-    if (sector[6] & CD_I_SUBMODE_AUDIO) {
+    /* TACS routes ADPCM to the audio processor. The selected sector's
+     * header still advances host record accounting ($428AA2); the ROM
+     * excludes TACS audio from payload DMA at $428A84. Suppressing the
+     * header notification until EOR leaves SS.Pos frozen throughout music. */
+    int direct_audio = ciap.last_selected && (sector[6] & CD_I_SUBMODE_AUDIO) && sector[5] < 16u &&
+                       (read_word(CIAP_TACS) & (1u << sector[5]));
+    if (direct_audio) {
         cdi_audio_decode_sector(sector);
-        if (!(sector[6] & (CD_I_SUBMODE_EOR | CD_I_SUBMODE_EOF |
-                           CD_I_SUBMODE_TRIGGER))) {
-            ciap.drive_lba++;
-            emit_selection_prime_poke();
-            return;
-        }
-        /* flagged audio sector: fall through to the data delivery path */
     }
 
     ciap.drive_lba++;
+
+    /* CIAP has no drive-control interface. A full host buffer pair inhibits
+     * payload delivery, but cannot stop physical sectors or position reports.
+     * Keep owned bytes intact until the host releases them. */
+    if (data_buffers_full()) {
+        ciap.held_ticks++;
+        return;
+    }
 
     buffer = ciap.next_data_buffer;
     /* Never overwrite a buffer the host still owns: fill the free one. */
@@ -659,21 +732,17 @@ static void deliver_one_sector(void) {
         buffer ^= 1u;
     bit = buffer ? CIAP_BMAN_DATA1 : CIAP_BMAN_DATA0;
     offset = buffer ? CIAP_DATA1 : CIAP_DATA0;
-    memcpy(ciap.memory + offset, sector, sizeof sector);
-    /* The delivery owns its BMAN bit (the ROM's picker reads the set bit to
-     * find the buffer) and the CIAP alternates fill buffers itself.  A real
-     * DATA interrupt also satisfies any pending re-selection poke. */
+    if (direct_audio || metadata_only) {
+        memcpy(ciap.memory + offset, sector, 12u);
+        memset(ciap.memory + offset + 12u, 0, sizeof sector - 12u);
+    } else memcpy(ciap.memory + offset, sector, sizeof sector);
+    ciap.data_deliveries++;
+    /* Every host notification owns a real header buffer. The ROM's picker
+     * reads its BMAN bit and the CIAP alternates fill buffers itself. */
     bman = read_word(CIAP_BMAN);
     store_word(CIAP_BMAN, (uint16_t)(bman | bit));
     ciap.next_data_buffer = (uint8_t)(buffer ^ 1u);
-    ciap.selection_prime_pending = 0;
-    /* A selected trigger sector latches its own event bit alongside DATA;
-     * the ROM ISR reads the combined word and takes the $2002 PCL path
-     * ($429450) from the same invocation once the driver is in status 5. */
-    store_word(CIAP_ISR,
-               (uint16_t)(read_word(CIAP_ISR) | CIAP_ISR_DATA |
-                          ((sector[6] & CD_I_SUBMODE_TRIGGER)
-                               ? CIAP_ISR_TRIGGER : 0u)));
+    store_word(CIAP_ISR, (uint16_t)(read_word(CIAP_ISR) | CIAP_ISR_DATA));
     assert_interrupt_line();
 }
 
@@ -694,13 +763,41 @@ void cdic_increment_time(double nanoseconds) {
             ciap.ap_completion_delay_ns -= step;
         }
     }
+    uint64_t audio_step = (uint64_t)nanoseconds;
+    while (ciap.audio_active && audio_step >= ciap.audio_remaining_ns) {
+        audio_step -= ciap.audio_remaining_ns;
+        uint16_t bit = (uint16_t)(1u << ciap.audio_buffer);
+        store_word(CIAP_BMAN, (uint16_t)(read_word(CIAP_BMAN) & ~bit));
+        ciap.audio_active = 0;
+        ciap.audio_remaining_ns = 0;
+        ciap.audio_buffer ^= 1u;
+        store_word(CIAP_AP_POINTER, (uint16_t)(ciap.audio_buffer * 0x480u));
+        /* Bit 1 wakes the PCL refill path ($429E0C). Bit 13 is a different
+         * condition: it makes that handler probe/acknowledge the ADPCM pair
+         * and take its error path when neither buffer is owned ($429EFE).
+         * An ordinary consumed-buffer notification must not set it. */
+        store_word(CIAP_ISR, (uint16_t)(read_word(CIAP_ISR) | 0x0002u));
+        assert_interrupt_line();
+        start_audio_buffer();
+        if (!ciap.audio_active) {
+            store_word(CIAP_ASTAT, (uint16_t)(read_word(CIAP_ASTAT) & ~0x0040u));
+            if (ciap.audio_finish_requested) {
+                ciap.audio_playing = 0;
+                ciap.audio_finish_requested = 0;
+                request_ap_completion();
+            }
+        }
+    }
+    if (ciap.audio_active) {
+        ciap.audio_remaining_ns -= audio_step;
+        uint64_t elapsed = ciap.audio_duration_ns - ciap.audio_remaining_ns;
+        store_word(CIAP_AP_POINTER, (uint16_t)(ciap.audio_buffer * 0x480u +
+                   elapsed * 0x480u / ciap.audio_duration_ns));
+    }
     if (!ciap.data_running) return;
     ciap.sector_elapsed_ns += (uint64_t)nanoseconds;
     while (ciap.sector_elapsed_ns >= sector_period_ns) {
         ciap.sector_elapsed_ns -= sector_period_ns;
-        /* The re-selection poke (see emit_selection_prime_poke) rides the
-         * delivery path: it fires only from ticks whose sector produces no
-         * DATA delivery, never in place of one. */
         deliver_one_sector();
         if (!ciap.data_running) break;
     }

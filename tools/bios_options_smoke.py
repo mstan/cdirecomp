@@ -93,12 +93,11 @@ def events_since(port: int, start: int) -> list[dict]:
 
 
 def click_with_frontend(port: int) -> tuple[dict, dict, list[dict]]:
-    """Publish through the dev ABI until the physical frontend's next poll.
+    """Publish through the dev ABI until a real timed IKAT report samples it.
 
-    The visible player intentionally owns the base input mask every 4 ms. The
-    test repeats its dev state until one real 25-ms IKAT report samples it,
-    then repeats release until the next report. This proves both edges without
-    disabling or bypassing the player frontend.
+    The visible frontend and development input are independent producers. The
+    test waits for press and release packets without bypassing the frontend
+    or the 25-ms IKAT report cadence.
     """
     start = request(port, {"cmd": "ikat_events"})["total"]
     deadline = time.monotonic() + 5.0

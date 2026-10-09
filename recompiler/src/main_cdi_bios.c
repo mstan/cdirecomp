@@ -25,6 +25,7 @@
 #include "m68k_validator.h"
 #include "annotations.h"
 #include "game_config.h"
+#include "cdi_sha256.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -327,7 +328,21 @@ int main(int argc, char *argv[]) {
            ok ? "ok" : "FAILED", diag);
     printf("[CdiRecompBios] output: %s , %s\n", out_full, out_disp);
 
+    FILE *identity = fopen("bios/generated/bios_identity.h", "w");
+    if (!identity) ok = false;
+    else {
+        if (!ok || diag) fprintf(identity, "#error BIOS generation failed; regenerate before building\n");
+        else {
+            uint8_t digest[32];
+            cdi_sha256(img + CDI_BIOS_ROM_BASE, (size_t)sz, digest);
+            fprintf(identity, "#pragma once\n#include <stdint.h>\n#define CDI_COMPILED_BIOS_SIZE %ldu\nstatic const uint8_t cdi_compiled_bios_sha256[32] = {", sz);
+            for (int i=0;i<32;i++) fprintf(identity, "%s0x%02x", i?",":"", digest[i]);
+            fprintf(identity, "};\n");
+        }
+        if (fclose(identity)) ok=false;
+    }
+
     function_list_free(&funcs);
     free(img);
-    return ok ? 0 : 2;
+    return ok && !diag ? 0 : 2;
 }

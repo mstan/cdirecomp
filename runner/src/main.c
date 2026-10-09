@@ -16,6 +16,10 @@
 #include "cdi_media.h"
 #include "cdi_host_time.h"
 #include "player_config.h"
+#include "cdi_sha256.h"
+#ifdef CDI_BIOS_IDENTITY_BUILD
+#include "bios_identity.h"
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -182,6 +186,17 @@ int main(int argc, char *argv[]) {
     }
     fclose(f);
 
+#ifdef CDI_BIOS_IDENTITY_BUILD
+    uint8_t bios_digest[32];
+    cdi_sha256(raw, (size_t)sz, bios_digest);
+    if ((size_t)sz != CDI_COMPILED_BIOS_SIZE ||
+        memcmp(bios_digest, cdi_compiled_bios_sha256, sizeof bios_digest)) {
+        fprintf(stderr, "[cdi] BIOS differs from the statically compiled image; regenerate for this BIOS\n");
+        free(raw);
+        return 2;
+    }
+#endif
+
     uint32_t reset_ssp = be32(&raw[0]);
     uint32_t reset_pc  = be32(&raw[4]);
     cdi_bus_load_rom(raw, (uint32_t)sz);
@@ -345,6 +360,7 @@ int main(int argc, char *argv[]) {
                  * RAM at address zero after boot, so the application-supplied
                  * warm vectors are the reset vectors for this transition. */
                 g_main_reset_pending = 0;
+                g_main_reset_count++;
                 g_main_reset_boot_vectors = 0;
                 g_cpu.A[7] = restart_ssp;
                 g_cpu.SSP = restart_ssp;

@@ -27,6 +27,7 @@
 #define CDI_VOLUME_DESC_LBA      16u  /* ISO-9660 / CD-i volume descriptor */
 #define OS9_MODULE_SYNC      0x4AFCu  /* M$ID — also the 68K ILLEGAL opcode */
 #define OS9_MODULE_HDR_SIZE   0x30u   /* standard OS-9/68000 module header */
+#define OS9_MODULE_CRC_RESIDUE 0x800FE3u /* complemented three-byte CRC footer */
 
 typedef struct {
     char      bin_path[1024];
@@ -36,24 +37,40 @@ typedef struct {
     int       track_mode;     /* 1 or 2, parsed from the .cue (2 = CD-i) */
 } CdiDisc;
 
+typedef struct {
+    char path[256];
+    uint32_t lba;
+    uint32_t size;
+} CdiFile;
+
 /* One discovered OS-9/68000 module candidate. */
 typedef struct {
     uint64_t logical_offset;  /* byte offset within the concatenated Form-1 stream */
     uint32_t lba;             /* sector containing the sync word */
     uint32_t size;            /* M$Size (module length in bytes) */
+    uint32_t file_offset;     /* offset inside owning disc file (0 for ROM scan) */
+    char file_path[256];      /* owning directory entry; empty for ROM scan */
     uint8_t  type;            /* M$Type (e.g. Prog=0x1, Subr, Data, Device, ...) */
     uint8_t  lang;            /* M$Lang (e.g. 68000 objode = 0x1) */
     char     name[64];        /* M$Name string (high-bit terminator stripped) */
     bool     header_parity_ok;/* trusted validator: header check word == 0xFFFF */
-    bool     crc_ok;          /* os9_module_crc24 residue == 0 — UNVERIFIED, see TODO.md */
+    bool     crc_ok;          /* complete module, including complemented footer */
 } Os9Module;
 
 /* Open from a .cue (preferred) or directly from a .bin. */
 bool cdi_disc_open(const char *cue_or_bin_path, CdiDisc *out);
 void cdi_disc_close(CdiDisc *d);
 
-/* Copy the 2048 Form-1 user bytes of sector `lba` into `buf`. */
+/* Copy Form-1 user bytes. Rejects Form-2 sectors and mismatched subheaders. */
 bool cdi_read_sector_form1(CdiDisc *d, uint32_t lba, uint8_t buf[CDI_MODE2_FORM1_DATA]);
+
+/* Enumerate bounded ISO-9660/CD-i file extents. Returns total file count,
+ * filling up to max_out entries, or -1 on malformed/unsupported metadata. */
+int cdi_list_files(CdiDisc *d, CdiFile *out, int max_out);
+
+/* Preserve the file's sector-relative layout, replacing valid Form-2
+ * audio/video sectors with zeros. Buffer capacity must cover file->size. */
+bool cdi_read_file_form1(CdiDisc *d, const CdiFile *file, uint8_t *buf, uint32_t capacity);
 
 /* Copy the 2340 bytes presented by the Mono-III/IV CIAP data buffers: the
  * Mode-2 header, duplicated subheader, payload, and trailing EDC/ECC bytes,
@@ -69,12 +86,11 @@ bool cdi_read_volume_descriptor(CdiDisc *d);
  * logical_offset = byte offset within `buf`. Returns count (fills up to max_out). */
 int os9_scan_buffer(const uint8_t *buf, uint64_t len, Os9Module *out, int max_out);
 
-/* Scan the concatenated Form-1 user stream for 0x4AFC module syncs, validating
- * each with the header parity word. Fills up to `max_out` entries; returns the
- * number of valid module headers found (header_parity_ok). */
+/* Scan each directory file independently, excluding Form-2 payloads and
+ * preventing a module from crossing its owning file's end. Returns total
+ * complete headers, or -1 on invalid filesystem/media metadata. */
 int cdi_scan_os9_modules(CdiDisc *d, Os9Module *out, int max_out);
 
-/* OS-9/68000 module CRC-24 (poly 0x800063, init 0xFFFFFF). The algorithm is
- * standard; the residue-equals-zero validity check still needs verification
- * against real Hotel Mario modules before we trust it (see TODO.md MC-CDI-002). */
+/* OS-9/68000 CRC-24 (poly 0x800063, init 0xFFFFFF). Including the
+ * complemented CRC footer produces OS9_MODULE_CRC_RESIDUE, not zero. */
 uint32_t os9_module_crc24(const uint8_t *data, uint32_t len);

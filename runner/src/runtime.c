@@ -8,6 +8,7 @@
 #include "cdi_runtime.h"
 #include "debug_server.h"
 #include "m68k_interp.h"
+#include "cdi_native.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -23,7 +24,8 @@ int      game_dispatch_has_addr(uint32_t addr);
 /* Is `addr` the entry of a statically recompiled function? (Used by the hybrid
  * interpreter to know when it has re-entered recompiled territory.) */
 int dispatch_has_addr(uint32_t addr) {
-    return game_dispatch_has_addr(addr & 0xFFFFFFu);
+    addr &= 0xFFFFFFu;
+    return game_dispatch_has_addr(addr) || cdi_native_has_address(addr);
 }
 
 /* ---- Hybrid interpreter handoff (MC-CDI-011) ----
@@ -223,6 +225,7 @@ void cdi_irq_raise_onchip_level(uint8_t level) {
 
 /* ---- Dispatch-miss monitor ---- */
 uint32_t g_miss_count_any = 0;
+uint32_t g_main_reset_count = 0;
 uint32_t g_miss_last_addr = 0;
 uint64_t g_miss_last_frame = 0;
 uint32_t g_miss_unique_addrs[CDI_MAX_MISS_UNIQUE];
@@ -244,6 +247,7 @@ void genesis_log_dispatch_miss(uint32_t addr) {
  * hybrid-interpreter handoff: the target was reached via a recomp JSR/exception
  * that left a return address on the guest stack, so interpret from there. */
 int game_dispatch_override(uint32_t addr) {
+    if (cdi_native_dispatch(addr)) { g_call_was_hybrid=0;return 1; }
     debug_record_indirect_target(addr);   /* trace-guided discovery seed */
     return hybrid_enter(addr, m68k_read32(g_cpu.A[7]));
 }
@@ -271,6 +275,7 @@ void recomp_push_return(uint32_t ret_addr) {
 /* ---- Runtime init ---- */
 void runtime_init(void) {
     memset(&g_cpu, 0, sizeof g_cpu);
+    cdi_native_reset();
     /* SCC68070 reset entry costs 43 processor clocks. Native seeds the
      * post-reset registers directly, so carry that exception
      * time in the first generated instruction's accumulator: seq 0 remains the

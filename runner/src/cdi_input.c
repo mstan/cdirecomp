@@ -1,10 +1,12 @@
 #include "cdi_runtime.h"
+#include "cdi_input.h"
 
 #include <limits.h>
 #include <stdatomic.h>
 #include <stdint.h>
 
 static atomic_uint base_input;
+static atomic_uint frontend_input;
 enum { MOUSE_BUTTON_QUEUE_CAPACITY = 256 };
 
 static atomic_uint mouse_physical_buttons;
@@ -48,6 +50,7 @@ static int take_axis(atomic_int *target, int low, int high) {
 
 void cdi_input_reset(void) {
     atomic_store_explicit(&base_input, 0, memory_order_relaxed);
+    atomic_store_explicit(&frontend_input, 0, memory_order_relaxed);
     atomic_store_explicit(&mouse_physical_buttons, 0, memory_order_relaxed);
     atomic_store_explicit(&mouse_button_read, 0, memory_order_relaxed);
     atomic_store_explicit(&mouse_button_write, 0, memory_order_relaxed);
@@ -61,9 +64,13 @@ void cdi_input_set(uint32_t mask) {
     atomic_store_explicit(&base_input, mask & allowed_input,
                           memory_order_release);
 }
+void cdi_input_set_frontend(uint32_t mask) {
+    atomic_store_explicit(&frontend_input,mask&allowed_input,memory_order_release);
+}
 
 uint32_t cdi_input_get(void) {
     uint32_t result = atomic_load_explicit(&base_input, memory_order_acquire);
+    result |= atomic_load_explicit(&frontend_input,memory_order_acquire);
     unsigned read = atomic_load_explicit(&mouse_button_read, memory_order_acquire);
     unsigned write = atomic_load_explicit(&mouse_button_write, memory_order_acquire);
     if (read != write)

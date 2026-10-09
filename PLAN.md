@@ -8,9 +8,10 @@ sits in the family, what's missing, and the order to close the gaps. The
 `MC-CDI-*` tickets; this file sequences them and adds the cross-cutting
 infrastructure the tickets assume.
 
-**2026-07-15 status:** the BIOS/player-shell phase is closed and Phase E has an
-accepted Hotel Mario attract preview. Static promotion and gameplay remain the
-active path.
+**2026-10-09 status:** the BIOS/player-shell phase is closed. Hotel Mario has
+static position-independent module emission and reaches one-player Stage 1.
+Full attract cycles, both campaigns, save/continue and release acceptance
+remain active work; see ISSUES.md and central Beads `beads-ssy9`/`beads-ttbl`.
 
 ## 1. The house style (what a mature sibling looks like)
 
@@ -58,9 +59,9 @@ The non-negotiable maturity markers, in the order siblings acquired them:
 | Boots to shell / plays a game      | ✅  | ✅      | ✅   | ✅  | ✅ shell / attract preview |
 
 cdirecomp is now a **closed BIOS/player-shell implementation with an accepted
-Hotel Mario attract preview**. Loaded game modules currently execute through
-the clean-room fallback; the next bottleneck is promoting those relocated
-modules into the static native tier without regressing the accepted path.
+Hotel Mario preview**. Loaded game modules bind to static native code by full
+image identity, with clean-room fallback for uncovered entries. The current
+bottleneck is validating stream restarts, full campaigns and persistence.
 
 ## 3. The 68000 frontend (provenance + reconciliation)
 

@@ -1,4 +1,5 @@
 #include "cdi_runtime.h"
+#include "cdi_input.h"
 
 #include <stdio.h>
 
@@ -13,6 +14,17 @@ static int failures;
 
 int main(void) {
     int x, y;
+
+    cdi_input_reset();
+    cdi_input_set(CDI_INPUT_BTN1);
+    cdi_input_set_frontend(0);
+    CHECK(cdi_input_get()==CDI_INPUT_BTN1);
+    cdi_input_set_frontend(CDI_INPUT_RIGHT);
+    CHECK(cdi_input_get()==(CDI_INPUT_RIGHT|CDI_INPUT_BTN1));
+    cdi_input_set(0);
+    CHECK(cdi_input_get()==CDI_INPUT_RIGHT);
+    cdi_input_reset();
+    CHECK(cdi_input_get()==0);
 
     cdi_input_reset();
     cdi_input_set(CDI_INPUT_LEFT);

@@ -20,6 +20,8 @@ typedef struct CdiAudioState {
  * optional PCM queue. */
 void cdi_audio_reset(void);
 int  cdi_audio_decode_sector(const uint8_t sector_body[2340]);
+/* Decode the 18 sound groups in a CIAP ADPCM buffer. Returns output frames
+ * at CDI_AUDIO_OUTPUT_RATE; the device uses that count for guest timing. */
+uint32_t cdi_audio_decode_groups(const uint8_t sound_groups[2304], uint8_t coding);
 uint32_t cdi_audio_read_frames(int16_t *stereo_pcm, uint32_t capacity_frames);
 void cdi_audio_debug_state(CdiAudioState *out);
-

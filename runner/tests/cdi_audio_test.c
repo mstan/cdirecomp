@@ -37,6 +37,13 @@ int main(void) {
     CHECK(state.pcm_fnv1a != UINT64_C(0xCBF29CE484222325));
     CHECK(cdi_audio_read_frames(pcm, 4032) == 2016);
     CHECK(pcm[0] == 4096 && pcm[1] == 4096);
+    uint64_t sector_hash = state.pcm_fnv1a;
+    cdi_audio_reset();
+    CHECK(cdi_audio_decode_groups(sector + 12, 0x01) == 2016);
+    cdi_audio_debug_state(&state);
+    CHECK(state.pcm_fnv1a == sector_hash);
+    CHECK(cdi_audio_read_frames(pcm, 4032) == 2016);
+    CHECK(pcm[0] == 4096 && pcm[1] == 4096);
 
     cdi_audio_reset();
     make_audio_sector(sector, 0x05, 0x11); /* 18.9 kHz duplicates frames. */

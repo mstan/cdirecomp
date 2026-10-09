@@ -43,7 +43,7 @@ runtime grows, MC-CDI-015):
 
 ```
 ping                 -> {ok,pong}
-status               -> {ok,insns,blocks,frame,pc,halted,input,miss_count,miss_last,irq_pending}
+status               -> {ok,insns,blocks,interp,frame,pc,halted,held,input,miss_count,miss_last,irq_pending,main_resets,...}
 pause                -> {ok,pause_requested,seq}  freeze CPU at next already-recorded trace entry
 video_state          -> {ok,csr1r,csr2r,csr1w,csr2w,dcr1,dcr2,ddr1,ddr2,vsr1,vsr2,dcp1,dcp2,cursor_x,cursor_y,cursor_enabled,cursor_pattern,...}
 video_frame          -> {ok,width,height,generation,argb_fnv1a}
@@ -57,6 +57,12 @@ set_input mask[,dx,dy] -> {ok,input,pending_dx,pending_dy}  dev-only state/motio
 emu_ikat_state       -> {ok,input,pointer_ns,cursor_packets,out_remaining,regs}
 ikat_events          -> {ok,total,events:[{seq,trace_seq,pc,frame,cycles,type,channel,data}...]}
 ciap_events          -> {ok,total,oldest,events:[{seq,trace_seq,pc,frame,cycles,offset,size,write,value}...]}
+ciap_state           -> {ok,drive_lba,last_lba,file,channel,submode,coding,selected,running,waiting_ack,bman,isr,ier,ccr,apcr,astat,channel_mask,armed,q_reporting,selection_active,prime_pending,data_deliveries,locator_deliveries,held_ticks}
+native_state         -> {ok,compiled,active,bindings,invalidations,dispatches,identity_rejections}
+native_events [from,count] -> {ok,total,oldest,events:[{seq,trace_seq,frame,cycles,epoch,pc,base,size,module,type}...]}
+module_targets [from,count] -> {ok,total,dropped,targets:[{module,offset,base,epoch,frame,trace_seq,hits,sha256}...]}
+stores addr[,from,count,before] -> {ok,addr,total,oldest,next,records:[{store,seq,frame,pc,addr,val,size}...]}
+stop_frame frame     -> {ok,frame}  stop at a future completed field while retaining normal pacing
 disc_state           -> {ok,present,sectors,track_mode}
 mount_disc path      -> {ok,present,sectors,track_mode}  validates/mounts real CUE/BIN media
 eject_disc           -> {ok,present,sectors,track_mode}
@@ -76,6 +82,20 @@ frame_diff        memory_diff        first_divergence  framebuf_diff
 Reverse-debugger tiers (per-store / per-block / per-call attribution,
 breakpoints, watchpoints, RAM reconstruction) follow the nesrecomp/Genesis
 `rdb_*` design once the basic surface is up.
+
+`native_events` types are 1=bind, 2=invalidate, 3=identity rejection. `module`
+is the generated manifest index; unmatched candidates use UINT32_MAX.
+`module_targets` is a bounded set of uncovered executed entries, identified
+at execution time by immutable image hash and offset. It survives address
+reuse by another overlay. Pagination uses `from` as the set index (not trace
+sequence). A nonzero `dropped` means incomplete evidence and must prevent
+offline seed export. `tools/collect_module_seeds.py` writes SHA-bound seeds.
+
+Forward `stores` pagination uses its `next` cursor and reports evictions;
+`before` and `from` are mutually exclusive. `stop_frame` is a TCP arm for a
+future frame, distinct from the startup free-run switch. Pause/stop/fault
+holds currently have no continue command; evidence tools terminate only
+their own process after capture.
 
 ## Oracle (CeDImu) — live
 

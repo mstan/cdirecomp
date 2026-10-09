@@ -13,6 +13,7 @@
  */
 #include "cdi_runtime.h"
 #include "cosim_state.h"
+#include "cdi_native.h"
 
 #ifdef CDI_COSIM
 
@@ -150,6 +151,7 @@ void cdi_cosim_inject_ram(uint32_t addr, uint32_t xorval) {
     else if (addr - CDI_RAM1_BASE < CDI_RAM1_SIZE) p = &g_ram1[addr - CDI_RAM1_BASE];
     if (!p) return;   /* not RAM (ROM/MMIO excluded, §2b) — no-op */
     *p ^= (uint8_t)xorval;
+    cdi_native_notify_write(addr, 1);
     cdi_cosim_note_ram_write(addr, 1);   /* mark dirty so the NEXT hash call sees the flip */
 }
 

@@ -96,13 +96,16 @@ void cdi_audio_reset(void) {
 }
 
 int cdi_audio_decode_sector(const uint8_t sector[2340]) {
-    uint8_t coding;
+    if (!sector || sector[3] != 2u || !(sector[6] & 0x04u)) return 0;
+    return cdi_audio_decode_groups(sector + XA_PAYLOAD_OFFSET, sector[7]) != 0;
+}
+
+uint32_t cdi_audio_decode_groups(const uint8_t sound_groups[2304], uint8_t coding) {
     int stereo, eight_bit, duplicate;
     unsigned units;
     uint64_t hash, frames = 0, dropped = 0;
 
-    if (!sector || sector[3] != 2u || !(sector[6] & 0x04u)) return 0;
-    coding = sector[7];
+    if (!sound_groups) return 0;
     stereo = (coding & 3u) == 1u;
     eight_bit = (coding & 0x30u) == 0x10u;
     duplicate = (coding & 0x0Cu) == 0x04u; /* 18.9 kHz -> 37.8 kHz output. */
@@ -111,8 +114,7 @@ int cdi_audio_decode_sector(const uint8_t sector[2340]) {
 
     for (unsigned group_index = 0; group_index < XA_SOUND_GROUPS;
          group_index++) {
-        const uint8_t *group = sector + XA_PAYLOAD_OFFSET +
-                               group_index * XA_SOUND_GROUP_BYTES;
+        const uint8_t *group = sound_groups + group_index * XA_SOUND_GROUP_BYTES;
         int16_t decoded[8][XA_SAMPLES_PER_UNIT];
 
         for (unsigned unit = 0; unit < units; unit++) {
@@ -152,7 +154,7 @@ int cdi_audio_decode_sector(const uint8_t sector[2340]) {
     atomic_store_explicit(&audio.pcm_hash, hash, memory_order_relaxed);
     atomic_fetch_add_explicit(&audio.dropped_frames, dropped,
                               memory_order_relaxed);
-    return 1;
+    return (uint32_t)frames;
 }
 
 uint32_t cdi_audio_read_frames(int16_t *pcm, uint32_t capacity) {

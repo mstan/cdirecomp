@@ -9,6 +9,7 @@ static int failures;
 static uint8_t fake_sector[2340];
 static int irq_raises;
 static int irq_clears;
+static int audio_decodes;
 
 M68KState g_cpu;
 uint64_t g_total_cycles;
@@ -38,7 +39,13 @@ void periph_ciap_dma_request(uint16_t control) { (void)control; }
 void cdi_audio_reset(void) {}
 int cdi_audio_decode_sector(const uint8_t sector[2340]) {
     (void)sector;
+    audio_decodes++;
     return 0;
+}
+uint32_t cdi_audio_decode_groups(const uint8_t sound_groups[2304], uint8_t coding) {
+    (void)sound_groups;
+    audio_decodes++;
+    return (coding & 1u) ? 2016u : 4032u;
 }
 int cdi_media_present(void) { return 1; }
 int cdi_media_read_sector_body(uint32_t lba, uint8_t dst[2340]) {
@@ -127,31 +134,315 @@ int main(void) {
     CHECK(irq_clears == 2);
     CHECK((cdic_read(CDI_CDIC_BASE + 0x25AA, 2) & 0x0080) == 0);
 
-    /* Mid-stream re-selection (ASEL while the transport runs) arms the
-     * re-evaluation poke, but the poke must only ride ticks whose sector
-     * produces no DATA delivery.  A selected sector arriving right after
-     * the ASEL must deliver normally (one DATA with its BMAN bit set) —
-     * a deliveryless DATA ahead of it would spend the record path's
-     * positioning-transition discard ($4286D0) and let the previous
-     * record's EOR reach the record engine (the attract/title-background
-     * play-pump stall). */
+    /* Selection changes cannot invent DATA before a sector arrives. A real
+     * selected delivery carries its header, payload and ownership together. */
     (void)cdic_read(CDI_CDIC_BASE + 0x2586, 2);    /* clear ISR */
     cdic_write(CDI_CDIC_BASE + 0x2594, 0x000C, 2); /* ack data buffers */
     cdic_write(CDI_CDIC_BASE + 0x2596, 0x0008, 2); /* ASEL mid-stream */
+    CHECK((cdic_read(CDI_CDIC_BASE + 0x2586, 2) & 0x0001) == 0);
     make_sector(15, 0x62);                         /* selected video */
     cdic_increment_time(14000000.0);
     CHECK((cdic_read(CDI_CDIC_BASE + 0x2586, 2) & 0x0001) != 0);
     CHECK((cdic_read(CDI_CDIC_BASE + 0x2594, 2) & 0x000C) != 0);
 
-    /* The boot-load shape still needs the poke: ASEL mid-stream with only
-     * unselected sectors passing must synthesize one DATA (no BMAN bit)
-     * so the driver wakes and re-evaluates its selection. */
+    /* STOPD parks the decoder without flushing an owned data buffer. */
+    uint16_t stopped_bman = cdic_read(CDI_CDIC_BASE + 0x2594, 2);
+    selection_state(&selected, &drive_lba);
+    uint32_t stopped_lba = drive_lba;
+    cdic_write(CDI_CDIC_BASE + 0x2596, 0x0040, 2);
+    cdic_increment_time(28000000.0);
+    selection_state(&selected, &drive_lba);
+    CHECK(drive_lba == stopped_lba);
+    CHECK(cdic_read(CDI_CDIC_BASE + 0x2594, 2) == stopped_bman);
+    cdic_transport_resume();
+    cdic_increment_time(14000000.0);
+    selection_state(&selected, &drive_lba);
+    CHECK(drive_lba > stopped_lba);
+
+    /* Q-buffer ownership does not impersonate trigger/EOF. Locator IRQs
+     * obey IER bit 2; the ordinary record mask $060B keeps them masked. */
+    cdic_write(CDI_CDIC_BASE + 0x2596, 0x0100, 2);
+    cdic_write(CDI_CDIC_BASE + 0x2584, 0x0608, 2); /* isolate Q from header DATA */
+    cdic_write(CDI_CDIC_BASE + 0x2596, 0x0044, 2);
+    cdic_write(CDI_CDIC_BASE + 0x2596, 0x0008, 2);
+    cdic_write(CDI_CDIC_BASE + 0x2588, 0x8000, 2);
+    make_sector(3, 0x62);
+    cdic_increment_time(14000000.0);
+    (void)cdic_read(CDI_CDIC_BASE + 0x2586, 2); /* real header notification */
+    irq_raises = 0;
+    cdic_increment_time(14000000.0);
+    CHECK(irq_raises == 0);
+    CHECK((cdic_read(CDI_CDIC_BASE + 0x2586, 2) & 0x0600) == 0);
+    cdic_write(CDI_CDIC_BASE + 0x2594, 0x0030, 2);
+    cdic_write(CDI_CDIC_BASE + 0x2584, 0x0004, 2);
+    irq_raises = 0;
+    cdic_increment_time(14000000.0);
+    CHECK(irq_raises == 1);
+    CHECK((cdic_read(CDI_CDIC_BASE + 0x2586, 2) & 0x0004) != 0);
+    cdic_increment_time(28000000.0); /* leave both locator reports unconsumed */
+    CHECK((cdic_read(CDI_CDIC_BASE + 0x2586, 2) & 0x0800) == 0);
+    CHECK(cdic_read(CDI_CDIC_BASE + 0x1B24, 2) == 0x4100);
+    CHECK(cdic_read(CDI_CDIC_BASE + 0x24E6, 2) == 0x4100);
+    CHECK(cdic_read(CDI_CDIC_BASE + 0x1B2E, 2) == 0); /* Q CRC must not overwrite R-W */
+    CHECK(cdic_read(CDI_CDIC_BASE + 0x24F0, 2) == 0);
+
+    /* A file-wide EOF on an unselected channel interrupts without filling
+     * a host payload buffer. It must not be lost behind channel filtering. */
+    cdic_write(CDI_CDIC_BASE + 0x2596, 0x0100, 2);
+    cdic_write(CDI_CDIC_BASE + 0x2584, 0x0400, 2);
+    cdic_write(CDI_CDIC_BASE + 0x2596, 0x00C4, 2);
+    cdic_write(CDI_CDIC_BASE + 0x2596, 0x0008, 2);
+    /* The first real header confirms selection to the firmware discard
+     * phase, even when a boundary sector belongs to another file. */
+    make_sector(0, 0x89);
+    fake_sector[4] = fake_sector[8] = 0;
+    fake_sector[12] = 0xA5;
+    cdic_increment_time(14000000.0);
+    CHECK(cdic_read(CDI_CDIC_BASE + 0x2586, 2) == 0x0001);
+    CHECK((cdic_read(CDI_CDIC_BASE + 0x2594, 2) & 0x000C) != 0);
+    CHECK(cdic_read(CDI_CDIC_BASE + 0x120C, 1) == 0);
+    cdic_write(CDI_CDIC_BASE + 0x2594, 0x000C, 2);
+    cdic_increment_time(14000000.0);
+    CHECK(cdic_read(CDI_CDIC_BASE + 0x2586, 2) == 0);
+    CHECK((cdic_read(CDI_CDIC_BASE + 0x2594, 2) & 0x000C) == 0);
+    make_sector(3, 0xE1);
+    irq_raises = 0;
+    cdic_increment_time(14000000.0);
+    CHECK(irq_raises > 0); /* asserting an already-high IRQ is idempotent */
+    CHECK((cdic_read(CDI_CDIC_BASE + 0x2586, 2) & 0x0400) != 0);
+    CHECK((cdic_read(CDI_CDIC_BASE + 0x2594, 2) & 0x000C) == 0);
+
+    /* Scene triggers on an unselected channel signal the selected file.
+     * They do not hand a payload to the host or impersonate PCL refill. */
+    cdic_write(CDI_CDIC_BASE + 0x2584, 0x0200, 2);
+    make_sector(0, 0x70);
+    irq_raises = 0;
+    cdic_increment_time(14000000.0);
+    CHECK(irq_raises == 1);
+    CHECK(cdic_read(CDI_CDIC_BASE + 0x2586, 2) == 0x0200);
+    CHECK((cdic_read(CDI_CDIC_BASE + 0x2594, 2) & 0x000C) == 0);
+    fake_sector[4] = fake_sector[8] = 2; /* different file */
+    irq_raises = 0;
+    cdic_increment_time(14000000.0);
+    CHECK(irq_raises == 0);
+    CHECK(cdic_read(CDI_CDIC_BASE + 0x2586, 2) == 0);
+    make_sector(0, 0x70);
+    fake_sector[10] = 0x60; /* inconsistent duplicate subheader */
+    cdic_increment_time(14000000.0);
+    CHECK(irq_raises == 0);
+    CHECK(cdic_read(CDI_CDIC_BASE + 0x2586, 2) == 0);
+
+    /* An unselected regular sector still advances host position through its
+     * real header. Its payload cannot leak into a caller's DMA destination.
+     * Re-selection alone must not announce stale data. */
     cdic_write(CDI_CDIC_BASE + 0x2594, 0x000C, 2); /* ack data buffers */
     cdic_write(CDI_CDIC_BASE + 0x2596, 0x0008, 2); /* ASEL mid-stream */
     make_sector(3, 0x62);                          /* unselected channel */
+    fake_sector[0] = 0x01; /* physical MSF header */
+    fake_sector[12] = 0xA5;
+    CHECK((cdic_read(CDI_CDIC_BASE + 0x2586, 2) & 0x0001) == 0);
     cdic_increment_time(14000000.0);
     CHECK((cdic_read(CDI_CDIC_BASE + 0x2586, 2) & 0x0001) != 0);
+    CHECK((cdic_read(CDI_CDIC_BASE + 0x2594, 2) & 0x000C) != 0);
+    unsigned header_buffer = (cdic_read(CDI_CDIC_BASE + 0x2594, 2) & 4u)
+                               ? 0x1200u : 0x1BC2u;
+    CHECK(cdic_read(CDI_CDIC_BASE + header_buffer, 1) == 0x01);
+    CHECK(cdic_read(CDI_CDIC_BASE + header_buffer + 5u, 1) == 3);
+    CHECK(cdic_read(CDI_CDIC_BASE + header_buffer + 12u, 1) == 0);
+    cdic_write(CDI_CDIC_BASE + 0x2594, 0x000C, 2);
+
+    /* Every regular header can advance position, including with locators
+     * enabled. Unselected record ends must never terminate another channel.
+     * The next selected EOR remains an ordinary complete sector. */
+    cdic_write(CDI_CDIC_BASE + 0x2596, 0x0100, 2);
+    cdic_write(CDI_CDIC_BASE + 0x2596, 0x0044, 2);
+    cdic_write(CDI_CDIC_BASE + 0x2596, 0x0008, 2);
+    make_sector(3, 0x62);
+    cdic_increment_time(14000000.0);
+    CHECK((cdic_read(CDI_CDIC_BASE + 0x2586, 2) & 0x0001) != 0);
+    CHECK((cdic_read(CDI_CDIC_BASE + 0x2594, 2) & 0x000C) != 0);
+    cdic_write(CDI_CDIC_BASE + 0x2594, 0x000C, 2);
+    cdic_increment_time(14000000.0);
+    CHECK((cdic_read(CDI_CDIC_BASE + 0x2586, 2) & 0x0001) != 0);
+    cdic_write(CDI_CDIC_BASE + 0x2594, 0x000C, 2);
+    make_sector(3, 0x65); /* EOR of an unselected audio channel */
+    cdic_increment_time(14000000.0);
+    CHECK((cdic_read(CDI_CDIC_BASE + 0x2586, 2) & 0x0601) == 0);
     CHECK((cdic_read(CDI_CDIC_BASE + 0x2594, 2) & 0x000C) == 0);
+    make_sector(15, 0x65); /* selected audio end-of-record */
+    cdic_increment_time(14000000.0);
+    CHECK((cdic_read(CDI_CDIC_BASE + 0x2586, 2) & 0x0001) != 0);
+    CHECK((cdic_read(CDI_CDIC_BASE + 0x2594, 2) & 0x000C) != 0);
+
+    /* AUDIO submode alone must not swallow host records. With TACS clear,
+     * normal audio payloads arrive in DATA buffers; with its channel bit
+     * set, decoding is direct but the header still advances host position.
+     * The directly decoded payload is not delivered to host RAM.
+     * Channel 16 cannot alias bit 0. */
+    cdic_write(CDI_CDIC_BASE + 0x2596, 0x0100, 2);
+    cdic_write(CDI_CDIC_BASE + 0x2596, 0x00C4, 2);
+    cdic_write(CDI_CDIC_BASE + 0x2588, 0x0000, 2);
+    audio_decodes = 0;
+    make_sector(14, 0x64);
+    fake_sector[12] = 0xA5;
+    cdic_increment_time(14000000.0);
+    CHECK(audio_decodes == 0);
+    CHECK((cdic_read(CDI_CDIC_BASE + 0x2594, 2) & 0x000C) != 0);
+    CHECK(cdic_read(CDI_CDIC_BASE + 0x120C, 1) == 0xA5);
+    cdic_write(CDI_CDIC_BASE + 0x2594, 0x000C, 2);
+    cdic_write(CDI_CDIC_BASE + 0x2588, 0x4000, 2);
+    cdic_increment_time(14000000.0);
+    CHECK(audio_decodes == 1);
+    CHECK((cdic_read(CDI_CDIC_BASE + 0x2594, 2) & 0x000C) != 0);
+    CHECK(cdic_read(CDI_CDIC_BASE + 0x1BC6, 1) == 1); /* file */
+    CHECK(cdic_read(CDI_CDIC_BASE + 0x1BCE, 1) == 0); /* no ADPCM payload */
+    cdic_write(CDI_CDIC_BASE + 0x2594, 0x000C, 2);
+    cdic_write(CDI_CDIC_BASE + 0x2588, 0x0001, 2);
+    make_sector(16, 0x64);
+    cdic_increment_time(14000000.0);
+    CHECK(audio_decodes == 1);
+    CHECK((cdic_read(CDI_CDIC_BASE + 0x2594, 2) & 0x000C) != 0);
+
+    /* Backpressure cannot overwrite owned bytes or stop the physical head.
+     * After release, delivery resumes with the current sector, not a replay. */
+    cdic_write(CDI_CDIC_BASE + 0x2596, 0x0100, 2);
+    cdic_write(CDI_CDIC_BASE + 0x2596, 0x00C4, 2);
+    make_sector(15, 0x62);
+    fake_sector[12] = 0xA1;
+    cdic_increment_time(14000000.0);
+    fake_sector[12] = 0xB2;
+    cdic_increment_time(14000000.0);
+    (void)cdic_read(CDI_CDIC_BASE + 0x2586, 2);
+    selection_state(&selected, &drive_lba);
+    uint32_t full_lba = drive_lba;
+    fake_sector[12] = 0xC3;
+    cdic_increment_time(28000000.0);
+    selection_state(&selected, &drive_lba);
+    CHECK(drive_lba > full_lba);
+    CHECK(cdic_read(CDI_CDIC_BASE + 0x120C, 1) == 0xA1);
+    CHECK(cdic_read(CDI_CDIC_BASE + 0x1BCE, 1) == 0xB2);
+    CHECK((cdic_read(CDI_CDIC_BASE + 0x2586, 2) & 1) == 0);
+    cdic_write(CDI_CDIC_BASE + 0x2594, 0x000C, 2);
+    cdic_increment_time(14000000.0);
+    CHECK(cdic_read(CDI_CDIC_BASE + 0x120C, 1) == 0xC3);
+
+    /* A transport pause retains an armed decoder, but a decoder RESET is
+     * final until another CCR start. A deferred C4 reply after completion
+     * teardown must not refill the just-flushed buffers. Firmware idle $9
+     * belongs to core startup, not to every completed stream. */
+    cdic_write(CDI_CDIC_BASE + 0x2594, 0x003C, 2);
+    cdic_transport_pause();
+    selection_state(&selected, &drive_lba);
+    uint32_t paused_lba = drive_lba;
+    cdic_increment_time(14000000.0);
+    selection_state(&selected, &drive_lba);
+    CHECK(drive_lba == paused_lba);
+    cdic_transport_resume();
+    cdic_increment_time(14000000.0);
+    selection_state(&selected, &drive_lba);
+    CHECK(drive_lba > paused_lba);
+
+    cdic_write(CDI_CDIC_BASE + 0x2596, 0x0100, 2);
+    selection_state(&selected, &drive_lba);
+    uint32_t reset_lba = drive_lba;
+    cdic_transport_resume();
+    cdic_increment_time(28000000.0);
+    selection_state(&selected, &drive_lba);
+    CHECK(drive_lba == reset_lba);
+    CHECK(cdic_read(CDI_CDIC_BASE + 0x2594, 2) == 0);
+    CHECK(cdic_read(CDI_CDIC_BASE + 0x2586, 2) == 0);
+    cdic_write(CDI_CDIC_BASE + 0x2596, 0x00C4, 2);
+    make_sector(15, 0x62);
+    cdic_increment_time(14000000.0);
+    selection_state(&selected, &drive_lba);
+    CHECK(drive_lba > reset_lba);
+    CHECK((cdic_read(CDI_CDIC_BASE + 0x2594, 2) & 0x000C) != 0);
+
+    /* PLAY0 consumes two owned buffers at their sample duration, then
+     * INTDONE completes after the last buffer. It never produces the
+     * setup/ack storm that used to restart the ROM's PCL repeatedly. */
+    cdic_write(CDI_CDIC_BASE + 0x2596, 0x0100, 2);
+    cdic_write(CDI_CDIC_BASE + 0x2584, 0x000A, 2);
+    cdic_write(CDI_CDIC_BASE + 0x25A6, 0x0006, 2);
+    cdic_write(CDI_CDIC_BASE + 0x259A, 0x0800, 2); /* stereo 37.8 kHz */
+    cdic_write(CDI_CDIC_BASE + 0x2594, 0x0003, 2);
+    audio_decodes = 0;
+    irq_raises = 0;
+    cdic_write(CDI_CDIC_BASE + 0x25A6, 0x0140, 2);
+    CHECK(audio_decodes == 1);
+    cdic_write(CDI_CDIC_BASE + 0x25A6, 0x0020, 2);
+    cdic_increment_time(25000.0);
+    CHECK(irq_raises == 0);
+    CHECK(cdic_read(CDI_CDIC_BASE + 0x2594, 2) == 3);
+    CHECK((cdic_read(CDI_CDIC_BASE + 0x25AA, 2) & 0x00C0) == 0x0040);
+    cdic_increment_time(54000000.0);
+    CHECK(audio_decodes == 2);
+    CHECK(cdic_read(CDI_CDIC_BASE + 0x2594, 2) == 2);
+    CHECK(cdic_read(CDI_CDIC_BASE + 0x2586, 2) == 0x0002);
+    cdic_increment_time(54000000.0);
+    CHECK(cdic_read(CDI_CDIC_BASE + 0x2594, 2) == 0);
+    CHECK(cdic_read(CDI_CDIC_BASE + 0x2586, 2) == 0x0002);
+    CHECK((cdic_read(CDI_CDIC_BASE + 0x25AA, 2) & 0x00C0) == 0);
+    cdic_increment_time(25000.0);
+    CHECK(cdic_read(CDI_CDIC_BASE + 0x2586, 2) == 8);
+    CHECK((cdic_read(CDI_CDIC_BASE + 0x25AA, 2) & 0x0080) != 0);
+    cdic_write(CDI_CDIC_BASE + 0x25A6, 0x0200, 2);
+
+    /* Record-engine RESET/seek must not cancel an independent memory sound.
+     * SS_Sound stop sleeps until the next consumed-buffer/PCL notification;
+     * cancelling that consumer strands the guest and overruns its CILs. */
+    cdic_write(CDI_CDIC_BASE + 0x25A6, 0x0006, 2);
+    (void)cdic_read(CDI_CDIC_BASE + 0x2586, 2);
+    cdic_write(CDI_CDIC_BASE + 0x259A, 0x0800, 2);
+    cdic_write(CDI_CDIC_BASE + 0x2594, 1, 2);
+    cdic_write(CDI_CDIC_BASE + 0x25A6, 0x0140, 2);
+    cdic_increment_time(20000000.0);
+    uint16_t audio_pointer = cdic_read(CDI_CDIC_BASE + 0x25B4, 2);
+    CHECK(audio_pointer > 0 && audio_pointer < 0x480);
+    cdic_write(CDI_CDIC_BASE + 0x2596, 0x0100, 2);
+    CHECK(cdic_read(CDI_CDIC_BASE + 0x2594, 2) == 1);
+    CHECK((cdic_read(CDI_CDIC_BASE + 0x25AA, 2) & 0x0040) != 0);
+    CHECK(cdic_read(CDI_CDIC_BASE + 0x25B4, 2) == audio_pointer);
+    cdic_increment_time(34000000.0);
+    CHECK(cdic_read(CDI_CDIC_BASE + 0x2594, 2) == 0);
+    CHECK(cdic_read(CDI_CDIC_BASE + 0x2586, 2) == 2);
+
+    /* Plain PLAY0 ($40) is the live SS_Sound replacement path, not a no-op.
+     * The ROM uses the AP pointer to hand off the other buffer. Neither a
+     * decoder RESET nor a second PLAY0 may replay an already active buffer. */
+    cdic_write(CDI_CDIC_BASE + 0x25A6, 0x0040, 2);
+    cdic_write(CDI_CDIC_BASE + 0x2594, 2, 2);
+    cdic_increment_time(20000000.0);
+    audio_pointer = cdic_read(CDI_CDIC_BASE + 0x25B4, 2);
+    CHECK(audio_pointer > 0x480 && audio_pointer < 0x900);
+    cdic_write(CDI_CDIC_BASE + 0x25A6, 0x0040, 2);
+    CHECK(cdic_read(CDI_CDIC_BASE + 0x25B4, 2) == audio_pointer);
+    cdic_increment_time(34000000.0);
+    CHECK(cdic_read(CDI_CDIC_BASE + 0x2594, 2) == 0);
+    CHECK(cdic_read(CDI_CDIC_BASE + 0x2586, 2) == 2);
+
+    cdic_write(CDI_CDIC_BASE + 0x25A6, 0x00A0, 2);
+    cdic_write(CDI_CDIC_BASE + 0x2596, 0x0100, 2);
+    cdic_increment_time(25000.0);
+    CHECK(cdic_read(CDI_CDIC_BASE + 0x2586, 2) == 8);
+    CHECK((cdic_read(CDI_CDIC_BASE + 0x25AA, 2) & 0x0080) != 0);
+    cdic_write(CDI_CDIC_BASE + 0x25A6, 0x0200, 2);
+
+    /* A delayed refill resumes the next buffer without replaying the old
+     * one. Its coding is captured at handoff, independent of A_SHDW later. */
+    cdic_write(CDI_CDIC_BASE + 0x25A6, 0x0006, 2);
+    cdic_write(CDI_CDIC_BASE + 0x259A, 0x0800, 2);
+    cdic_write(CDI_CDIC_BASE + 0x2594, 1, 2);
+    cdic_write(CDI_CDIC_BASE + 0x25A6, 0x0140, 2);
+    cdic_increment_time(54000000.0);
+    (void)cdic_read(CDI_CDIC_BASE + 0x2586, 2);
+    cdic_write(CDI_CDIC_BASE + 0x259A, 0, 2); /* mono lasts twice as long */
+    cdic_write(CDI_CDIC_BASE + 0x2594, 2, 2);
+    cdic_write(CDI_CDIC_BASE + 0x259A, 0x0800, 2);
+    cdic_increment_time(54000000.0);
+    CHECK(cdic_read(CDI_CDIC_BASE + 0x2594, 2) == 2);
+    cdic_increment_time(54000000.0);
+    CHECK(cdic_read(CDI_CDIC_BASE + 0x2594, 2) == 0);
 
     if (failures) return 1;
     puts("CIAP channel-selection and AP command tests passed");

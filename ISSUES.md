@@ -1,111 +1,115 @@
-# Known Issues
+# Hotel Mario engineering status
 
-Current as of `5687e32` (2026-07-31). The first issue is the headline
-defect; the others gate or compound it. Investigation breadcrumbs live in
-the session notes referenced at the bottom.
+Updated 2026-10-09. Work is tracked in central Beads under the framework epic
+`beads-ttbl` and game epic `beads-ssy9`.
 
----
+## Corrected bring-up failures
 
-## 1. Intro cutscene: scene backgrounds transition late, then stop updating
+- **Intro backgrounds (`beads-bcha`).** Scene markers on file 1/channel 0
+  were discarded while the intro selected channel 15. CIAP now delivers
+  file-wide trigger/EOF status separately from channel-selected payloads.
+  The real ROM maps these events into record flags and the game flips its
+  background pages. All eight intro page changes were observed; the mushroom
+  talk scene also renders in a normal-speed windowed run. The previous
+  MCD212 displayed-flag hypothesis was disproved by its recorded writers.
+- **Buffered audio/stage entry (`beads-6v0p`).** Ordinary ADPCM buffer
+  consumption incorrectly set the interrupt that makes the ROM acknowledge
+  and re-probe an already-consumed pair. It now signals the normal PCL refill
+  interrupt. Memory playback consumes alternating buffers for their actual
+  decoded duration, and FINISH waits for them to drain. Direct selected XA
+  audio also provides the header notification used by the real driver to
+  update `SS.Pos`; its payload follows the audio path.
+- **Transport lifecycle (`beads-6v0p`).** Decoder RESET cancels the decoder
+  arm, so a delayed IKAT resume cannot restart a completed operation.
+  Firmware download exposes its initial idle state independently. Locator
+  status no longer competes with the ROM's DATA buffer picker.
+- **Windowed scripted input.** SDL polling and developer input now have
+  separate producer states. Idle keyboard polling previously cleared a
+  button before IKAT's timed sample. Both producers still use the same
+  low-level pointer/interrupt path.
+- **First stage data record.** Selection now notifies the host from the next
+  physical sector header, including the filtered boundary sector. The ROM's
+  one-buffer discard callback had consumed the first selected payload and
+  left a 24-sector stage load at 23 sectors. No fabricated selection event is
+  used. Regular filtered headers also keep the real driver's `SS.Pos` moving
+  between selected audio sectors.
+- **Death/restart audio.** Decoder RESET previously cancelled the separate
+  audio processor, and plain APCR PLAY0 (`$40`) did nothing. The real ROM's
+  sound-stop wait then timed out and audio CIL reuse raised `$F4`. Decoder
+  RESET now preserves AP playback and notifications; AP reset is separate,
+  PLAY0 resumes playback, and its word pointer tracks consumed samples.
+  Regression tests exercise reset during playback and sound replacement.
 
-**The character/cel animation stream advances on schedule, but the scene
-background stills lag one or more scenes behind — and partway through the
-intro they stop updating entirely, leaving later scenes on a bare sky-blue
-plane.**
+The CIAP firmware model still contains behavior inferred from original ROM
+traffic, especially buffer ownership, memory-play gating and physical sector
+progress while host buffers are full. These are tested implementations, not
+claims of complete silicon/microcode accuracy. Broader applications must
+continue to exercise them.
 
-Reference footage (real hardware capture, "Hotel Mario - All Cutscenes")
-vs. this recompiler, same scenes:
+## Static native modules (`beads-z8yh`)
 
-| Real hardware | This recomp | Defect |
-| --- | --- | --- |
-| ![gate](docs/issues/ref-1-gate.png) | ![gate ok](docs/issues/recomp-1-gate-ok.png) | Gate scene: **correct** (background matches). |
-| ![bowser wall](docs/issues/ref-2-bowser-wall.png) | ![bowser stale](docs/issues/recomp-2-bowser-stale-bg.png) | Bowser's laugh should play against the yellow Klub Koopa wall with his claw on it. We show him over the **stale scene-1 path/gate background**. |
-| ![mushroom walk](docs/issues/ref-3-mushroom-walk.png) | ![walk stale](docs/issues/recomp-3-walk-stale-bg.png) | The "nice of the princess" walk should pass a big red mushroom with bridge scenery. We keep the **stale gate background** under the new cels. |
-| ![talk scenery](docs/issues/ref-4-talk-scenery.png) | ![talk cyan](docs/issues/recomp-4-talk-cyan.png) | The Mario/Luigi talk scene should sit against full mushroom-cap scenery. We show the cels over a **bare cyan plane** — the background never arrived at all. |
+The disc frontend inventories bounded filesystem files, validates OS-9
+header parity and CRC, and emits position-independent C for 174 distinct
+Hotel Mario executable images. Program and explicitly selected private Subr
+export layouts provide code seeds. The original OS-9 loader remains in charge.
 
-Additional symptom: single torn frames at scene cuts (old background with
-the next scene's cels already drawn over it) — the cel cut lands before
-the background swap.
+Native bindings require an exact full-image SHA-256. Every overlapping CPU
+or DMA RAM write revokes the binding; per-instruction epoch checks prevent
+an abandoned call from continuing into an unloaded/replaced image. Exact
+instruction resume maps cover interrupts and OS-9 trap continuations.
+Uncovered code stays on the clean-room interpreter floor. Recorded module
+targets retain image identity and can be promoted by offline regeneration.
 
-**Prime suspect** (decoded but not yet run down): the game's display
-hookup callback (`$260A94` in the game module) gates each background
-page-flip on a per-record "displayed" flag (`$498(a0)`) that is set by a
-video-line callback from the game's `I$SetStt $56` line-event/UCM
-subscriptions. If the runtime's MCD212/UCM line-event delivery fires
-those callbacks late or not at all, every background swap queues behind
-the wait while the ungated cel stream keeps cutting — exactly the
-observed lag-then-stop.
+Synthetic tests cover two relocation bases, PC-relative reads/calls/jumps,
+32-bit index values, preserved absolute addresses, guest stacks, trap service
+words, asynchronous resumes, overlapping writes, image replacement and stale
+tokens. Generation fails for unsupported instructions and module fall-off.
 
-**How to investigate:** the `video_plane` debug command (added in
-`5687e32`; `tools/session-probes/plane_dump.py`) dumps plane A, plane B,
-and the per-pixel composition verdict independently of the composed
-output — watch plane B content against the scene cuts, and trace the
-`$56`-subscription callback delivery.
+## Remaining playthrough gates (`beads-mq6t`)
 
----
+- The former attract restart `$FA` failure was corrected by keeping
+  `SS.Pos` current through filtered physical-sector headers. A normal-speed
+  windowed build reached field 120000 without reset, dispatch miss or PCM
+  drops. That evidence predates the latest selection/audio changes; final
+  build acceptance and exact complete-cycle identification remain pending.
+- One-player Stage 1 is reachable through normal shell/menu input. A
+  normal-speed windowed run reached field 12000 with working button/direction
+  input, zero resets/dispatch misses and zero PCM drops through SDL's dummy
+  consumer. This does not certify completion of a level, campaign or audio
+  listening quality.
+- The current seeded build completed an accelerated field-40000 controller
+  probe through repeated deaths/restarts and game over without the prior
+  audio CIL error. This establishes lifecycle progress, not a cleared stage
+  or legitimate full campaign.
+- Both legitimate campaigns, all streamed modules/bosses/cutscenes, the
+  ending, and original-game save/restore/continue need validation. No guest
+  progress writes, forced stages or replacement game logic are permitted.
+- Thirty older headless title launches and 29 older windowed launches passed.
+  The final older windowed launch reached the title but its evidence capture
+  was invalidated by a harness version change. A stable current binary still
+  needs the complete 30 headless + 30 windowed normal-speed acceptance matrix.
+- A local runtime-only HotelMarioRecomp preview archive passed the five-file
+  allowlist, Release/COSIM OFF build-graph audit, PE import audit and linked
+  input provenance checks. Publication and sustained performance acceptance
+  remain release gates. Assets, generated C and development tools stay out.
 
-## 2. Stage entry never completes: no Mario, timer frozen (demo + 1 Player)
+## Reproducible evidence
 
-Entering any stage (attract demo or 1 PLAYER) draws the stage backdrop
-and HUD, but Mario never spawns and TIME stays frozen at 200. The
-stage-entry cutscene (hotel facade → Mario & Luigi walk in → Bowser
-laughs) never plays.
+`tools/hotelmario_scenario.py` boots an isolated player profile, selects Play
+CD-i through actual input, records runtime/asset/source identities and device
+traffic, and retains a framebuffer, CPU/device state and both RAM banks.
+Requested capture points must be reached; guest resets, faults, transport
+stalls and the known disc-error screen fail the run. Accelerated runs are
+investigation, not normal-speed acceptance.
+Use `--require-build-provenance` for acceptance: the executable and every
+linked source/generated input must match their build-time hashes. The runtime
+also rejects a BIOS that differs from the ROM used to generate its BIOS C.
 
-Measured root: the stage-entry play selects channel 14 (entry/stage
-audio) and arms the CIAP in locator mode (`CCR $0044`) **without the
-`$C4` re-arm that every working attract play performs**. Locator
-reporting then persists through the whole play; nothing in that ROM phase
-acknowledges the locator buffer pair, so the driver's buffer picker
-(`$4292F0`) finds a "ready locator" ahead of the data buffer on every
-interrupt and the record engine never consumes. The ch14 record's
-end-of-record sector (LBA 45221) is delivered but never consumed; the
-play never completes; the game waits forever.
+```powershell
+py -3 tools/hotelmario_scenario.py path/to/HotelMarioRecomp.exe bios/cdi490a.rom "disc/Hotel Mario (USA).cue" --output build/tmp/my-run --generated-dir hotelmario/generated --windowed --speed 1 --seconds 300 --stop-frame 12000 --input-script "6000:16,6018:0,6250:16,6270:0,7400:16,7420:0,8000:4,8120:0,8200:16,8220:0,8400:32,8420:0"
+py -3 tools/collect_module_seeds.py --evidence build/tmp/my-run/evidence.json --output build/tmp/my-module-seeds.txt
+```
 
-Fix direction: decode who acknowledges the Q pair in the real `$0044`
-flow (most likely locator reporting should stop at the handover rather
-than persist through the play), then correct the `q_reporting` lifecycle
-in `runner/src/cdic.c`.
-
-This one flow gates: the demo, the attract loop (which is what rotates
-the title-screen background between cycles), and 1-Player play.
-
----
-
-## 3. Racy load wedge after "Play CD-I" (black screen)
-
-Roughly a third to half of launches — much more often in windowed mode
-than headless — the game load parks forever at LBA 2273/2274 or 3219
-with an un-acknowledged CIAP buffer: black screen, drive holding, game
-polling. No recovery except relaunch.
-
-Shape: after an op's completion teardown (`CCR $0100`), the deferred IKAT
-`C4` resume restarts the transport; a sector delivers while the ROM is
-idle (its ISR reads and ignores the announcement — the ISR is
-acknowledge-on-read); once both buffers end up host-owned the transport
-holds and the next op starves.
-
-Three model-level fixes were attempted and reverted (hold-only-while-
-engaged; locator interrupts; overwrite-oldest) — each moved the failure
-instead of fixing it. The real fix needs the same ROM-phase decode as
-issue 2: when the transport must hold vs. stream vs. report locators,
-per driver phase. Full experiment record in the session notes.
-
----
-
-## 4. Racy boot crash (wild jump during CD-i shell boot)
-
-Occasionally (more often in windowed mode) the BIOS boot crashes ~7M
-instructions in with a wild jump out of the ROM's IKAT command
-serializer (`$42B2Fx` → unmapped address, garbage pointer while
-serializing a `C4` command). Same timing-race family as issue 3.
-
----
-
-## Cross-references
-
-- Investigation notes/history: this repo's commit messages for `bab3d68`
-  (CIAP double-buffering, delivery-honest re-selection poke, audio record
-  events) and `5687e32` (per-plane composition snapshots), plus
-  `.claude/GOAL.md` in working trees where present.
-- Reference frames in `docs/issues/` are cropped stills from a real
-  console capture, included for engineering comparison.
+The schedule is a reproduction for the tested asset/build, not a general
+campaign driver. Evidence directories are local and git-ignored. Historical
+incorrect-background comparison frames remain in `docs/issues/`.

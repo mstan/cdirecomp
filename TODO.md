@@ -3,8 +3,10 @@
 **Strategy (decided 2026-05-28; BIOS closed 2026-07-14; first attract accepted
 2026-07-15): recompile the entire OS first, then promote loaded game code.**
 The whole CD-RTOS / OS-9 ROM is statically recompiled. Hotel Mario now launches
-and runs its attract intro through the clean-room fallback; static game-module
-promotion and gameplay remain open.
+and reaches one-player Stage 1 with native module bindings and interpreter
+coverage for remaining entries. Full attract cycles and campaigns remain open.
+Current engineering tasks are tracked in the central Beads database under
+`beads-ttbl` (framework) and `beads-ssy9` (Hotel Mario).
 CD-i runs CD-RTOS / OS-9 from a player **system ROM** (the "BIOS"). We do NOT
 hand-write HLE stubs for OS-9 — psxrecomp learned the hard way that stubbing the
 BIOS (faking syscall outputs, mirroring kernel state in C) causes silent drift
@@ -63,7 +65,8 @@ IDs are referenced from code comments (`TODO MC-CDI-NNN`).
   player config. A new battery is initialized by the real BIOS and later boots
   retain its settings. Deterministic profiles never touch it.
 - ✅ **MC-CDI-023 — IKAT** (Mono-3/4 input/serial gate; replaces the Mono-2 SLAVE).
-  CeDImu HLEs IKAT — mirror that. Command/response channels plus the timed
+  Model its documented host ABI and original BIOS traffic; optional emulators
+  remain black-box comparators. Command/response channels plus the timed
   25-ms Class::Maneuvering channel-A packet generator and physical SDL keyboard/
   game-controller mapping are present. At the no-disc shell STOP, CD-RTOS uses
   `IMR=$A0` (channels C/D enabled) and keeps unopened channel A masked, so queued

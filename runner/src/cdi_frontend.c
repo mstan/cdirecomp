@@ -3,6 +3,7 @@
 
 #include "cdi_frontend.h"
 #include "cdi_runtime.h"
+#include "cdi_input.h"
 #include "cdi_media.h"
 #include "cdi_audio.h"
 #include "mcd212_video.h"
@@ -254,14 +255,14 @@ int cdi_frontend_pump(void) {
                 SDL_free(event.drop.file);
             }
         }
-        cdi_input_set(input_mask());
+        cdi_input_set_frontend(input_mask());
     }
     pump_audio();
     return present_frame();
 }
 
 void cdi_frontend_shutdown(void) {
-    cdi_input_set(0);
+    cdi_input_set_frontend(0);
     cdi_input_mouse_focus(0);
     apply_mouse_capture();
     cdi_input_mouse_configure(0);

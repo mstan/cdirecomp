@@ -3,7 +3,8 @@
 > ### ⚠️ Very early development
 > This project boots the real Philips CD-i **system ROM** as native code and can
 > perform a **very basic boot of a CD-i title** — *Hotel Mario* reaches its
-> title card. **Gameplay is not yet reachable.** Expect rough edges, missing
+> title card and one-player **Stage 1 with working input**. Full campaigns
+> and save/restore are still unverified. Expect rough edges, missing
 > features, incomplete hardware coverage, and breaking changes. This is a
 > research project shared in the open, not a finished product — and it is a
 > static recompiler, **not an emulator**.
@@ -31,8 +32,8 @@ It shares the two-tier structure and spirit of the sibling projects
 </p>
 <p align="center">
   <sub>Real CD-RTOS player shell · Time/Date settings · the Philips Interactive Media
-  bumper · and <i>Hotel Mario</i> reaching its title card — all running as native
-  recompiled code.</sub>
+  bumper · and <i>Hotel Mario</i> reaching its title card through the real
+  recompiled system ROM.</sub>
 </p>
 
 ## Philosophy: low-level, static, native-first
@@ -67,10 +68,17 @@ What works today:
 - **Boots the real CD-RTOS system ROM** (user-supplied) to its interactive
   **player shell** — navigation, the Time/Date and storage settings UIs, media
   insert/eject, and persistence — running as native recompiled code.
-- **Very basic Hotel Mario boot.** From the shell you can *Play CD-I* a
+- **Hotel Mario boot and initial gameplay.** From the shell you can *Play CD-I* a
   user-supplied *Hotel Mario (USA)* disc; CD-RTOS loads the title, the Philips
   Interactive Media bumper plays with decoded XA audio, and the game reaches its
-  **title card** with zero native dispatch misses.
+  **title card** and one-player Stage 1. Intro background changes now follow
+  the disc's file-wide trigger events. Windowed input and buffered XA playback
+  reach gameplay through the real OS-9 drivers.
+- **Static native OS-9 modules.** The disc frontend validates file extents,
+  header parity and CRC, then emits relocatable C with instruction resume maps.
+  Hotel Mario supplies 174 distinct executable images. The runtime binds a
+  loaded image by its full SHA-256 and revokes that binding on overlapping
+  RAM writes. Uncovered code uses the clean-room interpreter.
 - **Real-time clock (RTC) on Windows.** The runtime can seed the CD-i's DS1216
   real-time clock from your **Windows host clock** once at startup (opt-in), and
   the player's on-screen **Time & Date** settings screen is functional.
@@ -85,8 +93,10 @@ What works today:
 
 What is **not** done yet:
 
-- **Gameplay is not reachable.** Static native promotion of relocated game
-  modules, and full-playthrough certification, are open work.
+- **Full-playthrough certification remains open.** Longer attract playback
+  currently reaches the game's disc-read error screen on a later stream
+  restart. All levels, both player modes, save/continue, and the ending still
+  need legitimate input-driven validation.
 - Broader title compatibility beyond the current Hotel Mario bring-up.
 - Unexercised I2C/MMU paths and additional exception cases remain platform
   backlog, driven by real applications as they are brought up.
@@ -115,6 +125,10 @@ cmake --build build/recompiler -j
 
 # Recompile the CD-RTOS system ROM to C (emit generated BIOS)
 build/recompiler/CdiRecompBios.exe bios/cdi490a.rom --emit
+
+# Recompile Hotel Mario's executable OS-9 modules from your own disc.
+# named-offset32 explicitly opts into this game's Subr export-table layout.
+build/recompiler/CdiRecomp.exe "path/to/Hotel Mario (USA).cue" --emit --out hotelmario/generated --subr-exports named-offset32
 
 # Runtime (CdiRuntime) — hardware models + native/interpreted guest execution
 cmake -S runner -B build/runner-release -G Ninja -DCMAKE_BUILD_TYPE=Release

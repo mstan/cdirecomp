@@ -6,6 +6,8 @@ build/
 # Generated C (throwaway artifacts — regenerate from the disc + recompiler)
 hotelmario/generated/*.c
 hotelmario/generated/*.h
+hotelmario/generated/*.cmake
+hotelmario/generated/*.log
 bios/generated/*.c
 bios/generated/*.h
 bios/generated/*.log

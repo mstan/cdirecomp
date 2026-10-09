@@ -15,7 +15,18 @@ option(CDI_COSIM_BUILD "Build the MC-CDI-016 differential co-simulation instrume
 #   - hotelmario/generated/*.c : the recompiled game (Phase 3, empty until then).
 # OS-first: the BIOS is what we boot to the player shell before any game work.
 file(GLOB BIOS_GEN_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/../bios/generated/*.c")
-file(GLOB GAME_GEN_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/../hotelmario/generated/*.c")
+set(CDI_GAME_GENERATED_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../hotelmario/generated" CACHE PATH "Directory of generated native OS-9 modules")
+file(GLOB GAME_GEN_SRCS "${CDI_GAME_GENERATED_DIR}/*.c")
+if(EXISTS "${CDI_GAME_GENERATED_DIR}/module_manifest.c")
+    if(NOT EXISTS "${CDI_GAME_GENERATED_DIR}/module_sources.cmake")
+        message(FATAL_ERROR "Regenerate native modules: module_sources.cmake is missing")
+    endif()
+    include("${CDI_GAME_GENERATED_DIR}/module_sources.cmake")
+    set(GAME_GEN_SRCS "")
+    foreach(MODULE_SOURCE IN LISTS CDI_NATIVE_MODULE_FILES)
+        list(APPEND GAME_GEN_SRCS "${CDI_GAME_GENERATED_DIR}/${MODULE_SOURCE}")
+    endforeach()
+endif()
 
 # GCC's -O3 expansion of the ~450k-line generated ROM can exhaust the MinGW
 # assembler even on otherwise roomy developer machines. -O2 keeps the runtime
@@ -31,6 +42,8 @@ endif()
 add_executable(CdiRuntime
     src/main.c
     src/cdi_bus.c
+    src/cdi_native.c
+    ../common/cdi_sha256.c
     src/runtime.c
     src/mcd212.c
     src/mcd212_video.c
@@ -59,10 +72,11 @@ add_executable(CdiRuntime
 
 target_include_directories(CdiRuntime PRIVATE
     include
+    ../common
     "${CMAKE_CURRENT_SOURCE_DIR}/../external/m68k-recomp-core/common"
     "${CMAKE_CURRENT_SOURCE_DIR}/../recompiler/src"
     "${CMAKE_CURRENT_SOURCE_DIR}/../bios/generated"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../hotelmario/generated"
+    "${CDI_GAME_GENERATED_DIR}"
 )
 
 set_target_properties(CdiRuntime PROPERTIES
@@ -74,9 +88,49 @@ if(MSVC)
 endif()
 
 target_compile_definitions(CdiRuntime PRIVATE $<$<BOOL:${CDI_COSIM_BUILD}>:CDI_COSIM=1>)
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../bios/generated/bios_identity.h")
+    target_compile_definitions(CdiRuntime PRIVATE CDI_BIOS_IDENTITY_BUILD=1)
+endif()
+if(EXISTS "${CDI_GAME_GENERATED_DIR}/module_manifest.c")
+    target_compile_definitions(CdiRuntime PRIVATE CDI_NATIVE_MODULES=1)
+endif()
 
 find_package(SDL2 CONFIG REQUIRED)
 target_link_libraries(CdiRuntime PRIVATE SDL2::SDL2)
+
+# Keep local acceptance evidence bound to the inputs actually linked. This
+# sidecar contains hashes/paths only and is excluded from runtime archives.
+get_target_property(PROVENANCE_SOURCES CdiRuntime SOURCES)
+set(PROVENANCE_FILES "")
+foreach(SOURCE IN LISTS PROVENANCE_SOURCES)
+    get_filename_component(INPUT "${SOURCE}" ABSOLUTE BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
+    list(APPEND PROVENANCE_FILES "${INPUT}")
+endforeach()
+file(GLOB_RECURSE PROVENANCE_HEADERS CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/*.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../common/*.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../external/m68k-recomp-core/common/*.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../recompiler/src/*.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../bios/generated/*.h"
+    "${CDI_GAME_GENERATED_DIR}/*.h")
+list(APPEND PROVENANCE_FILES ${PROVENANCE_HEADERS}
+    "${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../tools/build_provenance.cmake"
+    "${CMAKE_SOURCE_DIR}/CMakeLists.txt")
+if(EXISTS "${CDI_GAME_GENERATED_DIR}/module_sources.cmake")
+    list(APPEND PROVENANCE_FILES "${CDI_GAME_GENERATED_DIR}/module_sources.cmake")
+endif()
+set(PROVENANCE_INPUTS "${CMAKE_CURRENT_BINARY_DIR}/runtime-provenance-inputs.cmake")
+file(GENERATE OUTPUT "${PROVENANCE_INPUTS}" CONTENT
+    "set(PROVENANCE_FILES [==[${PROVENANCE_FILES}]==])\nset(PROVENANCE_COMPILER [==[${CMAKE_C_COMPILER};${CMAKE_C_COMPILER_ID};${CMAKE_C_COMPILER_VERSION}]==])\nset(PROVENANCE_OPTIONS [==[${CMAKE_BUILD_TYPE};${CMAKE_C_FLAGS};${CMAKE_C_FLAGS_RELEASE};$<TARGET_PROPERTY:CdiRuntime,COMPILE_DEFINITIONS>;$<TARGET_PROPERTY:CdiRuntime,COMPILE_OPTIONS>]==])\n")
+set_property(TARGET CdiRuntime APPEND PROPERTY LINK_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/../tools/build_provenance.cmake"
+    "${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt")
+add_custom_command(TARGET CdiRuntime POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" "-DPROVENANCE_INPUTS=${PROVENANCE_INPUTS}"
+            "-DRUNTIME=$<TARGET_FILE:CdiRuntime>" -P
+            "${CMAKE_CURRENT_SOURCE_DIR}/../tools/build_provenance.cmake"
+    COMMENT "Recording linked runtime input hashes")
 if(WIN32)
     add_custom_command(TARGET CdiRuntime POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
@@ -94,6 +148,16 @@ endif()
 
 include(CTest)
 if(BUILD_TESTING)
+    add_executable(SlaveTest tests/slave_test.c src/slave.c src/cdi_input.c)
+    target_include_directories(SlaveTest PRIVATE include)
+    add_test(NAME ikat_transport COMMAND SlaveTest)
+    add_executable(CdiNativeTest tests/cdi_native_test.c src/cdi_native.c ../common/cdi_sha256.c)
+    target_include_directories(CdiNativeTest PRIVATE include ../common)
+    target_compile_definitions(CdiNativeTest PRIVATE CDI_NATIVE_MODULES=1)
+    add_test(NAME native_module_binding COMMAND CdiNativeTest)
+    add_executable(CdiSha256Test tests/cdi_sha256_test.c ../common/cdi_sha256.c)
+    target_include_directories(CdiSha256Test PRIVATE ../common)
+    add_test(NAME sha256 COMMAND CdiSha256Test)
     add_executable(CdiNvramTest
         tests/cdi_nvram_test.c
         src/cdi_nvram.c

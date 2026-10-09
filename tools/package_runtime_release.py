@@ -48,7 +48,7 @@ def audit_runtime(runtime: Path) -> None:
     )
     lowered = result.stdout.lower()
     if "pei-x86-64" not in lowered:
-        fail("CdiRuntime.exe is not a Windows x86-64 PE executable")
+        fail(f"{runtime.name} is not a Windows x86-64 PE executable")
     imports = {
         match.group(1).lower()
         for match in re.finditer(r"DLL Name:\s*([^\s]+)", result.stdout)
@@ -93,7 +93,8 @@ def audit_build_graph(runtime: Path) -> None:
         fail(f"development/oracle source or library leaked into build graph: {leaked}")
 
 
-def audit_archive(archive: Path, expected: set[str], prefix: str) -> None:
+def audit_archive(archive: Path, expected: set[str], prefix: str,
+                  executable: str = "CdiRuntime.exe") -> None:
     with zipfile.ZipFile(archive) as bundle:
         names = set(bundle.namelist())
         if names != expected:
@@ -109,7 +110,7 @@ def audit_archive(archive: Path, expected: set[str], prefix: str) -> None:
             if any(marker.decode("ascii") in lowered
                    for marker in FORBIDDEN_MARKERS):
                 fail(f"development/oracle name leaked into release: {name}")
-        runtime_data = bundle.read(prefix + "CdiRuntime.exe").lower()
+        runtime_data = bundle.read(prefix + executable).lower()
         if any(marker in runtime_data for marker in FORBIDDEN_MARKERS):
             fail("development/oracle marker leaked into archived runtime")
 
@@ -117,6 +118,8 @@ def audit_archive(archive: Path, expected: set[str], prefix: str) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--version", required=True)
+    parser.add_argument("--product", choices=("cdirecomp", "hotelmario"),
+                        default="cdirecomp")
     parser.add_argument("--runtime", type=Path,
                         default=Path("build/runner-release/CdiRuntime.exe"))
     parser.add_argument("--sdl", type=Path,
@@ -133,9 +136,11 @@ def main() -> int:
     version = args.version.removeprefix("v")
     if not re.fullmatch(r"\d+\.\d+\.\d+", version):
         fail("--version must use MAJOR.MINOR.PATCH")
-    archive = args.out or Path("dist") / f"cdirecomp-{version}-windows-x64.zip"
+    executable = "HotelMarioRecomp.exe" if args.product == "hotelmario" else "CdiRuntime.exe"
+    product = "HotelMarioRecomp" if args.product == "hotelmario" else "cdirecomp"
+    archive = args.out or Path("dist") / f"{product}-{version}-windows-x64.zip"
     sources = {
-        "CdiRuntime.exe": args.runtime,
+        executable: args.runtime,
         "SDL2.dll": args.sdl,
         "player.cfg.example": args.config,
         "README.md": args.readme,
@@ -144,20 +149,23 @@ def main() -> int:
     missing = [str(path) for path in sources.values() if not path.is_file()]
     if missing:
         fail("missing allowlisted release input(s): " + ", ".join(missing))
-    if args.runtime.name.lower() != "cdiruntime.exe":
-        fail("--runtime must be the native CdiRuntime.exe target")
+    if args.runtime.name.lower() != executable.lower():
+        fail(f"--runtime must be the native {executable} target")
     if args.sdl.name.lower() != "sdl2.dll":
         fail("--sdl must be SDL2.dll")
 
     audit_build_graph(args.runtime)
     audit_runtime(args.runtime)
-    prefix = f"cdirecomp-{version}/"
+    if args.product == "hotelmario":
+        from build_provenance import verify
+        verify(args.runtime)
+    prefix = f"{product}-{version}/"
     expected = {prefix + name for name in sources}
     archive.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as bundle:
         for destination, source in sources.items():
             bundle.write(source, prefix + destination)
-    audit_archive(archive, expected, prefix)
+    audit_archive(archive, expected, prefix, executable)
 
     checksum = sha256(archive)
     checksum_path = archive.with_suffix(archive.suffix + ".sha256")

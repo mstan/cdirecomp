@@ -76,6 +76,13 @@ void cdic_debug_state(uint32_t *drive_lba, uint32_t *last_lba,
                       uint8_t *file, uint8_t *channel, uint8_t *submode,
                       uint8_t *coding, int *selected, int *running,
                       int *waiting_ack);
+typedef struct {
+    uint16_t bman, isr, ier, ccr, apcr, astat;
+    uint32_t channel_mask;
+    uint8_t armed, q_reporting, selection_active, prime_pending;
+    uint64_t data_deliveries, locator_deliveries, held_ticks;
+} CdiCiapState;
+void cdic_debug_snapshot(CdiCiapState *out);
 
 /* ---- Interpreter-fallback classification (always-on) ----
  * The hybrid interpreter (MC-CDI-011) runs whatever the static recompiler did

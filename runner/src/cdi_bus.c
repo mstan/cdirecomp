@@ -14,6 +14,7 @@
 #include "cdi_runtime.h"
 #include "debug_server.h"
 #include "cosim_state.h"
+#include "cdi_native.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -139,6 +140,7 @@ void m68k_write8(uint32_t addr, uint8_t val) {
     uint8_t *p = ram_ptr(addr);
     if (p) {
         *p = val;
+        cdi_native_notify_write(addr,1);
 #ifdef CDI_COSIM
         cdi_cosim_note_ram_write(addr, 1);   /* MC-CDI-016: dirty-page mark for the incremental RAM hash */
 #endif
@@ -161,6 +163,7 @@ void m68k_write16(uint32_t addr, uint16_t val) {
     uint8_t *p = ram_ptr(addr);
     if (p) {
         p[0] = (uint8_t)(val >> 8); p[1] = (uint8_t)val;
+        cdi_native_notify_write(addr,2);
 #ifdef CDI_COSIM
         cdi_cosim_note_ram_write(addr, 2);   /* MC-CDI-016: dirty-page mark for the incremental RAM hash */
 #endif

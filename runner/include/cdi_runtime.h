@@ -394,6 +394,7 @@ extern int g_halted;
 
 /* Dispatch-miss monitor. */
 extern uint32_t g_miss_count_any;
+extern uint32_t g_main_reset_count;
 extern uint32_t g_miss_last_addr;
 extern uint64_t g_miss_last_frame;
 #define CDI_MAX_MISS_UNIQUE 64

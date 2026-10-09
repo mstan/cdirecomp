@@ -23,6 +23,7 @@
 #include "cosim_state.h"
 #include "cdi_media.h"
 #include "cdi_audio.h"
+#include "cdi_native.h"
 #include "mcd212_video.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -78,6 +79,7 @@ static CdiFrameRecord s_frame_ring[CDI_FRAME_RING_LEN];
 static uint32_t s_frame_widx = 0;
 static uint32_t s_mcd_count = 0;
 static uint64_t s_mcd_hash = 0x14650FB0739D0383ULL;
+static atomic_ullong s_pause_at_frame;
 
 void debug_trace_mcd_event(uint8_t area, uint16_t line, uint32_t word) {
     const uint64_t prime = 0x00000100000001B3ULL;
@@ -103,6 +105,11 @@ void debug_ring_capture_frame(void) {
     s_mcd_count = 0;
     s_mcd_hash = 0x14650FB0739D0383ULL;
     s_frame_widx++;
+    uint64_t stop = atomic_load_explicit(&s_pause_at_frame, memory_order_acquire);
+    if (stop && g_frame_count >= stop) {
+        atomic_store_explicit(&s_pause_at_frame, 0, memory_order_release);
+        cdi_fault_hold();
+    }
 }
 
 /* ====================================================================== */
@@ -289,7 +296,7 @@ static int trace_range(CdiTraceRecord *out, uint64_t from, int count, uint64_t *
 /* ====================================================================== */
 /* Always-on per-write log so a memory-divergence (a cell read back with the
  * wrong value) can be chased to its WRITER without re-running: query the most
- * recent store covering an address before a given seq. ~1M records (~16 MB). */
+ * recent store covering an address before a given seq. ~1M records (~32 MB). */
 #define CDI_STORE_RING_LEN (1u << 20)
 #define CDI_STORE_MASK     (CDI_STORE_RING_LEN - 1u)
 
@@ -298,6 +305,7 @@ typedef struct {
     uint32_t pc;       /* g_cpu.PC at the store (the writing instruction) */
     uint32_t addr;     /* guest address written */
     uint32_t val;      /* value written (low `size` bytes meaningful) */
+    uint32_t frame;    /* guest field at the write */
     uint8_t  size;     /* 1, 2, or 4 */
 } CdiStoreRecord;
 
@@ -310,6 +318,7 @@ void debug_trace_store(uint32_t addr, uint32_t val, int size) {
     r->pc   = g_cpu.PC;
     r->addr = addr;
     r->val  = val;
+    r->frame = (uint32_t)g_frame_count;
     r->size = (uint8_t)size;
     s_store_count++;
 }
@@ -440,6 +449,7 @@ static int      s_it_count = 0;
 
 void debug_record_indirect_target(uint32_t addr) {
     addr &= 0xFFFFFFu;
+    cdi_native_record_target(addr);
     for (int i = 0; i < s_it_count; i++)
         if (s_it_addr[i] == addr) return;
     if (s_it_count < CDI_IT_MAX) s_it_addr[s_it_count++] = addr;
@@ -539,13 +549,14 @@ static void resp_status(char *out, int outlen) {
     snprintf(out, outlen,
         "{\"ok\":true,\"insns\":%llu,\"blocks\":%llu,\"interp\":%llu,\"frame\":%llu,\"pc\":%u,"
         "\"halted\":%d,\"held\":%d,\"input\":%u,\"miss_count\":%u,\"miss_last\":%u,\"irq_pending\":%u,"
-        "\"irq_raises\":%llu,\"irq_first_seq\":%llu}",
+        "\"irq_raises\":%llu,\"irq_first_seq\":%llu,\"main_resets\":%u}",
         (unsigned long long)g_native_insn_count, (unsigned long long)s_trace_seq,
         (unsigned long long)s_fb_total,
         (unsigned long long)g_frame_count, g_cpu.PC,
         g_halted, s_debug_held, cdi_input_get(), g_miss_count_any, g_miss_last_addr,
         recomp_pending_irq_mask(),
-        (unsigned long long)s_irq_count, (unsigned long long)s_irq_first_seq);
+        (unsigned long long)s_irq_count, (unsigned long long)s_irq_first_seq,
+        g_main_reset_count);
 }
 
 static void resp_pause(char *out, int outlen) {
@@ -553,6 +564,18 @@ static void resp_pause(char *out, int outlen) {
     snprintf(out, outlen,
              "{\"ok\":true,\"pause_requested\":true,\"seq\":%llu}",
              (unsigned long long)s_trace_seq);
+}
+
+/* Stop at a completed field without changing player pacing or disabling the
+ * frontend, unlike the startup-only --stop-frame investigation profile. */
+static void resp_stop_frame(const char *line, char *out, int outlen) {
+    uint64_t frame = 0;
+    if (!json_int(line, "frame", &frame) || (frame && frame <= g_frame_count)) {
+        snprintf(out, outlen, "{\"ok\":false,\"error\":\"future frame required (0 clears)\"}");
+        return;
+    }
+    atomic_store_explicit(&s_pause_at_frame, frame, memory_order_release);
+    snprintf(out, outlen, "{\"ok\":true,\"frame\":%llu}", (unsigned long long)frame);
 }
 
 /* stop_pc: arm a PC-stop. Params: pc (required), skip (hits to ignore first,
@@ -910,21 +933,81 @@ static void resp_ciap_state(char *out, int outlen) {
     uint32_t drive_lba, last_lba;
     uint8_t file, channel, submode, coding;
     int selected, running, waiting_ack;
+    CdiCiapState state;
     cdic_debug_state(&drive_lba, &last_lba, &file, &channel, &submode,
                      &coding, &selected, &running, &waiting_ack);
+    cdic_debug_snapshot(&state);
     snprintf(out, outlen,
         "{\"ok\":true,\"drive_lba\":%u,\"last_lba\":%u,"
         "\"file\":%u,\"channel\":%u,\"submode\":%u,"
         "\"coding\":%u,\"selected\":%d,\"running\":%d,"
-        "\"waiting_ack\":%d}",
+        "\"waiting_ack\":%d,\"bman\":%u,\"isr\":%u,\"ier\":%u,"
+        "\"ccr\":%u,\"apcr\":%u,\"astat\":%u,\"channel_mask\":%u,"
+        "\"armed\":%u,\"q_reporting\":%u,\"selection_active\":%u,"
+        "\"prime_pending\":%u,\"data_deliveries\":%llu,"
+        "\"locator_deliveries\":%llu,\"held_ticks\":%llu}",
         drive_lba, last_lba, file, channel, submode, coding, selected,
-        running, waiting_ack);
+        running, waiting_ack, state.bman, state.isr, state.ier, state.ccr,
+        state.apcr, state.astat, state.channel_mask, state.armed,
+        state.q_reporting, state.selection_active, state.prime_pending,
+        (unsigned long long)state.data_deliveries,
+        (unsigned long long)state.locator_deliveries,
+        (unsigned long long)state.held_ticks);
 }
 
 static void resp_disc_state(char *out, int outlen) {
     snprintf(out, outlen,
         "{\"ok\":true,\"present\":%d,\"sectors\":%u,\"track_mode\":%d}",
         cdi_media_present(), cdi_media_sector_count(), cdi_media_track_mode());
+}
+
+static void resp_native_state(char *out, int outlen) {
+    CdiNativeState state;
+    cdi_native_state(&state);
+    snprintf(out, outlen,
+        "{\"ok\":true,\"compiled\":%u,\"active\":%u,\"bindings\":%llu,"
+        "\"invalidations\":%llu,\"dispatches\":%llu,\"identity_rejections\":%llu}",
+        state.compiled, state.active, (unsigned long long)state.bindings,
+        (unsigned long long)state.invalidations, (unsigned long long)state.dispatches,
+        (unsigned long long)state.identity_rejections);
+}
+
+static void resp_native_events(const char *line,char *out,int outlen) {
+    uint64_t from=UINT64_MAX,count=64,total,oldest;
+    json_int(line,"from",&from);json_int(line,"count",&count);
+    if (count>256) count=256;
+    CdiNativeEvent events[256];
+    int got=cdi_native_events(events,(int)count,from,&total,&oldest);
+    int n=snprintf(out,outlen,"{\"ok\":true,\"total\":%llu,\"oldest\":%llu,\"events\":[",
+                   (unsigned long long)total,(unsigned long long)oldest);
+    for (int i=0;i<got && n<outlen-256;i++) {
+        const CdiNativeEvent *e=&events[i];
+        n+=snprintf(out+n,outlen-n,
+            "%s{\"seq\":%llu,\"trace_seq\":%llu,\"frame\":%llu,\"cycles\":%llu,\"epoch\":%llu,"
+            "\"pc\":%u,\"base\":%u,\"size\":%u,\"module\":%u,\"type\":%u}",i?",":"",
+            (unsigned long long)e->seq,(unsigned long long)e->trace_seq,(unsigned long long)e->frame,
+            (unsigned long long)e->cycles,(unsigned long long)e->epoch,e->pc,e->base,e->size,e->module,e->type);
+    }
+    snprintf(out+n,outlen-n,"]}");
+}
+static void resp_module_targets(const char *line,char *out,int outlen) {
+    uint64_t from=0,count=64,dropped;
+    uint32_t total;
+    json_int(line,"from",&from);json_int(line,"count",&count);
+    if (count>256) count=256;
+    CdiNativeTarget targets[256];
+    int got=from>UINT32_MAX?0:cdi_native_targets(targets,(int)count,(uint32_t)from,&total,&dropped);
+    if (from>UINT32_MAX) cdi_native_targets(NULL,0,0,&total,&dropped);
+    int n=snprintf(out,outlen,"{\"ok\":true,\"total\":%u,\"dropped\":%llu,\"targets\":[",total,(unsigned long long)dropped);
+    for (int i=0;i<got && n<outlen-384;i++) {
+        const CdiNativeTarget *t=&targets[i];
+        n+=snprintf(out+n,outlen-n,"%s{\"module\":%u,\"offset\":%u,\"base\":%u,\"epoch\":%llu,"
+            "\"frame\":%llu,\"trace_seq\":%llu,\"hits\":%llu,\"sha256\":\"",i?",":"",t->module,t->offset,t->base,
+            (unsigned long long)t->epoch,(unsigned long long)t->frame,(unsigned long long)t->trace_seq,(unsigned long long)t->hits);
+        for (unsigned b=0;b<32;b++) n+=snprintf(out+n,outlen-n,"%02x",g_cdi_native_modules[t->module].sha256[b]);
+        n+=snprintf(out+n,outlen-n,"\"}");
+    }
+    snprintf(out+n,outlen-n,"]}");
 }
 
 static void resp_mount_disc(const char *line, char *out, int outlen) {
@@ -1039,37 +1122,63 @@ static void resp_cycle_trace(const char *line, char *out, int outlen) {
 /* stores: chase a memory-divergence to its writer. Params:
  *   addr   (required) the byte whose writers we want
  *   before (optional) only stores with seq < before (default: all)
+ *   from   (optional) scan forward from a store cursor; returns next cursor
  *   count  (optional) how many most-recent matches to return (default 16, max 64)
  * Returns matches oldest-first (so the LAST element is the most recent writer),
  * scanning the ring backward. A store matches if its [addr, addr+size) covers
  * the queried byte. */
 static void resp_stores(const char *line, char *out, int outlen) {
-    uint64_t addr = 0, before = 0, count = 16;
+    uint64_t addr = 0, before = 0, from = 0, count = 16;
     if (!json_int(line, "addr", &addr)) { snprintf(out, outlen, "{\"ok\":false,\"error\":\"addr required\"}"); return; }
     int have_before = json_int(line, "before", &before);
+    int have_from = json_int(line, "from", &from);
+    if (have_from && have_before) {
+        snprintf(out, outlen, "{\"ok\":false,\"error\":\"from and before are mutually exclusive\"}");
+        return;
+    }
     json_int(line, "count", &count);
     if (count > 64) count = 64;
 
     uint64_t total  = s_store_count;
     uint64_t oldest = total > CDI_STORE_RING_LEN ? total - CDI_STORE_RING_LEN : 0;
     static CdiStoreRecord hits[64];
+    uint64_t indices[64];
     int nh = 0;
+    uint64_t next = total;
+    if (have_from) {
+        uint64_t i = from < oldest ? oldest : from;
+        if (i > total) i = total;
+        for (; i < total && nh < (int)count; i++) {
+            const CdiStoreRecord *r = &s_store_ring[i & CDI_STORE_MASK];
+            if (addr >= r->addr && addr < (uint64_t)r->addr + r->size) {
+                indices[nh] = i;
+                hits[nh++] = *r;
+            }
+        }
+        next = i;
+    } else {
     /* scan backward; collect up to `count` most-recent covering stores */
     for (uint64_t i = total; i > oldest && nh < (int)count; ) {
         i--;
         const CdiStoreRecord *r = &s_store_ring[i & CDI_STORE_MASK];
         if (have_before && r->seq >= before) continue;
-        if (addr >= r->addr && addr < (uint64_t)r->addr + r->size)
+        if (addr >= r->addr && addr < (uint64_t)r->addr + r->size) {
+            indices[nh] = i;
             hits[nh++] = *r;
+        }
     }
-    int n = snprintf(out, outlen, "{\"ok\":true,\"addr\":%u,\"total\":%llu,\"oldest\":%llu,\"records\":[",
-                     (uint32_t)addr, (unsigned long long)total, (unsigned long long)oldest);
+    }
+    int n = snprintf(out, outlen, "{\"ok\":true,\"addr\":%u,\"total\":%llu,\"oldest\":%llu,\"next\":%llu,\"records\":[",
+                     (uint32_t)addr, (unsigned long long)total, (unsigned long long)oldest,
+                     (unsigned long long)next);
     /* emit oldest-first (reverse of the backward scan) */
-    for (int k = nh - 1; k >= 0 && n < outlen - 160; k--) {
+    for (int j = 0; j < nh && n < outlen - 200; j++) {
+        int k = have_from ? j : nh - 1 - j;
         const CdiStoreRecord *r = &hits[k];
         n += snprintf(out + n, outlen - n,
-            "%s{\"seq\":%llu,\"pc\":%u,\"addr\":%u,\"val\":%u,\"size\":%u}",
-            k == nh - 1 ? "" : ",", (unsigned long long)r->seq, r->pc, r->addr, r->val, r->size);
+            "%s{\"store\":%llu,\"seq\":%llu,\"frame\":%u,\"pc\":%u,\"addr\":%u,\"val\":%u,\"size\":%u}",
+            j ? "," : "", (unsigned long long)indices[k], (unsigned long long)r->seq,
+            r->frame, r->pc, r->addr, r->val, r->size);
     }
     snprintf(out + n, outlen - n, "]}");
 }
@@ -1169,12 +1278,16 @@ static int handle_line(const char *line, char *out, int outlen) {
     if (!strcmp(cmd, "ping"))               snprintf(out, outlen, "{\"ok\":true,\"pong\":true,\"session\":\"%s\"}", s_cosim_session);
     else if (!strcmp(cmd, "status"))        resp_status(out, outlen);
     else if (!strcmp(cmd, "pause"))         resp_pause(out, outlen);
+    else if (!strcmp(cmd, "stop_frame"))    resp_stop_frame(line, out, outlen);
     else if (!strcmp(cmd, "stop_pc"))       resp_stop_pc(line, out, outlen);
     else if (!strcmp(cmd, "set_input"))     resp_set_input(line, out, outlen);
     else if (!strcmp(cmd, "emu_ikat_state")) resp_ikat_state(out, outlen);
     else if (!strcmp(cmd, "ikat_events"))    resp_ikat_events(out, outlen);
     else if (!strcmp(cmd, "ciap_events"))    resp_ciap_events(line, out, outlen);
     else if (!strcmp(cmd, "ciap_state"))     resp_ciap_state(out, outlen);
+    else if (!strcmp(cmd, "native_state"))   resp_native_state(out, outlen);
+    else if (!strcmp(cmd, "native_events"))  resp_native_events(line, out, outlen);
+    else if (!strcmp(cmd, "module_targets")) resp_module_targets(line, out, outlen);
     else if (!strcmp(cmd, "video_frame"))    resp_video_frame(out, outlen);
     else if (!strcmp(cmd, "audio_state"))    resp_audio_state(out, outlen);
     else if (!strcmp(cmd, "frame_hashes"))   resp_frame_hashes(line, out, outlen);
