@@ -368,3 +368,17 @@ close, and debug-server `quit` only disconnects TCP.
 Beads updates are durable in the central local database. Its Dolt push has
 failed because remote `origin/main` references missing Dolt data; that failure
 must not be described as synchronized. Repairing that remote is separate work.
+
+## Windows and Linux package tooling
+
+The owner requested a new Windows/Linux Hotel Mario checkpoint build, using
+`../psxrecomp/TombaRecomp` as the release reference. Build task `beads-ssy9.2`
+owns the product artifacts; `beads-ttbl.2` owns reusable Linux runtime packaging.
+`tools/package_runtime_appimage.py` follows the linuxdeploy/appimagetool
+workflow with SHA-pinned official tools, Release/COSIM OFF graph checks,
+linked-input verification, ELF/dependency checks, and allowlist/hash comparison
+of the staged and extracted AppImage payload. Original assets, generated C,
+provenance sidecars and development tools remain outside runtime packages.
+The product supplies its Linux build wrapper and AppRun. This packaging work
+does not resume full-campaign or visual-flicker investigation. Actual artifact
+results are recorded after the builds and package boot checks finish.
