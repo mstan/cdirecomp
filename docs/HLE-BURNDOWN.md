@@ -26,7 +26,7 @@ documentation prohibiting OS-9 HLE. Preserve the underlying correctness rule:
 no fabricated syscall success, silent stubs, drifting shadow kernel state or
 forced guest progress. Use authoritative guest RAM and verified contracts.
 
-## Remaining candidates
+## Candidate dispositions
 
 These are complete jobs to evaluate. Related candidates can become one
 replacement across OS, memory and device boundaries. They are not ten fixed
@@ -36,20 +36,25 @@ subsystem boundaries or a requirement to adopt every proposed optimization.
 | --- | --- | --- | --- |
 | 1 | **Qualify the scanout candidate already written** | Repeated decoding, transparency, contribution and composition work across pixels | **Qualified as part of the combined native frame job.** Three alternating Hotel Mario pairs save 23.0-26.0% CPU/field with complete contract equality. Scanout-only performance remains inconclusive. |
 | 2 | **Complete frame production and publication** | Repeated framebuffer hashing, copying, diagnostic reconstruction and publication work | **Implemented and qualified with candidate 1.** Exact content identity, retained storage and frontend handoff remove duplicate work without changing field cadence. |
-| 3 | **Graphics service to completed drawing job** | Guest drawing preparation, intermediate memory traffic, control-list construction and repeated renderer preparation | Broader architectural candidate. Could cross OS, memory and video together; requires workload attribution. |
-| 4 | **Memory operation to fully published result** | Instruction-by-instruction copying/filling plus repeated module invalidation, tag maintenance and dirty tracking | Concrete repeated machinery exists; its gameplay cost remains unmeasured. |
-| 5 | **File/module load to executable module ready** | Repeated sector handling, copying, validation, relocation, linking, hashing and native binding | Coherent cross-subsystem candidate. Preserve authoritative guest loader/kernel state and observable transport behavior. |
-| 6 | **Frequently executed OS-9 service jobs** | Recompiled kernel algorithms and internal dispatch that a complete native operation could replace | Substantially unexplored because this repository previously prohibited OS HLE. Select services by measured cost. |
+| 3 | **Graphics service to completed drawing job** | Guest drawing preparation, intermediate memory traffic, control-list construction and repeated renderer preparation | Renderer preparation consolidated into 1/2 and native continuations into 7; broader guest job **deferred** pending a measured drawing/callback boundary and ownership contract. See final dispositions. |
+| 4 | **Memory operation to fully published result** | Instruction-by-instruction copying/filling plus repeated module invalidation, tag maintenance and dirty tracking | **Deferred.** No gameplay module churn; write bookkeeping is a small sampled cost. Requires a demonstrated bulk-operation workload and complete overlap/fault/interrupt/publication contract. |
+| 5 | **File/module load to executable module ready** | Repeated sector handling, copying, validation, relocation, linking, hashing and native binding | **Deferred.** No bindings occur in the measured gameplay interval. Requires a loading/transition benchmark and loader success/error/unload contract. |
+| 6 | **Frequently executed OS-9 service jobs** | Recompiled kernel algorithms and internal dispatch that a complete native operation could replace | **Deferred.** Current samples identify no expensive particular service. Requires service-boundary attribution and a success/error/interruption corpus; OS HLE remains allowed. |
 | 7 | **Native execution spans** | Repeated dispatch, interpreter handoffs, instruction bookkeeping and checks between operations with no observable intervening event | **Implemented and qualified.** Reused the existing observed native catalog, then coalesced legal PIC continuations into shared native bodies. SDK `3955bf3`; incremental 3-pair median CPU reduction 23.77% versus the seeded catalog, with exact canonical guest contracts. |
-| 8 | **Complete CD/XA streaming jobs** | Repeated work across sector selection, decoding, buffer ownership, DMA/refill, guest drivers and audio handoff | Existing pieces are native; the opportunity is consolidating the complete job. Benefit unmeasured. |
-| 9 | **Whole-board event advancement** | Calling timer, input transport, CD/audio, RTC, raster and pacing machinery after every instruction | Concrete candidate, lower priority: roughly 5-6% of the sampled execution. Preserve event ordering and interrupt boundaries. |
-| 10 | **Frame to host presentation** | Redundant frame copies, texture uploads, conversions and presentation preparation | **Redundant copy/upload portion consolidated into candidate 2.** SDL dummy/software frontend A/B passes exact guest/frame/PCM contracts; one retained pair saves 33.2% CPU/field. Hardware-driver presentation cost remains unqualified and needs its own actual-window/backend profile. |
+| 8 | **Complete CD/XA streaming jobs** | Repeated work across sector selection, decoding, buffer ownership, DMA/refill, guest drivers and audio handoff | **Deferred.** Decode is already native and scarcely sampled; remaining stream/device consolidation depends on the event contract in 9 and seek/channel/refill/PCM-continuity qualification. |
+| 9 | **Whole-board event advancement** | Calling timer, input transport, CD/audio, RTC, raster and pacing machinery after every instruction | **Deferred.** Final sampling finds 40/344 samples. Bulk cycle sums demonstrably change integer device time and activation ordering. Requires explicit event frontiers and a qualified span contract. |
+| 10 | **Frame to host presentation** | Redundant frame copies, texture uploads, conversions and presentation preparation | **Consolidated into candidate 2**, qualified through SDL dummy/software. Final supported package saves 75.47% CPU/field in the direct retained original-reference comparison. Hardware-driver extension is deferred pending an actual-window/backend profile. |
 
 ## Current checkpoint
 
 - Branch: `perf/native-scanout-hle-20261027`, based on framework `f3c8d57`.
-- The native frame implementation and comparison harness are being committed
-  as a coherent qualified checkpoint. Preserve the retained A/B inputs.
+- Qualified engine checkpoints: `a83c317` (frame job), `e92baf8` (coarse native
+  catalog), `85c869e` (completed-line jobs). Shared core: `3955bf3`.
+- Supported consumer integration: `16353fc` on
+  `HotelMarioRecomp/perf/native-jobs-20261028`, owning issue `beads-7t8h`.
+- Every listed candidate has a validated implementation/consolidation or an
+  evidence-backed deferral with a concrete prerequisite below. This closes
+  this burndown's dispositions, not the separate full-game certification.
 - Scanout selection is `-DCDI_VIDEO_BACKEND=LLE` or
   `-DCDI_VIDEO_BACKEND=HLE`. The repository default remains LLE.
 - HLE computes joint source/matte color spans, consolidating contribution,
@@ -304,12 +309,9 @@ explicitly excluded from CPU-tier semantic equality; actual event sequence,
 hardware timing/payload and all guest outputs/state remain compared. All raw
 diagnostics are retained.
 
-The owning burndown remains active. Frame/CPU job qualification does not close
-the other candidate investigations or the existing full-campaign/audio/save
-acceptance gaps. The next step is to profile the remaining built execution
-cost and select the next complete job, including whether unchanged source and
-register state can avoid a whole scanout job, or whether board-event spans are
-now the larger opportunity. Neither hypothesis is an adopted improvement.
+At this checkpoint the owning burndown remained active. The next measurement
+selected a completed-line job, recorded below. Frame/CPU job qualification
+does not close the separate full-campaign/audio/save acceptance gaps.
 
 ### Completed-line native job qualification
 
@@ -353,4 +355,103 @@ to the earlier combined-package percentage. Differential component coverage
 now includes 50,688 line jobs and 4,792 observed reuse hits, direct source-byte
 mutations, CE rewrites across publication, controls, geometry and retained
 interlaced storage. Windows runtime tests and Linux GCC portable LLE/HLE
-fixtures/parity pass. Final consumer/frontend integration remains pending.
+fixtures/parity pass. Final consumer/frontend integration is recorded below.
+
+### Supported consumer and final direct comparison
+
+The supported `HotelMarioRecomp/tools/build.ps1 -Disc ...` pipeline rebuilt
+the current generator, regenerated all 174 executable modules using the tracked
+SHA-bound catalog, and rebuilt the consumer. Default consumer video selection
+is HLE; `-VideoBackend LLE` retains faithful scanout. `-StaticModuleEntries`
+selects static-only discovery; `-ModuleSeeds` supplies an alternative catalog.
+Linux build glue uses the same default, with `CDI_VIDEO_BACKEND=LLE` available.
+The shared framework's default remains LLE. Native kernel/save behavior is
+unchanged; owner settings and saves were preserved.
+
+`final-combined-sdl/campaign-evidence.json` compares that supported build
+directly against original-catalog/LLE video, using the actual frontend with
+SDL dummy video/software rendering and dummy PCM output:
+
+| Comparison | Original CPU ms/field | Final supported CPU ms/field | CPU reduction |
+| --- | --- | --- | --- |
+| Warm | 5.224511 | 1.368221 | 73.81% |
+| Retained | 5.704861 | 1.399498 | **75.47%** |
+
+Both complete canonical guest contracts pass, including every frame from
+1 through 13,000. This direct result is one warmed retained pair; the individual
+frame, CPU-coalescing and completed-line packages separately have three
+alternating pairs. Do not present the one final pair as a three-pair result or
+add incremental percentages. Final binary size is 33,892,868 versus 29,908,046
+bytes; sampled peak RSS is 216,723,456 versus 207,187,968 bytes (about 9.5 MB
+more). The line cache is bounded to the maximum 560 rows. Host occupancy was
+76.8%/80.9%; retain the raw samples and avoid quiet-host latency claims.
+
+The tracked machine-readable index is [hle-campaign-evidence.json](hle-campaign-evidence.json).
+It records each package, per-game measurements, source/core/consumer heads,
+binary identities, raw evidence/identity hashes, limits and every candidate's
+disposition/prerequisite. The raw root retains settings, all samples, RAM,
+frames, sources/diffs, binaries, component logs and the resource ledger.
+Original link-time sidecars are retained when source snapshots are relocated;
+each relocated source must match its original link-time hash.
+
+### Final evidence-backed deferrals
+
+The post-line-job profile (`profile-final.json`) contains 344 gameplay-only
+main-thread samples. It finds 60 in instruction-entry tracing, 47 in line-job
+qualification, 32 in frame publication and 40 in board-event advancement.
+Named game-native bodies account for 16 samples; named ROM-native bodies for
+7. Leaf sampling cannot attribute all indirect service cost or certify other
+workloads. It selects useful work; it is not an A/B result.
+
+- **3, graphics/drawing preparation:** the earlier interpreter hotspot at
+  module offset `0x17018` processes a dynamic callback queue, including guest
+  callback invocation and queue-pointer updates. It is not an established
+  single blit/copy contract. The renderer portion is delivered in 1/2 and legal
+  native continuations in 7. Before replacing the broader guest job, capture
+  a demonstrably expensive drawing/callback operation at its caller boundary,
+  including queue ownership/head/tail, callback effects, interrupts and output
+  memory; build a boundary differential fixture and an exercising workload.
+- **4, memory/publication:** the run has only five native bindings and one
+  invalidation, all before the timed interval. Native write bookkeeping has
+  13/491 initial and 10/344 final samples; this is not demonstrated repeated
+  load/hash churn. A replacement needs a measured bulk-copy/fill/loading case
+  plus overlap, partial-fault, interrupt-visible memory and code-invalidation
+  contracts at the complete operation boundary.
+- **5, loader pipeline:** all five bindings occur by field 7,072; the timed
+  gameplay interval contains none. Startup output/state equality is retained,
+  but gameplay gains cannot establish loader performance. Prerequisite: matched
+  loading/transition measurements covering actual Load/Link/Unlink outcomes,
+  relocation, error, unload and authoritative kernel/module state.
+- **6, OS-9 services:** current sampling identifies no specific costly service,
+  and seven named ROM-body samples do not establish a service ABI. Prerequisite:
+  service-boundary cost attribution and a hot-service corpus including success,
+  errors, interrupted/reentrant execution, caller registers, kernel structures
+  and native-save effects. OS HLE remains an allowed implementation option.
+- **8, CD/XA streaming:** existing native jobs decode 2,259 audio sectors and
+  6,181,056 sample frames with exact PCM identity. Decode appears in only 2/491
+  initial samples. Remaining CDIC work includes observable buffer-pointer and
+  IRQ advancement. Prerequisites: a seek/channel-switch/refill workload,
+  DMA/IRQ/locator/ownership timelines, normal-speed PCM continuity qualification
+  and the event-span contract in 9. Existing audio-listening certification
+  remains open under the separate game acceptance work.
+- **9, board advancement:** a bulk-cycle sum fails a concrete timing identity:
+  24 four-cycle quanta advance slave/CDIC time by **6,336 ns**, while a single
+  96-cycle quantum advances it by **6,355 ns**. `slave_increment_time` can also
+  activate CDIC before its update in the same quantum. Timer IRQs and RTC/raster
+  phases remain observable. Prerequisites: earliest-event/frontier APIs across
+  timer, IKAT, CDIC and raster; preserve summed per-quantum truncated time and
+  RTC/raster phase; flush prior elapsed time before MMIO/visible effects;
+  preserve activation/order/IRQ boundaries. Deadline, seek, audio and IRQ
+  differential fixtures and a built-game span A/B must qualify that job.
+- **10, hardware presentation extension:** redundant copy/upload is delivered
+  and frontend-qualified. A hardware-driver optimization still needs a matched
+  actual-window/backend profile, resize/expose behavior and pixel readback,
+  while preserving owner focus and presentation settings. Dummy/software
+  evidence does not establish GPU-driver performance.
+
+Future native OS/memory/drawing jobs should compare caller-visible inputs,
+outputs, authoritative guest state, errors and hardware time/events at the
+complete job boundary. They may change interior instruction execution. The
+exact instruction-history comparison used in this pass is appropriate to its
+CPU-preserving frame jobs and faithful AOT changes; it does not constrain
+future HLE to retain the reference algorithm.

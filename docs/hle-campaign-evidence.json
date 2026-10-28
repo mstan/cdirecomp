@@ -1,0 +1,861 @@
+{
+  "schema": 1,
+  "owner_issue": "beads-oatv",
+  "campaign_issue": "beads-2wy8.1",
+  "consumer_issue": "beads-7t8h",
+  "status": "qualified implementations and evidence-backed dispositions",
+  "engine_head": "85c869ee808b438905f2c1bc29a46d30f27647f8",
+  "core_head": "3955bf3311f55e031836f70b5c1839e95b81f9cf",
+  "game_head": "16353fc849ef8056af891e2c3b7d3e29ae3a41da",
+  "raw_evidence_root": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027",
+  "game": "Hotel Mario (USA)",
+  "coverage": {
+    "start_field": 9400,
+    "end_field": 13000,
+    "canonical_stop_instruction_entry": 150976126,
+    "inputs": "Real timed CLI controller script retained per identity.json; no guest-progress writes",
+    "comparison": "Full1MiB guest RAM; caller CPU/guest registers at common entry; hardware/audio state; every1..13000 completed frame/control hash; final256 instruction/cycle/register records",
+    "limitations": [
+      "One bounded early-gameplay workload; no extrapolation to other games/stages",
+      "Windows process-CPU measurements under retained host load; not quiet-host latency",
+      "SDL dummy/software frontend; no actual hardware-driver performance claim",
+      "Linux portable C LLE/HLE fixtures and compiler checks; no Linux built-game performance claim",
+      "Existing full-campaign, audio-listening, visual-flicker, reliability and native-save-restoration gaps remain separate"
+    ]
+  },
+  "experiments": [
+    {
+      "name": "scanout-first-pair",
+      "evidence": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\scanout-first-pair\\campaign-evidence.json",
+      "evidence_sha256": "0ec276ff9af335b0ad9d44f0938a1477365e1eb86a602930769be78958cb06ea",
+      "identity": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\scanout-first-pair\\identity.json",
+      "identity_sha256": "e203458cf6116b6378c23322858128f29c8972a7f061f96183b5ce727396226c",
+      "package": "native scanout spans with direct RLE7 sources",
+      "reference_package": null,
+      "contracts": [
+        {
+          "left": "warm-LLE",
+          "right": "warm-HLE",
+          "equal": true,
+          "differences": []
+        },
+        {
+          "left": "pair1-LLE",
+          "right": "pair1-HLE",
+          "equal": true,
+          "differences": []
+        }
+      ],
+      "paired_cpu_reduction_percent": [
+        -1.534849493639845
+      ],
+      "median_cpu_reduction_percent": -1.534849493639845,
+      "samples": [
+        {
+          "label": "pair1-LLE",
+          "runtime": {
+            "path": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\LLE\\HotelMarioRecomp.exe",
+            "bytes": 29907466,
+            "sha256": "ea24af537467ea226cb6c24760808b9ac34167e6afa8b1aad26cba96c5a6dbab"
+          },
+          "cpu_ms_per_field": 4.954340277777778,
+          "fields_per_s": 158.18946879974098,
+          "peak_sampled_rss_bytes": 207679488
+        },
+        {
+          "label": "pair1-HLE",
+          "runtime": {
+            "path": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\HLE\\HotelMarioRecomp.exe",
+            "bytes": 29912237,
+            "sha256": "8a875fb291aef045778716c549eff6b3a23e32a92a8e366664846df28689de1a"
+          },
+          "cpu_ms_per_field": 5.030381944444445,
+          "fields_per_s": 171.16774438944864,
+          "peak_sampled_rss_bytes": 207691776
+        }
+      ],
+      "scope": "one built title, fixed early-gameplay interval; no broader title/platform/release claim"
+    },
+    {
+      "name": "frame-package-pairs",
+      "evidence": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\frame-package-pairs\\campaign-evidence.json",
+      "evidence_sha256": "9e913dc12cfcd1609c19f3178b9476e6eb6f68307417ae7fa12a8bce1d5589f0",
+      "identity": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\frame-package-pairs\\identity.json",
+      "identity_sha256": "0f4358b12d7504d5817f2e6adb26d6057cd9dec03ad53fabba44d09a5aea718b",
+      "package": "native scanout spans + exact frame publication/content reuse",
+      "reference_package": null,
+      "contracts": [
+        {
+          "left": "warm-LLE",
+          "right": "warm-HLE",
+          "equal": true,
+          "differences": []
+        },
+        {
+          "left": "pair1-LLE",
+          "right": "pair1-HLE",
+          "equal": true,
+          "differences": []
+        },
+        {
+          "left": "pair2-LLE",
+          "right": "pair2-HLE",
+          "equal": true,
+          "differences": []
+        },
+        {
+          "left": "pair3-LLE",
+          "right": "pair3-HLE",
+          "equal": true,
+          "differences": []
+        }
+      ],
+      "paired_cpu_reduction_percent": [
+        26.011091847390766,
+        22.97746582933137,
+        25.75839167115419
+      ],
+      "median_cpu_reduction_percent": 25.75839167115419,
+      "samples": [
+        {
+          "label": "pair1-LLE",
+          "runtime": {
+            "path": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\LLE-frame\\HotelMarioRecomp.exe",
+            "bytes": 29908046,
+            "sha256": "5cff7101786df27d480042641860d0cbc6e15d94711903fc02a930ba904a20f1"
+          },
+          "cpu_ms_per_field": 5.945638020833333,
+          "fields_per_s": 102.90896487161865,
+          "peak_sampled_rss_bytes": 207679488,
+          "host_average_cpu_busy_percent": 100.0
+        },
+        {
+          "label": "pair1-HLE",
+          "runtime": {
+            "path": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\HLE-frame\\HotelMarioRecomp.exe",
+            "bytes": 29912817,
+            "sha256": "bd6cc115d6fd78cc66676c5ccc0c20acb3b6b997759385eb4ebdc60b6efa503a"
+          },
+          "cpu_ms_per_field": 4.399112654320988,
+          "fields_per_s": 175.4338468206508,
+          "peak_sampled_rss_bytes": 207708160,
+          "host_average_cpu_busy_percent": 100.0
+        },
+        {
+          "label": "pair2-HLE",
+          "runtime": {
+            "path": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\HLE-frame\\HotelMarioRecomp.exe",
+            "bytes": 29912817,
+            "sha256": "bd6cc115d6fd78cc66676c5ccc0c20acb3b6b997759385eb4ebdc60b6efa503a"
+          },
+          "cpu_ms_per_field": 4.524739583333333,
+          "fields_per_s": 199.05082246712797,
+          "peak_sampled_rss_bytes": 207687680,
+          "host_average_cpu_busy_percent": 99.9979033881248
+        },
+        {
+          "label": "pair2-LLE",
+          "runtime": {
+            "path": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\LLE-frame\\HotelMarioRecomp.exe",
+            "bytes": 29908046,
+            "sha256": "5cff7101786df27d480042641860d0cbc6e15d94711903fc02a930ba904a20f1"
+          },
+          "cpu_ms_per_field": 5.874565972222222,
+          "fields_per_s": 137.94028335243297,
+          "peak_sampled_rss_bytes": 207679488,
+          "host_average_cpu_busy_percent": 99.99753985435937
+        },
+        {
+          "label": "pair3-LLE",
+          "runtime": {
+            "path": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\LLE-frame\\HotelMarioRecomp.exe",
+            "bytes": 29908046,
+            "sha256": "5cff7101786df27d480042641860d0cbc6e15d94711903fc02a930ba904a20f1"
+          },
+          "cpu_ms_per_field": 6.044921875,
+          "fields_per_s": 144.80754340045218,
+          "peak_sampled_rss_bytes": 207679488,
+          "host_average_cpu_busy_percent": 99.99866992977229
+        },
+        {
+          "label": "pair3-HLE",
+          "runtime": {
+            "path": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\HLE-frame\\HotelMarioRecomp.exe",
+            "bytes": 29912817,
+            "sha256": "bd6cc115d6fd78cc66676c5ccc0c20acb3b6b997759385eb4ebdc60b6efa503a"
+          },
+          "cpu_ms_per_field": 4.487847222222222,
+          "fields_per_s": 212.74081077861015,
+          "peak_sampled_rss_bytes": 207687680,
+          "host_average_cpu_busy_percent": 95.5753823743627
+        }
+      ],
+      "scope": "one built title, fixed early-gameplay interval; no broader title/platform/release claim"
+    },
+    {
+      "name": "frame-package-sdl",
+      "evidence": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\frame-package-sdl\\campaign-evidence.json",
+      "evidence_sha256": "6e7a95945ad9c5297587c77b9544ddf3cf0a2d7bb641836478dc65fe7d596fb7",
+      "identity": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\frame-package-sdl\\identity.json",
+      "identity_sha256": "b8a9f72f5b4a25a5aa9b8856b91d670d788921ffb9db7c9692224249ad7ad4df",
+      "package": "native scanout spans + exact frame publication/content reuse",
+      "reference_package": null,
+      "contracts": [
+        {
+          "left": "warm-LLE",
+          "right": "warm-HLE",
+          "equal": true,
+          "differences": []
+        },
+        {
+          "left": "pair1-LLE",
+          "right": "pair1-HLE",
+          "equal": true,
+          "differences": []
+        }
+      ],
+      "paired_cpu_reduction_percent": [
+        33.20391627278866
+      ],
+      "median_cpu_reduction_percent": 33.20391627278866,
+      "samples": [
+        {
+          "label": "pair1-LLE",
+          "runtime": {
+            "path": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\LLE-frame\\HotelMarioRecomp.exe",
+            "bytes": 29908046,
+            "sha256": "5cff7101786df27d480042641860d0cbc6e15d94711903fc02a930ba904a20f1"
+          },
+          "cpu_ms_per_field": 5.1423611111111125,
+          "fields_per_s": 187.45216064729797,
+          "peak_sampled_rss_bytes": 207159296,
+          "host_average_cpu_busy_percent": 51.88011299015246
+        },
+        {
+          "label": "pair1-HLE",
+          "runtime": {
+            "path": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\HLE-frame\\HotelMarioRecomp.exe",
+            "bytes": 29912817,
+            "sha256": "bd6cc115d6fd78cc66676c5ccc0c20acb3b6b997759385eb4ebdc60b6efa503a"
+          },
+          "cpu_ms_per_field": 3.434895833333334,
+          "fields_per_s": 288.804030419608,
+          "peak_sampled_rss_bytes": 207163392,
+          "host_average_cpu_busy_percent": 62.75017253284507
+        }
+      ],
+      "scope": "one built title, fixed early-gameplay interval; no broader title/platform/release claim"
+    },
+    {
+      "name": "seeded-native-entry-probe",
+      "evidence": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\seeded-native-entry-probe\\campaign-evidence.json",
+      "evidence_sha256": "c55e859cf602d3592551d0bd571fb2458ecb137c4b1b39812a0d11958440b6ad",
+      "identity": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\seeded-native-entry-probe\\identity.json",
+      "identity_sha256": "22d714c4faf818492bd3b77d168dafafd292caf463a8d7eb533b8a9dc4e7b618",
+      "package": "qualified native frame job plus retained 1205-entry native catalog",
+      "reference_package": "qualified native frame job with original module catalog",
+      "contracts": [
+        {
+          "left": "warm-reference",
+          "right": "warm-candidate",
+          "equal": true,
+          "differences": []
+        },
+        {
+          "left": "pair1-reference",
+          "right": "pair1-candidate",
+          "equal": true,
+          "differences": []
+        }
+      ],
+      "paired_cpu_reduction_percent": [
+        43.81393992948958
+      ],
+      "median_cpu_reduction_percent": 43.81393992948958,
+      "samples": [
+        {
+          "label": "pair1-reference",
+          "runtime": {
+            "path": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\HLE-frame\\HotelMarioRecomp.exe",
+            "bytes": 29912817,
+            "sha256": "bd6cc115d6fd78cc66676c5ccc0c20acb3b6b997759385eb4ebdc60b6efa503a"
+          },
+          "cpu_ms_per_field": 3.8422309027777777,
+          "fields_per_s": 255.63869730823504,
+          "peak_sampled_rss_bytes": 207732736,
+          "host_average_cpu_busy_percent": 57.21973339144557
+        },
+        {
+          "label": "pair1-candidate",
+          "runtime": {
+            "path": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\seeded-build\\HotelMarioRecomp.exe",
+            "bytes": 34906721,
+            "sha256": "b41dde9d8b7bd0aaba333f3f4a53aeb6c244a3d00fe8f2443c28e9e874e267f7"
+          },
+          "cpu_ms_per_field": 2.1587981630824373,
+          "fields_per_s": 455.9214638504516,
+          "peak_sampled_rss_bytes": 211251200,
+          "host_average_cpu_busy_percent": 41.201461466713596
+        }
+      ],
+      "scope": "one built title, fixed early-gameplay interval; no broader title/platform/release claim"
+    },
+    {
+      "name": "coarse-native-pairs",
+      "evidence": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\coarse-native-pairs\\campaign-evidence.json",
+      "evidence_sha256": "53b7689c82b470a29d44fca60104a29a237e00ea3169e289e0881bb9f6e2c7cd",
+      "identity": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\coarse-native-pairs\\identity.json",
+      "identity_sha256": "ef66d3e53a2b5fcf330ec9d3a5cda11702462d09cef0eae736fb8653680118b0",
+      "package": "native frame plus observed catalog plus coarse PIC continuation jobs",
+      "reference_package": "native frame plus observed catalog with per-entry native dispatch",
+      "contracts": [
+        {
+          "left": "warm-reference",
+          "right": "warm-candidate",
+          "equal": true,
+          "differences": []
+        },
+        {
+          "left": "pair1-reference",
+          "right": "pair1-candidate",
+          "equal": true,
+          "differences": []
+        },
+        {
+          "left": "pair2-reference",
+          "right": "pair2-candidate",
+          "equal": true,
+          "differences": []
+        },
+        {
+          "left": "pair3-reference",
+          "right": "pair3-candidate",
+          "equal": true,
+          "differences": []
+        }
+      ],
+      "paired_cpu_reduction_percent": [
+        23.76738408579804,
+        40.27742428098753,
+        21.604795941895315
+      ],
+      "median_cpu_reduction_percent": 23.76738408579804,
+      "samples": [
+        {
+          "label": "pair1-reference",
+          "runtime": {
+            "path": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\seeded-build\\HotelMarioRecomp.exe",
+            "bytes": 34906721,
+            "sha256": "b41dde9d8b7bd0aaba333f3f4a53aeb6c244a3d00fe8f2443c28e9e874e267f7"
+          },
+          "cpu_ms_per_field": 2.0641121031746033,
+          "fields_per_s": 479.4398924434426,
+          "peak_sampled_rss_bytes": 211234816,
+          "host_average_cpu_busy_percent": 26.163829587134394
+        },
+        {
+          "label": "pair1-candidate",
+          "runtime": {
+            "path": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\coarse-build\\HotelMarioRecomp.exe",
+            "bytes": 33891700,
+            "sha256": "2d8a1f2ab4e1f50fd4133bcda0f11d97dd4abdf194605ea99b9c9a35d2db060d"
+          },
+          "cpu_ms_per_field": 1.5735266516516515,
+          "fields_per_s": 626.9031829871723,
+          "peak_sampled_rss_bytes": 211398656,
+          "host_average_cpu_busy_percent": 15.571460775757007
+        },
+        {
+          "label": "pair2-candidate",
+          "runtime": {
+            "path": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\coarse-build\\HotelMarioRecomp.exe",
+            "bytes": 33891700,
+            "sha256": "2d8a1f2ab4e1f50fd4133bcda0f11d97dd4abdf194605ea99b9c9a35d2db060d"
+          },
+          "cpu_ms_per_field": 1.5668402777777777,
+          "fields_per_s": 622.7296315560488,
+          "peak_sampled_rss_bytes": 211378176,
+          "host_average_cpu_busy_percent": 25.45552560679032
+        },
+        {
+          "label": "pair2-reference",
+          "runtime": {
+            "path": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\seeded-build\\HotelMarioRecomp.exe",
+            "bytes": 34906721,
+            "sha256": "b41dde9d8b7bd0aaba333f3f4a53aeb6c244a3d00fe8f2443c28e9e874e267f7"
+          },
+          "cpu_ms_per_field": 2.623530982905983,
+          "fields_per_s": 371.59372419482804,
+          "peak_sampled_rss_bytes": 211243008,
+          "host_average_cpu_busy_percent": 31.68878969395981
+        },
+        {
+          "label": "pair3-reference",
+          "runtime": {
+            "path": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\seeded-build\\HotelMarioRecomp.exe",
+            "bytes": 34906721,
+            "sha256": "b41dde9d8b7bd0aaba333f3f4a53aeb6c244a3d00fe8f2443c28e9e874e267f7"
+          },
+          "cpu_ms_per_field": 2.3529730902777777,
+          "fields_per_s": 416.50798548004263,
+          "peak_sampled_rss_bytes": 211238912,
+          "host_average_cpu_busy_percent": 24.449817630240435
+        },
+        {
+          "label": "pair3-candidate",
+          "runtime": {
+            "path": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\coarse-build\\HotelMarioRecomp.exe",
+            "bytes": 33891700,
+            "sha256": "2d8a1f2ab4e1f50fd4133bcda0f11d97dd4abdf194605ea99b9c9a35d2db060d"
+          },
+          "cpu_ms_per_field": 1.8446180555555556,
+          "fields_per_s": 534.5608434212136,
+          "peak_sampled_rss_bytes": 211382272,
+          "host_average_cpu_busy_percent": 27.611940298507463
+        }
+      ],
+      "scope": "one built title, fixed early-gameplay interval; no broader title/platform/release claim"
+    },
+    {
+      "name": "combined-native-pairs",
+      "evidence": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\combined-native-pairs\\campaign-evidence.json",
+      "evidence_sha256": "61277212fcd57bd063995e74dcbc2db966020546e083fe9172c9556e85592181",
+      "identity": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\combined-native-pairs\\identity.json",
+      "identity_sha256": "99feacc6e765e4c7d9e244d6a604720ed837977c692381ceaf80bfd8e88228b8",
+      "package": "native frame publication plus observed catalog plus coarse PIC continuation jobs",
+      "reference_package": "reference LLE scanout with original native module catalog",
+      "contracts": [
+        {
+          "left": "warm-reference",
+          "right": "warm-candidate",
+          "equal": true,
+          "differences": []
+        },
+        {
+          "left": "pair1-reference",
+          "right": "pair1-candidate",
+          "equal": true,
+          "differences": []
+        },
+        {
+          "left": "pair2-reference",
+          "right": "pair2-candidate",
+          "equal": true,
+          "differences": []
+        },
+        {
+          "left": "pair3-reference",
+          "right": "pair3-candidate",
+          "equal": true,
+          "differences": []
+        }
+      ],
+      "paired_cpu_reduction_percent": [
+        58.113732436456104,
+        57.28548527716062,
+        59.61402682984232
+      ],
+      "median_cpu_reduction_percent": 58.113732436456104,
+      "samples": [
+        {
+          "label": "pair1-reference",
+          "runtime": {
+            "path": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\LLE-frame\\HotelMarioRecomp.exe",
+            "bytes": 29908046,
+            "sha256": "5cff7101786df27d480042641860d0cbc6e15d94711903fc02a930ba904a20f1"
+          },
+          "cpu_ms_per_field": 5.343215811965811,
+          "fields_per_s": 183.28072497724298,
+          "peak_sampled_rss_bytes": 207679488,
+          "host_average_cpu_busy_percent": 61.05127848790505
+        },
+        {
+          "label": "pair1-candidate",
+          "runtime": {
+            "path": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\coarse-build\\HotelMarioRecomp.exe",
+            "bytes": 33891700,
+            "sha256": "2d8a1f2ab4e1f50fd4133bcda0f11d97dd4abdf194605ea99b9c9a35d2db060d"
+          },
+          "cpu_ms_per_field": 2.2380736714975846,
+          "fields_per_s": 438.22740191898237,
+          "peak_sampled_rss_bytes": 211378176,
+          "host_average_cpu_busy_percent": 71.377567394095
+        },
+        {
+          "label": "pair2-candidate",
+          "runtime": {
+            "path": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\coarse-build\\HotelMarioRecomp.exe",
+            "bytes": 33891700,
+            "sha256": "2d8a1f2ab4e1f50fd4133bcda0f11d97dd4abdf194605ea99b9c9a35d2db060d"
+          },
+          "cpu_ms_per_field": 2.126456093189964,
+          "fields_per_s": 464.1432688824619,
+          "peak_sampled_rss_bytes": 211378176,
+          "host_average_cpu_busy_percent": 63.61695137985252
+        },
+        {
+          "label": "pair2-reference",
+          "runtime": {
+            "path": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\LLE-frame\\HotelMarioRecomp.exe",
+            "bytes": 29908046,
+            "sha256": "5cff7101786df27d480042641860d0cbc6e15d94711903fc02a930ba904a20f1"
+          },
+          "cpu_ms_per_field": 4.978298611111111,
+          "fields_per_s": 198.3580362557057,
+          "peak_sampled_rss_bytes": 207675392,
+          "host_average_cpu_busy_percent": 44.7045521945433
+        },
+        {
+          "label": "pair3-reference",
+          "runtime": {
+            "path": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\LLE-frame\\HotelMarioRecomp.exe",
+            "bytes": 29908046,
+            "sha256": "5cff7101786df27d480042641860d0cbc6e15d94711903fc02a930ba904a20f1"
+          },
+          "cpu_ms_per_field": 5.029592803030304,
+          "fields_per_s": 194.78890490232504,
+          "peak_sampled_rss_bytes": 207675392,
+          "host_average_cpu_busy_percent": 52.99311254391116
+        },
+        {
+          "label": "pair3-candidate",
+          "runtime": {
+            "path": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\coarse-build\\HotelMarioRecomp.exe",
+            "bytes": 33891700,
+            "sha256": "2d8a1f2ab4e1f50fd4133bcda0f11d97dd4abdf194605ea99b9c9a35d2db060d"
+          },
+          "cpu_ms_per_field": 2.03125,
+          "fields_per_s": 473.0617608418671,
+          "peak_sampled_rss_bytes": 211398656,
+          "host_average_cpu_busy_percent": 56.09971711483206
+        }
+      ],
+      "scope": "one built title, fixed early-gameplay interval; no broader title/platform/release claim"
+    },
+    {
+      "name": "line-reuse-key-pairs",
+      "evidence": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\line-reuse-key-pairs\\campaign-evidence.json",
+      "evidence_sha256": "d1028fde1179d49f89d897116e926adb37720ef5ac7ed7dba1546527163a500f",
+      "identity": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\line-reuse-key-pairs\\identity.json",
+      "identity_sha256": "c39ab17b5bea819376cdd341e886c73aaaeed269f284587dcc2289c38307330d",
+      "package": "native frame plus coarse PIC jobs plus exact completed-line reuse with effective cursor key",
+      "reference_package": "qualified native frame plus coarse PIC jobs",
+      "contracts": [
+        {
+          "left": "warm-reference",
+          "right": "warm-candidate",
+          "equal": true,
+          "differences": []
+        },
+        {
+          "left": "pair1-reference",
+          "right": "pair1-candidate",
+          "equal": true,
+          "differences": []
+        },
+        {
+          "left": "pair2-reference",
+          "right": "pair2-candidate",
+          "equal": true,
+          "differences": []
+        },
+        {
+          "left": "pair3-reference",
+          "right": "pair3-candidate",
+          "equal": true,
+          "differences": []
+        }
+      ],
+      "paired_cpu_reduction_percent": [
+        36.80053831987534,
+        40.20590253946465,
+        40.313083783787384
+      ],
+      "median_cpu_reduction_percent": 40.20590253946465,
+      "samples": [
+        {
+          "label": "pair1-reference",
+          "runtime": {
+            "path": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\coarse-reference-frozen\\HotelMarioRecomp.exe",
+            "bytes": 33891700,
+            "sha256": "2d8a1f2ab4e1f50fd4133bcda0f11d97dd4abdf194605ea99b9c9a35d2db060d"
+          },
+          "cpu_ms_per_field": 2.0425347222222223,
+          "fields_per_s": 478.3926008619829,
+          "peak_sampled_rss_bytes": 211402752,
+          "host_average_cpu_busy_percent": 52.201754385839955
+        },
+        {
+          "label": "pair1-candidate",
+          "runtime": {
+            "path": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\coarse-build\\HotelMarioRecomp.exe",
+            "bytes": 33892868,
+            "sha256": "282d0f70566d6adc40488c0e6aac0ff53ef247a8d1106a90dcce5769e91f9423"
+          },
+          "cpu_ms_per_field": 1.290870949074074,
+          "fields_per_s": 764.5002875743204,
+          "peak_sampled_rss_bytes": 217235456,
+          "host_average_cpu_busy_percent": 61.467450765864335
+        },
+        {
+          "label": "pair2-candidate",
+          "runtime": {
+            "path": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\coarse-build\\HotelMarioRecomp.exe",
+            "bytes": 33892868,
+            "sha256": "282d0f70566d6adc40488c0e6aac0ff53ef247a8d1106a90dcce5769e91f9423"
+          },
+          "cpu_ms_per_field": 1.238239247311828,
+          "fields_per_s": 793.6507936482784,
+          "peak_sampled_rss_bytes": 217255936,
+          "host_average_cpu_busy_percent": 52.53025302530253
+        },
+        {
+          "label": "pair2-reference",
+          "runtime": {
+            "path": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\coarse-reference-frozen\\HotelMarioRecomp.exe",
+            "bytes": 33891700,
+            "sha256": "2d8a1f2ab4e1f50fd4133bcda0f11d97dd4abdf194605ea99b9c9a35d2db060d"
+          },
+          "cpu_ms_per_field": 2.0708385942760943,
+          "fields_per_s": 465.3622421966516,
+          "peak_sampled_rss_bytes": 211423232,
+          "host_average_cpu_busy_percent": 64.12621359203514
+        },
+        {
+          "label": "pair3-reference",
+          "runtime": {
+            "path": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\coarse-reference-frozen\\HotelMarioRecomp.exe",
+            "bytes": 33891700,
+            "sha256": "2d8a1f2ab4e1f50fd4133bcda0f11d97dd4abdf194605ea99b9c9a35d2db060d"
+          },
+          "cpu_ms_per_field": 2.0705925179211473,
+          "fields_per_s": 473.0617608411668,
+          "peak_sampled_rss_bytes": 211410944,
+          "host_average_cpu_busy_percent": 52.17050209217446
+        },
+        {
+          "label": "pair3-candidate",
+          "runtime": {
+            "path": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\coarse-build\\HotelMarioRecomp.exe",
+            "bytes": 33892868,
+            "sha256": "282d0f70566d6adc40488c0e6aac0ff53ef247a8d1106a90dcce5769e91f9423"
+          },
+          "cpu_ms_per_field": 1.2358728213507624,
+          "fields_per_s": 795.1872977933631,
+          "peak_sampled_rss_bytes": 217247744,
+          "host_average_cpu_busy_percent": 62.3995755646506
+        }
+      ],
+      "scope": "one built title, fixed early-gameplay interval; no broader title/platform/release claim"
+    },
+    {
+      "name": "final-combined-sdl",
+      "evidence": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\final-combined-sdl\\campaign-evidence.json",
+      "evidence_sha256": "529bd26ad6668642d6444023b78133de23d64d2e6f240dd0b8aa65f1d4930d4f",
+      "identity": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\final-combined-sdl\\identity.json",
+      "identity_sha256": "5688cf97addf815729302983832ebdf2faec640a3616efeb6d22059d1f1469a3",
+      "package": "supported consumer: exact native frame and completed-line jobs plus observed coarse PIC catalog",
+      "reference_package": "original LLE scanout and original native catalog",
+      "contracts": [
+        {
+          "left": "warm-reference",
+          "right": "warm-candidate",
+          "equal": true,
+          "differences": []
+        },
+        {
+          "left": "pair1-reference",
+          "right": "pair1-candidate",
+          "equal": true,
+          "differences": []
+        }
+      ],
+      "paired_cpu_reduction_percent": [
+        75.46831676472577
+      ],
+      "median_cpu_reduction_percent": 75.46831676472577,
+      "samples": [
+        {
+          "label": "pair1-reference",
+          "runtime": {
+            "path": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\original-reference-frozen\\HotelMarioRecomp.exe",
+            "bytes": 29908046,
+            "sha256": "5cff7101786df27d480042641860d0cbc6e15d94711903fc02a930ba904a20f1"
+          },
+          "cpu_ms_per_field": 5.704861111111111,
+          "fields_per_s": 167.15264751205098,
+          "peak_sampled_rss_bytes": 207187968,
+          "host_average_cpu_busy_percent": 76.84094959266803
+        },
+        {
+          "label": "pair1-candidate",
+          "runtime": {
+            "path": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\coarse-build\\HotelMarioRecomp.exe",
+            "bytes": 33892868,
+            "sha256": "335b9cff0ed8ba077bb38da1e66e6fb97ba157049ec6096b86629f584a151278"
+          },
+          "cpu_ms_per_field": 1.3994984567901234,
+          "fields_per_s": 692.9888351839637,
+          "peak_sampled_rss_bytes": 216723456,
+          "host_average_cpu_busy_percent": 80.86411943319838
+        }
+      ],
+      "scope": "one built title, fixed early-gameplay interval; no broader title/platform/release claim"
+    }
+  ],
+  "unadopted_attempts": [
+    {
+      "name": "scanout-first-pair",
+      "reason": "Standalone scanout timing mixed/inconclusive; later whole-job package separately qualified"
+    },
+    {
+      "name": "seeded-native-probe",
+      "reason": "Frame-end CPU observation phase mismatch; canonical instruction-entry protocol used subsequently; raw data retained"
+    },
+    {
+      "name": "line-reuse-pairs",
+      "reason": "Nonsemantic cursor restart-field key prevented almost all reuse; no benefit in complete retained pair; partial later runs excluded",
+      "evidence": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\line-reuse-pairs\\stopped.json",
+      "source_and_binary": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\line-key-attempt"
+    }
+  ],
+  "candidate_dispositions": [
+    {
+      "candidate": 1,
+      "name": "Existing scanout candidate",
+      "status": "validated",
+      "job": "native frame/line production",
+      "evidence": [
+        "frame-package-pairs",
+        "line-reuse-key-pairs"
+      ],
+      "prerequisite": null
+    },
+    {
+      "candidate": 2,
+      "name": "Complete frame production/publication",
+      "status": "validated",
+      "job": "exact frame publication and completed-line reuse",
+      "evidence": [
+        "frame-package-pairs",
+        "line-reuse-key-pairs"
+      ],
+      "prerequisite": null
+    },
+    {
+      "candidate": 3,
+      "name": "Graphics service to completed drawing",
+      "status": "deferred",
+      "validated_portion": "renderer preparation consolidated into candidates1/2; native callback continuations into7",
+      "evidence": [
+        "profile-residual.json",
+        "profile-final.json",
+        "combined-native-pairs",
+        "line-reuse-key-pairs"
+      ],
+      "reason": "The old interpreter hotspot was a dynamic callback queue processor at module offset0x17018, not an established single drawing/copy contract. Final sampling has16/344 samples in named game bodies. This does not attribute all indirect cost or qualify a graphics-service replacement.",
+      "prerequisite": "Capture one demonstrably expensive drawing/callback job at its caller boundary, including queue ownership/head/tail, callback effects, interrupts and output memory; construct a boundary differential fixture and a workload that exercises it."
+    },
+    {
+      "candidate": 4,
+      "name": "Memory operation to fully published result",
+      "status": "deferred",
+      "evidence": [
+        "residual-selection.json",
+        "profile-final.json",
+        "combined-native-pairs/pair1-candidate/evidence.json"
+      ],
+      "reason": "Only5 native bindings and1 invalidation through13000 fields; none in the timed gameplay interval. Write-side native bookkeeping has13/491 initial and10/344 final samples, not a repeated load/hash churn bottleneck.",
+      "prerequisite": "A measured bulk copy/fill/loading workload plus an identified complete operation contract covering overlap, faults/partial results, interrupt-visible memory and native-code invalidation/publication; qualify it at operation boundaries."
+    },
+    {
+      "candidate": 5,
+      "name": "File/module load to executable module ready",
+      "status": "deferred",
+      "evidence": [
+        "combined-native-pairs/pair1-candidate/evidence.json",
+        "supported-build.log"
+      ],
+      "reason": "Five bindings occur by field7072; the timed interval9400-13000 contains no new native binding. Startup correctness is retained, but steady-gameplay gains cannot establish a loader optimization.",
+      "prerequisite": "Matched loading/transition timing with actual F$Load/F$Link/F$Unlink outcomes, relocation/error/unload cases and authoritative kernel/module state. Preserve each observable transport/interrupt boundary or qualify a broader boundary explicitly."
+    },
+    {
+      "candidate": 6,
+      "name": "Frequent OS-9 service jobs",
+      "status": "deferred",
+      "evidence": [
+        "profile-final.json",
+        "profile-residual.json"
+      ],
+      "reason": "Final selection sampling has7/344 samples in named ROM-native bodies and identifies no particular expensive service. Leaf sampling cannot establish per-service cost or its full ABI. OS HLE remains allowed.",
+      "prerequisite": "Service-boundary cost attribution and a concrete hot service corpus including success/error, interrupted/reentrant execution, caller registers, kernel structures and native-save effects; validate a native job at those boundaries."
+    },
+    {
+      "candidate": 7,
+      "name": "Native execution spans",
+      "status": "validated",
+      "job": "Observed static native catalog plus legal PIC continuation coalescing",
+      "evidence": [
+        "seeded-native-entry-probe",
+        "coarse-native-pairs",
+        "combined-native-pairs"
+      ],
+      "prerequisite": null
+    },
+    {
+      "candidate": 8,
+      "name": "Complete CD/XA streaming jobs",
+      "status": "deferred",
+      "evidence": [
+        "combined-native-pairs/pair1-candidate/evidence.json",
+        "profile-residual.json",
+        "profile-final.json"
+      ],
+      "reason": "Existing native sector/decode jobs deliver2259 audio sectors and6181056 sample frames with exact PCM identity. Initial decode sampling is2/491; remaining CDIC cost includes guest-visible buffer pointer/IRQ advancement. Dummy/headless tests do not qualify listening or sustained normal-speed underrun behavior.",
+      "prerequisite": "A seek/channel-switch/refill workload with buffer ownership, DMA/IRQ/locator timelines and normal-speed PCM continuity. Integrate a proven event-span contract from9 before consolidating guest driver and device advancement."
+    },
+    {
+      "candidate": 9,
+      "name": "Whole-board event advancement",
+      "status": "deferred",
+      "evidence": [
+        "profile-residual.json",
+        "profile-final.json",
+        "runner/src/mcd212.c",
+        "runner/src/slave.c",
+        "runner/src/cdic.c",
+        "runner/src/periph.c",
+        "runner/src/cdi_nvram.c"
+      ],
+      "reason": "Board updates account for46/491 and40/344 samples. A bulk-cycle sum changes the reference integer-nanosecond clock:24 four-cycle quanta advance6336ns in slave/CDIC, but one96-cycle quantum advances6355ns. Slave callbacks can activate CDIC before its update in the same quantum; timer IRQ and RTC/raster phases are observable too.",
+      "prerequisite": "Earliest-event/frontier APIs across timer, IKAT, CDIC and raster; retain sum-of-per-quantum truncated time and RTC/raster phase, flush prior time before MMIO/RAM-visible side effects, preserve activation/order and interrupt entry. Differential deadline/seek/audio/IRQ fixtures plus a built-game span A/B are required before adoption."
+    },
+    {
+      "candidate": 10,
+      "name": "Frame to host presentation",
+      "status": "consolidated",
+      "job": "Exact content publication skips unchanged frontend copy/upload while retaining field presentation/redraw",
+      "evidence": [
+        "frame-package-sdl",
+        "final-combined-sdl"
+      ],
+      "deferred_extension": "Hardware-driver presentation cost",
+      "prerequisite": "A matched actual hardware-window/backend profile with resize/expose and pixel readback, retaining normal presentation settings and owner focus. SDL dummy/software coverage establishes the functional handoff only."
+    }
+  ],
+  "boundary_policy": "Current exact instruction-history comparison applies to CPU-preserving frame and AOT changes. A future native OS/memory/drawing replacement may change interior instruction execution; qualify caller-visible input/output, authoritative guest state, time/events/interrupts and errors at the complete job boundary instead of imposing internal LLE algorithms.",
+  "storage_ledger": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\resource-ledger.json",
+  "supported_rebuild": {
+    "earlier_headless_binary_sha256": "282d0f70566d6adc40488c0e6aac0ff53ef247a8d1106a90dcce5769e91f9423",
+    "final_supported_binary_sha256": "335b9cff0ed8ba077bb38da1e66e6fb97ba157049ec6096b86629f584a151278",
+    "all_linked_input_hashes_equal": true,
+    "compiler_and_options_equal": true,
+    "note": "Supported regeneration/rebuild overwrote the earlier completed-line binary. Its exact identity and link-time input receipt remain in line-reuse-key-pairs/identity.json; the final supported executable is retained and directly qualified in final-combined-sdl. All generated/tracked linked source bytes, compiler and flags match."
+  },
+  "cleanup_summary": {
+    "bytes_removed": 217439688,
+    "retained_bytes_approximately": 684361170,
+    "report": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\cleanup-report.json",
+    "ledger": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\resource-ledger.json"
+  }
+}
