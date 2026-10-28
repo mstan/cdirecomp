@@ -3,7 +3,7 @@
   "owner_issue": "beads-oatv",
   "campaign_issue": "beads-2wy8.1",
   "consumer_issue": "beads-7t8h",
-  "status": "qualified implementations and evidence-backed dispositions",
+  "status": "in_progress; premature completion withdrawn",
   "engine_head": "85c869ee808b438905f2c1bc29a46d30f27647f8",
   "core_head": "3955bf3311f55e031836f70b5c1839e95b81f9cf",
   "game_head": "16353fc849ef8056af891e2c3b7d3e29ae3a41da",
@@ -764,7 +764,7 @@
     {
       "candidate": 3,
       "name": "Graphics service to completed drawing",
-      "status": "deferred",
+      "status": "open_queued",
       "validated_portion": "renderer preparation consolidated into candidates1/2; native callback continuations into7",
       "evidence": [
         "profile-residual.json",
@@ -773,41 +773,49 @@
         "line-reuse-key-pairs"
       ],
       "reason": "The old interpreter hotspot was a dynamic callback queue processor at module offset0x17018, not an established single drawing/copy contract. Final sampling has16/344 samples in named game bodies. This does not attribute all indirect cost or qualify a graphics-service replacement.",
-      "prerequisite": "Capture one demonstrably expensive drawing/callback job at its caller boundary, including queue ownership/head/tail, callback effects, interrupts and output memory; construct a boundary differential fixture and a workload that exercises it."
+      "prerequisite": "Capture one demonstrably expensive drawing/callback job at its caller boundary, including queue ownership/head/tail, callback effects, interrupts and output memory; construct a boundary differential fixture and a workload that exercises it.",
+      "prior_deferral_rejected": true,
+      "work_remaining": "Capture one demonstrably expensive drawing/callback job at its caller boundary, including queue ownership/head/tail, callback effects, interrupts and output memory; construct a boundary differential fixture and a workload that exercises it."
     },
     {
       "candidate": 4,
       "name": "Memory operation to fully published result",
-      "status": "deferred",
+      "status": "open_queued",
       "evidence": [
         "residual-selection.json",
         "profile-final.json",
         "combined-native-pairs/pair1-candidate/evidence.json"
       ],
       "reason": "Only5 native bindings and1 invalidation through13000 fields; none in the timed gameplay interval. Write-side native bookkeeping has13/491 initial and10/344 final samples, not a repeated load/hash churn bottleneck.",
-      "prerequisite": "A measured bulk copy/fill/loading workload plus an identified complete operation contract covering overlap, faults/partial results, interrupt-visible memory and native-code invalidation/publication; qualify it at operation boundaries."
+      "prerequisite": "A measured bulk copy/fill/loading workload plus an identified complete operation contract covering overlap, faults/partial results, interrupt-visible memory and native-code invalidation/publication; qualify it at operation boundaries.",
+      "prior_deferral_rejected": true,
+      "work_remaining": "A measured bulk copy/fill/loading workload plus an identified complete operation contract covering overlap, faults/partial results, interrupt-visible memory and native-code invalidation/publication; qualify it at operation boundaries."
     },
     {
       "candidate": 5,
       "name": "File/module load to executable module ready",
-      "status": "deferred",
+      "status": "in_progress",
       "evidence": [
         "combined-native-pairs/pair1-candidate/evidence.json",
         "supported-build.log"
       ],
       "reason": "Five bindings occur by field7072; the timed interval9400-13000 contains no new native binding. Startup correctness is retained, but steady-gameplay gains cannot establish a loader optimization.",
-      "prerequisite": "Matched loading/transition timing with actual F$Load/F$Link/F$Unlink outcomes, relocation/error/unload cases and authoritative kernel/module state. Preserve each observable transport/interrupt boundary or qualify a broader boundary explicitly."
+      "prerequisite": "Matched loading/transition timing with actual F$Load/F$Link/F$Unlink outcomes, relocation/error/unload cases and authoritative kernel/module state. Preserve each observable transport/interrupt boundary or qualify a broader boundary explicitly.",
+      "prior_deferral_rejected": true,
+      "work_remaining": "Matched loading/transition timing with actual F$Load/F$Link/F$Unlink outcomes, relocation/error/unload cases and authoritative kernel/module state. Preserve each observable transport/interrupt boundary or qualify a broader boundary explicitly."
     },
     {
       "candidate": 6,
       "name": "Frequent OS-9 service jobs",
-      "status": "deferred",
+      "status": "open_queued",
       "evidence": [
         "profile-final.json",
         "profile-residual.json"
       ],
       "reason": "Final selection sampling has7/344 samples in named ROM-native bodies and identifies no particular expensive service. Leaf sampling cannot establish per-service cost or its full ABI. OS HLE remains allowed.",
-      "prerequisite": "Service-boundary cost attribution and a concrete hot service corpus including success/error, interrupted/reentrant execution, caller registers, kernel structures and native-save effects; validate a native job at those boundaries."
+      "prerequisite": "Service-boundary cost attribution and a concrete hot service corpus including success/error, interrupted/reentrant execution, caller registers, kernel structures and native-save effects; validate a native job at those boundaries.",
+      "prior_deferral_rejected": true,
+      "work_remaining": "Service-boundary cost attribution and a concrete hot service corpus including success/error, interrupted/reentrant execution, caller registers, kernel structures and native-save effects; validate a native job at those boundaries."
     },
     {
       "candidate": 7,
@@ -824,19 +832,21 @@
     {
       "candidate": 8,
       "name": "Complete CD/XA streaming jobs",
-      "status": "deferred",
+      "status": "open_queued",
       "evidence": [
         "combined-native-pairs/pair1-candidate/evidence.json",
         "profile-residual.json",
         "profile-final.json"
       ],
       "reason": "Existing native sector/decode jobs deliver2259 audio sectors and6181056 sample frames with exact PCM identity. Initial decode sampling is2/491; remaining CDIC cost includes guest-visible buffer pointer/IRQ advancement. Dummy/headless tests do not qualify listening or sustained normal-speed underrun behavior.",
-      "prerequisite": "A seek/channel-switch/refill workload with buffer ownership, DMA/IRQ/locator timelines and normal-speed PCM continuity. Integrate a proven event-span contract from9 before consolidating guest driver and device advancement."
+      "prerequisite": "A seek/channel-switch/refill workload with buffer ownership, DMA/IRQ/locator timelines and normal-speed PCM continuity. Integrate a proven event-span contract from9 before consolidating guest driver and device advancement.",
+      "prior_deferral_rejected": true,
+      "work_remaining": "A seek/channel-switch/refill workload with buffer ownership, DMA/IRQ/locator timelines and normal-speed PCM continuity. Integrate a proven event-span contract from9 before consolidating guest driver and device advancement."
     },
     {
       "candidate": 9,
       "name": "Whole-board event advancement",
-      "status": "deferred",
+      "status": "open_queued",
       "evidence": [
         "profile-residual.json",
         "profile-final.json",
@@ -847,7 +857,9 @@
         "runner/src/cdi_nvram.c"
       ],
       "reason": "Board updates account for46/491 and40/344 samples. A bulk-cycle sum changes the reference integer-nanosecond clock:24 four-cycle quanta advance6336ns in slave/CDIC, but one96-cycle quantum advances6355ns. Slave callbacks can activate CDIC before its update in the same quantum; timer IRQ and RTC/raster phases are observable too.",
-      "prerequisite": "Earliest-event/frontier APIs across timer, IKAT, CDIC and raster; retain sum-of-per-quantum truncated time and RTC/raster phase, flush prior time before MMIO/RAM-visible side effects, preserve activation/order and interrupt entry. Differential deadline/seek/audio/IRQ fixtures plus a built-game span A/B are required before adoption."
+      "prerequisite": "Earliest-event/frontier APIs across timer, IKAT, CDIC and raster; retain sum-of-per-quantum truncated time and RTC/raster phase, flush prior time before MMIO/RAM-visible side effects, preserve activation/order and interrupt entry. Differential deadline/seek/audio/IRQ fixtures plus a built-game span A/B are required before adoption.",
+      "prior_deferral_rejected": true,
+      "work_remaining": "Earliest-event/frontier APIs across timer, IKAT, CDIC and raster; retain sum-of-per-quantum truncated time and RTC/raster phase, flush prior time before MMIO/RAM-visible side effects, preserve activation/order and interrupt entry. Differential deadline/seek/audio/IRQ fixtures plus a built-game span A/B are required before adoption."
     },
     {
       "candidate": 10,
@@ -859,7 +871,8 @@
         "final-combined-sdl"
       ],
       "deferred_extension": "Hardware-driver presentation cost",
-      "prerequisite": "A matched actual hardware-window/backend profile with resize/expose and pixel readback, retaining normal presentation settings and owner focus. SDL dummy/software coverage establishes the functional handoff only."
+      "prerequisite": "A matched actual hardware-window/backend profile with resize/expose and pixel readback, retaining normal presentation settings and owner focus. SDL dummy/software coverage establishes the functional handoff only.",
+      "hardware_extension_status": "open_queued"
     }
   ],
   "boundary_policy": "Current exact instruction-history comparison applies to CPU-preserving frame and AOT changes. A future native OS/memory/drawing replacement may change interior instruction execution; qualify caller-visible input/output, authoritative guest state, time/events/interrupts and errors at the complete job boundary instead of imposing internal LLE algorithms.",
@@ -876,5 +889,6 @@
     "retained_bytes_approximately": 684361170,
     "report": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\cleanup-report.json",
     "ledger": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\resource-ledger.json"
-  }
+  },
+  "current_serial_candidate": 5
 }

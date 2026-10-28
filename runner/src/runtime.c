@@ -9,6 +9,7 @@
 #include "debug_server.h"
 #include "m68k_interp.h"
 #include "cdi_native.h"
+#include "cdi_loader_jobs.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -275,6 +276,7 @@ void recomp_push_return(uint32_t ret_addr) {
 /* ---- Runtime init ---- */
 void runtime_init(void) {
     memset(&g_cpu, 0, sizeof g_cpu);
+    cdi_loader_reset();
     cdi_native_reset();
     /* SCC68070 reset entry costs 43 processor clocks. Native seeds the
      * post-reset registers directly, so carry that exception

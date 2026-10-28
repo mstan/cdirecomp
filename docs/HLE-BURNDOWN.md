@@ -36,14 +36,14 @@ subsystem boundaries or a requirement to adopt every proposed optimization.
 | --- | --- | --- | --- |
 | 1 | **Qualify the scanout candidate already written** | Repeated decoding, transparency, contribution and composition work across pixels | **Qualified as part of the combined native frame job.** Three alternating Hotel Mario pairs save 23.0-26.0% CPU/field with complete contract equality. Scanout-only performance remains inconclusive. |
 | 2 | **Complete frame production and publication** | Repeated framebuffer hashing, copying, diagnostic reconstruction and publication work | **Implemented and qualified with candidate 1.** Exact content identity, retained storage and frontend handoff remove duplicate work without changing field cadence. |
-| 3 | **Graphics service to completed drawing job** | Guest drawing preparation, intermediate memory traffic, control-list construction and repeated renderer preparation | Renderer preparation consolidated into 1/2 and native continuations into 7; broader guest job **deferred** pending a measured drawing/callback boundary and ownership contract. See final dispositions. |
-| 4 | **Memory operation to fully published result** | Instruction-by-instruction copying/filling plus repeated module invalidation, tag maintenance and dirty tracking | **Deferred.** No gameplay module churn; write bookkeeping is a small sampled cost. Requires a demonstrated bulk-operation workload and complete overlap/fault/interrupt/publication contract. |
-| 5 | **File/module load to executable module ready** | Repeated sector handling, copying, validation, relocation, linking, hashing and native binding | **Deferred.** No bindings occur in the measured gameplay interval. Requires a loading/transition benchmark and loader success/error/unload contract. |
-| 6 | **Frequently executed OS-9 service jobs** | Recompiled kernel algorithms and internal dispatch that a complete native operation could replace | **Deferred.** Current samples identify no expensive particular service. Requires service-boundary attribution and a success/error/interruption corpus; OS HLE remains allowed. |
+| 3 | **Graphics service to completed drawing job** | Guest drawing preparation, intermediate memory traffic, control-list construction and repeated renderer preparation | **Open, queued.** Renderer preparation consolidated into 1/2 and native continuations into 7; broader guest-job investigation remains work to perform. |
+| 4 | **Memory operation to fully published result** | Instruction-by-instruction copying/filling plus repeated module invalidation, tag maintenance and dirty tracking | **Open, queued.** Previous gameplay-only attribution did not qualify complete bulk operations. |
+| 5 | **File/module load to executable module ready** | Repeated sector handling, copying, validation, relocation, linking, hashing and native binding | **In progress, current serial candidate.** Measure actual loading, implement the selected complete native job and qualify it before owner check-in. |
+| 6 | **Frequently executed OS-9 service jobs** | Recompiled kernel algorithms and internal dispatch that a complete native operation could replace | **Open, queued.** Service attribution and boundary contracts are remaining implementation work. |
 | 7 | **Native execution spans** | Repeated dispatch, interpreter handoffs, instruction bookkeeping and checks between operations with no observable intervening event | **Implemented and qualified.** Reused the existing observed native catalog, then coalesced legal PIC continuations into shared native bodies. SDK `3955bf3`; incremental 3-pair median CPU reduction 23.77% versus the seeded catalog, with exact canonical guest contracts. |
-| 8 | **Complete CD/XA streaming jobs** | Repeated work across sector selection, decoding, buffer ownership, DMA/refill, guest drivers and audio handoff | **Deferred.** Decode is already native and scarcely sampled; remaining stream/device consolidation depends on the event contract in 9 and seek/channel/refill/PCM-continuity qualification. |
-| 9 | **Whole-board event advancement** | Calling timer, input transport, CD/audio, RTC, raster and pacing machinery after every instruction | **Deferred.** Final sampling finds 40/344 samples. Bulk cycle sums demonstrably change integer device time and activation ordering. Requires explicit event frontiers and a qualified span contract. |
-| 10 | **Frame to host presentation** | Redundant frame copies, texture uploads, conversions and presentation preparation | **Consolidated into candidate 2**, qualified through SDL dummy/software. Final supported package saves 75.47% CPU/field in the direct retained original-reference comparison. Hardware-driver extension is deferred pending an actual-window/backend profile. |
+| 8 | **Complete CD/XA streaming jobs** | Repeated work across sector selection, decoding, buffer ownership, DMA/refill, guest drivers and audio handoff | **Open, queued.** Complete streaming integration and actual seek/channel/refill qualification remain work to perform. |
+| 9 | **Whole-board event advancement** | Calling timer, input transport, CD/audio, RTC, raster and pacing machinery after every instruction | **Open, queued.** The naïve bulk-sum counterexample is a design constraint, not a rejection of a correct native span. |
+| 10 | **Frame to host presentation** | Redundant frame copies, texture uploads, conversions and presentation preparation | Copy/upload consolidated into 2 and qualified through SDL dummy/software. **Hardware-driver qualification remains open, queued.** |
 
 ## Current checkpoint
 
@@ -52,9 +52,11 @@ subsystem boundaries or a requirement to adopt every proposed optimization.
   catalog), `85c869e` (completed-line jobs). Shared core: `3955bf3`.
 - Supported consumer integration: `16353fc` on
   `HotelMarioRecomp/perf/native-jobs-20261028`, owning issue `beads-7t8h`.
-- Every listed candidate has a validated implementation/consolidation or an
-  evidence-backed deferral with a concrete prerequisite below. This closes
-  this burndown's dispositions, not the separate full-game certification.
+- **Reopened at the owner's direction.** The prior closure was premature:
+  candidates 3/4/5/6/8/9 and hardware presentation still require actual work.
+  Missing workload attribution, contracts and differential fixtures are work
+  within this goal. Work serially, checking in with the owner after each.
+  Current candidate: **5, file/module load to executable module ready**.
 - Scanout selection is `-DCDI_VIDEO_BACKEND=LLE` or
   `-DCDI_VIDEO_BACKEND=HLE`. The repository default remains LLE.
 - HLE computes joint source/matte color spans, consolidating contribution,
@@ -397,7 +399,7 @@ frames, sources/diffs, binaries, component logs and the resource ledger.
 Original link-time sidecars are retained when source snapshots are relocated;
 each relocated source must match its original link-time hash.
 
-### Final evidence-backed deferrals
+### Prior deferral notes — reopened, not completion evidence
 
 The post-line-job profile (`profile-final.json`) contains 344 gameplay-only
 main-thread samples. It finds 60 in instruction-entry tracing, 47 in line-job
@@ -458,3 +460,31 @@ complete job boundary. They may change interior instruction execution. The
 exact instruction-history comparison used in this pass is appropriate to its
 CPU-preserving frame jobs and faithful AOT changes; it does not constrain
 future HLE to retain the reference algorithm.
+
+### Reopened serial work: candidate 5
+
+Owner rejected the premature deferral closure and requested actual work,
+serially with a check-in after each candidate. Candidate 5 is active; the
+other unfinished investigations remain queued. Owning shared-core dispatch
+hook issue: `beads-i8bk` (core `cd1e5e2`).
+
+Actual loading attribution and a held live kernel call identify verification
+of the 112,984-byte main module. Its SR is `$2000`; it admits interrupts and
+performs real process scheduling checks every 256 words. The prototype uses
+native polynomial folding over a ready verification span, preserves the
+original device-time quanta, and materializes original CPU state at interrupt
+or debugger frontiers. Scheduling, file I/O, module registration/linking and
+errors remain authoritative kernel operations. Unsupported firmware, memory
+shapes and instruction-observation modes retain faithful execution.
+
+The first prototype exposed a sign-extended MOVEQ constant error and is not
+adopted. After correction, 100,000 independent polynomial/register/flag checks
+pass on Windows and Linux. A production-object fixture compares the native
+job with the actual recompiled firmware in 74 cases, covering exact timed
+interrupt frontiers, unsupported firmware and a real bus error. Initial live
+load-to-native-entry comparison passes complete CPU/RAM/device/audio/frame
+contracts and suggests a roughly 51% loading CPU reduction in one retained
+pair. Balanced loading/gameplay measurements and real CRC rejection are
+still pending; no completion or final gain claim is made from this probe.
+
+Evidence: `G:/Temp/Codex/cdirecomp/load-job-20261028`.

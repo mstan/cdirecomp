@@ -21,6 +21,17 @@ else()
     message(FATAL_ERROR "CDI_VIDEO_BACKEND must be LLE or HLE")
 endif()
 
+# Complete native loader work has a separate build-time reference selection.
+set(CDI_LOADER_BACKEND "LLE" CACHE STRING "Loader job implementation: LLE or HLE")
+set_property(CACHE CDI_LOADER_BACKEND PROPERTY STRINGS LLE HLE)
+if(CDI_LOADER_BACKEND STREQUAL "HLE")
+    set(CDI_LOADER_HLE 1)
+elseif(CDI_LOADER_BACKEND STREQUAL "LLE")
+    set(CDI_LOADER_HLE 0)
+else()
+    message(FATAL_ERROR "CDI_LOADER_BACKEND must be LLE or HLE")
+endif()
+
 # Generated C is dropped in by the recompiler and compiled in here. It
 # #includes cdi_runtime.h + game_extras.h from runner/include.
 #   - bios/generated/*.c     : the recompiled CD-RTOS system ROM (Phase 1, boots).
@@ -55,6 +66,7 @@ add_executable(CdiRuntime
     src/main.c
     src/cdi_bus.c
     src/cdi_native.c
+    src/cdi_loader_jobs.c
     ../common/cdi_sha256.c
     src/runtime.c
     src/mcd212.c
@@ -105,6 +117,10 @@ target_compile_definitions(CdiRuntime PRIVATE $<$<BOOL:${CDI_COSIM_BUILD}>:CDI_C
 set_source_files_properties(src/mcd212_video.c src/main.c PROPERTIES
     COMPILE_DEFINITIONS "CDI_VIDEO_HLE=$<BOOL:$<TARGET_PROPERTY:CDI_NATIVE_SCANOUT>>")
 set_property(TARGET CdiRuntime PROPERTY CDI_NATIVE_SCANOUT ${CDI_VIDEO_HLE})
+set_source_files_properties(src/cdi_loader_jobs.c
+    "${CMAKE_CURRENT_SOURCE_DIR}/../bios/generated/cdrtos_dispatch.c"
+    PROPERTIES COMPILE_DEFINITIONS "CDI_LOADER_HLE=$<BOOL:$<TARGET_PROPERTY:CDI_NATIVE_LOADER>>")
+set_property(TARGET CdiRuntime PROPERTY CDI_NATIVE_LOADER ${CDI_LOADER_HLE})
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../bios/generated/bios_identity.h")
     target_compile_definitions(CdiRuntime PRIVATE CDI_BIOS_IDENTITY_BUILD=1)
 endif()
@@ -139,7 +155,7 @@ if(EXISTS "${CDI_GAME_GENERATED_DIR}/module_sources.cmake")
 endif()
 set(PROVENANCE_INPUTS "${CMAKE_CURRENT_BINARY_DIR}/runtime-provenance-inputs.cmake")
 file(GENERATE OUTPUT "${PROVENANCE_INPUTS}" CONTENT
-    "set(PROVENANCE_FILES [==[${PROVENANCE_FILES}]==])\nset(PROVENANCE_COMPILER [==[${CMAKE_C_COMPILER};${CMAKE_C_COMPILER_ID};${CMAKE_C_COMPILER_VERSION}]==])\nset(PROVENANCE_OPTIONS [==[${CMAKE_BUILD_TYPE};${CMAKE_C_FLAGS};${CMAKE_C_FLAGS_RELEASE};scanout=${CDI_VIDEO_BACKEND};$<TARGET_PROPERTY:CdiRuntime,COMPILE_DEFINITIONS>;$<TARGET_PROPERTY:CdiRuntime,COMPILE_OPTIONS>]==])\n")
+    "set(PROVENANCE_FILES [==[${PROVENANCE_FILES}]==])\nset(PROVENANCE_COMPILER [==[${CMAKE_C_COMPILER};${CMAKE_C_COMPILER_ID};${CMAKE_C_COMPILER_VERSION}]==])\nset(PROVENANCE_OPTIONS [==[${CMAKE_BUILD_TYPE};${CMAKE_C_FLAGS};${CMAKE_C_FLAGS_RELEASE};scanout=${CDI_VIDEO_BACKEND};loader=${CDI_LOADER_BACKEND};$<TARGET_PROPERTY:CdiRuntime,COMPILE_DEFINITIONS>;$<TARGET_PROPERTY:CdiRuntime,COMPILE_OPTIONS>]==])\n")
 set_property(TARGET CdiRuntime APPEND PROPERTY LINK_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/../tools/build_provenance.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt")
@@ -165,6 +181,12 @@ endif()
 
 include(CTest)
 if(BUILD_TESTING)
+    add_executable(CdiLoaderMathTest tests/cdi_loader_math_test.c)
+    target_include_directories(CdiLoaderMathTest PRIVATE include)
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../bios/cdi490a.rom")
+        add_test(NAME loader_crc_polynomial COMMAND CdiLoaderMathTest
+            "${CMAKE_CURRENT_SOURCE_DIR}/../bios/cdi490a.rom")
+    endif()
     add_executable(SlaveTest tests/slave_test.c src/slave.c src/cdi_input.c)
     target_include_directories(SlaveTest PRIVATE include)
     add_test(NAME ikat_transport COMMAND SlaveTest)
