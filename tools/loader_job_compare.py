@@ -7,6 +7,36 @@ from hotelmario_controller_probe import memory
 from scanout_hle_compare import SCRIPT,identity
 from hotelmario_launch_probe import disc_bin_path
 
+class CycleCounter:
+    """Raw Windows scheduled process cycles; never convert to elapsed time.
+
+    GetProcessTimes is too coarsely quantized for this short loading interval.
+    Keep both measurements and use matched process affinity for cycle results.
+    Other hosts retain CPU-time measurements without a Windows dependency.
+    """
+    def __init__(self,pid):
+        self.handle=None
+        if os.name=='nt':
+            import ctypes
+            from ctypes import wintypes
+            self.ctypes=ctypes;self.api=ctypes.WinDLL('kernel32',use_last_error=True)
+            self.api.OpenProcess.argtypes=[wintypes.DWORD,wintypes.BOOL,wintypes.DWORD]
+            self.api.OpenProcess.restype=wintypes.HANDLE
+            self.api.QueryProcessCycleTime.argtypes=[wintypes.HANDLE,ctypes.POINTER(ctypes.c_ulonglong)]
+            self.api.QueryProcessCycleTime.restype=wintypes.BOOL
+            self.api.CloseHandle.argtypes=[wintypes.HANDLE]
+            self.api.CloseHandle.restype=wintypes.BOOL
+            self.handle=self.api.OpenProcess(0x1000,False,pid)
+            if not self.handle:raise ctypes.WinError(ctypes.get_last_error())
+    def read(self):
+        if self.handle is None:return None
+        value=self.ctypes.c_ulonglong()
+        if not self.api.QueryProcessCycleTime(self.handle,self.ctypes.byref(value)):
+            raise self.ctypes.WinError(self.ctypes.get_last_error())
+        return value.value
+    def close(self):
+        if self.handle is not None:self.api.CloseHandle(self.handle);self.handle=None
+
 def run(exe,args,label):
     out=args.output/label;out.mkdir()
     env=os.environ.copy();env.update(CDI_PACE_SPEED='32',SDL_AUDIODRIVER='dummy',
@@ -19,8 +49,10 @@ def run(exe,args,label):
     samples=[];started=time.monotonic();host_before=psutil.cpu_times();armed=False
     with (out/'stdout.log').open('w') as stdout,(out/'stderr.log').open('w') as stderr:
         proc=subprocess.Popen(command,env=env,stdout=stdout,stderr=stderr,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
+        cycles=None
         try:
             process=psutil.Process(proc.pid)
+            cycles=CycleCounter(proc.pid)
             if args.cpu_core is not None:process.cpu_affinity([args.cpu_core])
             while time.monotonic()-started<120:
                 if proc.poll() is not None:raise RuntimeError(f'{label}: runtime exited')
@@ -29,7 +61,8 @@ def run(exe,args,label):
                 if not args.end_frame and not armed and s['frame']>=args.arm_frame:
                     arm=request(args.port,{'cmd':'stop_pc','pc':args.stop_pc});assert arm['ok'];armed=True
                 cpu=process.cpu_times();samples.append({'wall_s':time.monotonic()-started,
-                    'cpu_s':cpu.user+cpu.system,'rss_bytes':process.memory_info().rss,'status':s})
+                    'cpu_s':cpu.user+cpu.system,'process_cycles':cycles.read(),
+                    'rss_bytes':process.memory_info().rss,'status':s})
                 if s['miss_count'] or s['main_resets']:raise RuntimeError(s)
                 if s['held']:break
                 time.sleep(.01)
@@ -57,15 +90,19 @@ def run(exe,args,label):
             lo,hi=samples[upper-1:upper+1]
             f=(args.start_frame-lo['status']['frame'])/(hi['status']['frame']-lo['status']['frame'])
             cpu_start=lo['cpu_s']+f*(hi['cpu_s']-lo['cpu_s'])
+            cycle_start=(lo['process_cycles']+f*(hi['process_cycles']-lo['process_cycles'])
+                         if lo['process_cycles'] is not None else None)
             result={'label':label,'binary':identity(exe),'command':command,'start_frame':args.start_frame,
                 'cpu_affinity':process.cpu_affinity(),
                 'end_frame':s['frame'],'cpu_ms':1000*(samples[-1]['cpu_s']-cpu_start),
+                'process_cycles':samples[-1]['process_cycles']-cycle_start if cycle_start is not None else None,
                 'peak_rss_bytes':max(v['rss_bytes'] for v in samples),'start_bracket':[lo,hi],
                 'host_cpu_before':host_before._asdict(),'host_cpu_after':host_after._asdict(),
                 'loader_jobs':state['loader_jobs']}
             (out/'result.json').write_text(json.dumps(result,indent=2));print(json.dumps(result),flush=True)
             return result,state
         finally:
+            if cycles is not None:cycles.close()
             if proc.poll() is None:proc.terminate()
             proc.wait(timeout=10)
 
@@ -125,16 +162,20 @@ def main():
         contract={'pair':prefix,'equal':not differences,'differences':differences};contracts.append(contract)
         (args.output/'contracts.json').write_text(json.dumps(contracts,indent=2))
         if differences:raise RuntimeError(f'Loader job contract mismatch: {differences}')
-    savings=[]
+    savings=[];cycle_savings=[]
     for pair in range(1,args.pairs+1):
         a=next(r for r in results if r['label']==f'pair{pair}-reference')
         b=next(r for r in results if r['label']==f'pair{pair}-candidate')
         savings.append(100*(1-b['cpu_ms']/a['cpu_ms']))
+        if a['process_cycles'] is not None and b['process_cycles'] is not None:
+            cycle_savings.append(100*(1-b['process_cycles']/a['process_cycles']))
     scope=(f'Hotel Mario USA scripted gameplay fields {args.start_frame}..{args.end_frame}' if args.end_frame else
            'Hotel Mario USA real main-module CRC rejection' if args.expect_crc_error else
            'Hotel Mario USA real main-module load to first native entry')
     summary={'schema':1,'status':'collected; assess samples and variation','scope':scope,
         'results':results,'contracts':contracts,'paired_cpu_savings_percent':savings,
+        'paired_process_cycle_savings_percent':cycle_savings,
+        'median_process_cycle_savings_percent':statistics.median(cycle_savings) if cycle_savings else None,
         'median_cpu_savings_percent':statistics.median(savings)}
     (args.output/'campaign-evidence.json').write_text(json.dumps(summary,indent=2));print(json.dumps(summary,indent=2))
 if __name__=='__main__':main()
