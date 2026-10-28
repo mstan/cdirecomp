@@ -6263,5 +6263,13 @@
   "checks_logs": [
     "G:\\Temp\\Codex\\cdirecomp\\load-job-20261028\\component-detail.log",
     "G:\\Temp\\Codex\\cdirecomp\\load-job-20261028\\compiler-detail.log"
-  ]
+  ],
+  "beads_sync": {
+    "status": "remote push failed; central local issue updates retained",
+    "log": "C:/Users/Matthew/AppData/Local/beads/sync-logs/20261028T174857Z-21516/push.log",
+    "result": "C:/Users/Matthew/AppData/Local/beads/sync-logs/20261028T174857Z-21516/push.json",
+    "elapsed_seconds": 507.6,
+    "exit_code": 1,
+    "scope": "Candidate5 engineering and local central issue updates complete; remote backup sync remains an administrative gap. Broader HLE burndown is open; stop for owner check-in."
+  }
 }

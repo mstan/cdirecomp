@@ -547,4 +547,9 @@ Candidate 5's selected job is qualified. The broader burndown stays open;
 candidates 3, 4, 6, 8, 9 and hardware presentation have not been started as part
 of this serial step. Stop here for owner review.
 
+Central Beads issue updates are saved locally. The required remote push was
+allowed to finish and failed after 507.6 seconds; its log/result paths are
+retained in `loader-job-evidence.json`. Remote backup sync is an administrative
+gap, separate from this candidate's completed engineering qualification.
+
 Evidence: `G:/Temp/Codex/cdirecomp/load-job-20261028`.
