@@ -38,7 +38,7 @@ subsystem boundaries or a requirement to adopt every proposed optimization.
 | 2 | **Complete frame production and publication** | Repeated framebuffer hashing, copying, diagnostic reconstruction and publication work | **Implemented and qualified with candidate 1.** Exact content identity, retained storage and frontend handoff remove duplicate work without changing field cadence. |
 | 3 | **Graphics service to completed drawing job** | Guest drawing preparation, intermediate memory traffic, control-list construction and repeated renderer preparation | **Open, queued.** Renderer preparation consolidated into 1/2 and native continuations into 7; broader guest-job investigation remains work to perform. |
 | 4 | **Memory operation to fully published result** | Instruction-by-instruction copying/filling plus repeated module invalidation, tag maintenance and dirty tracking | **Open, queued.** Previous gameplay-only attribution did not qualify complete bulk operations. |
-| 5 | **File/module load to executable module ready** | Repeated sector handling, copying, validation, relocation, linking, hashing and native binding | **In progress, current serial candidate.** Measure actual loading, implement the selected complete native job and qualify it before owner check-in. |
+| 5 | **File/module load to executable module ready** | Repeated sector handling, copying, validation, relocation, linking, hashing and native binding | **Selected native verification job implemented and qualified in the real load-to-ready pipeline.** Three matched pairs use 23.4–33.3% fewer process cycles during loading; later gameplay is neutral/inconclusive. Kernel I/O, linking and scheduling stay authoritative. |
 | 6 | **Frequently executed OS-9 service jobs** | Recompiled kernel algorithms and internal dispatch that a complete native operation could replace | **Open, queued.** Service attribution and boundary contracts are remaining implementation work. |
 | 7 | **Native execution spans** | Repeated dispatch, interpreter handoffs, instruction bookkeeping and checks between operations with no observable intervening event | **Implemented and qualified.** Reused the existing observed native catalog, then coalesced legal PIC continuations into shared native bodies. SDK `3955bf3`; incremental 3-pair median CPU reduction 23.77% versus the seeded catalog, with exact canonical guest contracts. |
 | 8 | **Complete CD/XA streaming jobs** | Repeated work across sector selection, decoding, buffer ownership, DMA/refill, guest drivers and audio handoff | **Open, queued.** Complete streaming integration and actual seek/channel/refill qualification remain work to perform. |
@@ -56,7 +56,8 @@ subsystem boundaries or a requirement to adopt every proposed optimization.
   candidates 3/4/5/6/8/9 and hardware presentation still require actual work.
   Missing workload attribution, contracts and differential fixtures are work
   within this goal. Work serially, checking in with the owner after each.
-  Current candidate: **5, file/module load to executable module ready**.
+  Candidate **5** has now completed its serial implementation and qualification
+  below. **Stopped for owner check-in before selecting another candidate.**
 - Scanout selection is `-DCDI_VIDEO_BACKEND=LLE` or
   `-DCDI_VIDEO_BACKEND=HLE`. The repository default remains LLE.
 - HLE computes joint source/matte color spans, consolidating contribution,
@@ -481,10 +482,69 @@ The first prototype exposed a sign-extended MOVEQ constant error and is not
 adopted. After correction, 100,000 independent polynomial/register/flag checks
 pass on Windows and Linux. A production-object fixture compares the native
 job with the actual recompiled firmware in 74 cases, covering exact timed
-interrupt frontiers, unsupported firmware and a real bus error. Initial live
-load-to-native-entry comparison passes complete CPU/RAM/device/audio/frame
-contracts and suggests a roughly 51% loading CPU reduction in one retained
-pair. Balanced loading/gameplay measurements and real CRC rejection are
-still pending; no completion or final gain claim is made from this probe.
+interrupt frontiers, unsupported firmware, odd-source fallback and a real
+bus error. All 13 runtime tests, seven compiler tests and the existing
+function-alias integration check pass. The production source also passes
+Linux GCC strict compilation with HLE both enabled and disabled.
+
+Matched built-game comparisons reach the actual main module's first native
+entry, `$25F312`, at field 1,145 after real loading, verification and linking.
+They compare every CPU register/flag, full 1 MiB guest RAM, video/audio/device
+state, native binding/unbinding events and every completed frame. The gameplay
+extension passes through field 13,000, including all five observed module
+bindings and the actual unload at field 2,634. A deliberately corrupted copy
+of the main-module payload exercises the real kernel's CRC rejection at
+`$406B4C`: both builds return error `$E8` with carry set and identical complete
+contracts. The original disc was never modified; the disposable copy is
+removed after retaining its byte-change recipe, hashes and raw results.
+
+Short-interval process CPU time proved too coarsely quantized: an identical
+build's loading CPU samples differed by up to 38%. After reassessing those
+measurements, the harness retains raw Windows process-cycle counts as well as
+CPU time, with both processes restricted to logical CPU 15. Only task-created
+processes receive that affinity. No cycle-to-time conversion is used.
+
+| Pair | Reference process cycles | Native process cycles | Reduction |
+| --- | --- | --- | --- |
+| 1 | 474,821,260 | 316,634,143 | 33.32% |
+| 2 | 481,901,888 | 369,119,827 | 23.40% |
+| 3 | 495,179,075 | 376,439,108 | 23.98% |
+
+These three warmed, alternating pairs measure fields 1,000 through the first
+native module entry. Median loading cycle reduction is **23.98%**, versus
+roughly 1.6–5.2% variation in two identical-build loading controls. This is
+process work during the measured loading interval, not a disc-latency or
+whole-game speedup claim. The initial 51% CPU-time probe is not the final claim.
+
+Later gameplay (fields 9,400–13,000) is **neutral/inconclusive**: CPU differences
+are −1.05%, +7.32%, +1.00%; process-cycle differences are −8.54%, +8.87%, +0.46%.
+Controls and earlier noisy series are all retained. No reproducible gameplay
+regression is established, and no gameplay gain is claimed. The supported SDL
+dummy/software frontend also matches every contract; its one retained pair is
+−4.22% CPU / −3.44% cycles, within control variation. This does not qualify a
+hardware GPU driver, other stages, games, or Linux runtime performance.
+
+The supported consumer pipeline builds both `-LoaderBackend LLE` and `HLE`;
+HLE is the consumer default, while the generic engine default remains LLE.
+Linux uses `CDI_LOADER_BACKEND`. The rebuilt LLE control matches the original
+qualified package through field 13,000 and records zero native loader words.
+The accepted HLE run verifies 38,986 words in 286 spans, with 112 interrupt
+handoffs and 161 kernel scheduling-check handoffs. Those checks are not all
+actual process switches. File I/O, allocation, relocation, linking, unload,
+registration and errors continue through the real kernel. This is a measured
+native verification job integrated into that complete pipeline, not a claim
+that every `F$Load` operation has been rewritten.
+
+Implementation: engine `d7a3403`, shared core `cd1e5e2`; complete build-input
+provenance `050969a`. Consumer integration: `cf5a4ed`. Private native-job headers
+are now included in link-time provenance. The final provenance-only relink is
+checked for byte-identical PE sections against the measured and frontend-tested
+binaries. Exact identities, raw samples, settings and limitations are retained
+in [loader-job-evidence.json](loader-job-evidence.json). Owner saves/settings
+and delivery directories were untouched; all automated launches were muted.
+
+Candidate 5's selected job is qualified. The broader burndown stays open;
+candidates 3, 4, 6, 8, 9 and hardware presentation have not been started as part
+of this serial step. Stop here for owner review.
 
 Evidence: `G:/Temp/Codex/cdirecomp/load-job-20261028`.

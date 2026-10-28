@@ -3,7 +3,7 @@
   "owner_issue": "beads-oatv",
   "campaign_issue": "beads-2wy8.1",
   "consumer_issue": "beads-7t8h",
-  "status": "in_progress; premature completion withdrawn",
+  "status": "in_progress; candidate5 qualified and stopped for serial owner check-in",
   "engine_head": "85c869ee808b438905f2c1bc29a46d30f27647f8",
   "core_head": "3955bf3311f55e031836f70b5c1839e95b81f9cf",
   "game_head": "16353fc849ef8056af891e2c3b7d3e29ae3a41da",
@@ -794,15 +794,15 @@
     {
       "candidate": 5,
       "name": "File/module load to executable module ready",
-      "status": "in_progress",
+      "status": "validated",
       "evidence": [
-        "combined-native-pairs/pair1-candidate/evidence.json",
-        "supported-build.log"
+        "docs/loader-job-evidence.json"
       ],
-      "reason": "Five bindings occur by field7072; the timed interval9400-13000 contains no new native binding. Startup correctness is retained, but steady-gameplay gains cannot establish a loader optimization.",
-      "prerequisite": "Matched loading/transition timing with actual F$Load/F$Link/F$Unlink outcomes, relocation/error/unload cases and authoritative kernel/module state. Preserve each observable transport/interrupt boundary or qualify a broader boundary explicitly.",
+      "reason": "Actual module loading selected native verification; full successful load-to-native-entry, corrupt-module error, later bindings/unload and gameplay contracts pass. Loading cycle improvement is positive; gameplay neutral/inconclusive.",
+      "prerequisite": null,
       "prior_deferral_rejected": true,
-      "work_remaining": "Matched loading/transition timing with actual F$Load/F$Link/F$Unlink outcomes, relocation/error/unload cases and authoritative kernel/module state. Preserve each observable transport/interrupt boundary or qualify a broader boundary explicitly."
+      "work_remaining": null,
+      "job": "A native ready-span verification job integrated in real OS-9 load-to-ready, not a rewrite of all F$Load operations"
     },
     {
       "candidate": 6,
@@ -890,5 +890,8 @@
     "report": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\cleanup-report.json",
     "ledger": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\resource-ledger.json"
   },
-  "current_serial_candidate": 5
+  "current_serial_candidate": null,
+  "completed_serial_candidate": 5,
+  "awaiting_owner_checkin": true,
+  "loader_job_evidence": "docs/loader-job-evidence.json"
 }
