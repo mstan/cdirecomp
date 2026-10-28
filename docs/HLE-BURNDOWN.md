@@ -36,7 +36,7 @@ subsystem boundaries or a requirement to adopt every proposed optimization.
 | --- | --- | --- | --- |
 | 1 | **Qualify the scanout candidate already written** | Repeated decoding, transparency, contribution and composition work across pixels | **Qualified as part of the combined native frame job.** Three alternating Hotel Mario pairs save 23.0-26.0% CPU/field with complete contract equality. Scanout-only performance remains inconclusive. |
 | 2 | **Complete frame production and publication** | Repeated framebuffer hashing, copying, diagnostic reconstruction and publication work | **Implemented and qualified with candidate 1.** Exact content identity, retained storage and frontend handoff remove duplicate work without changing field cadence. |
-| 3 | **Graphics service to completed drawing job** | Guest drawing preparation, intermediate memory traffic, control-list construction and repeated renderer preparation | **Open, queued.** Renderer preparation consolidated into 1/2 and native continuations into 7; broader guest-job investigation remains work to perform. |
+| 3 | **Graphics service to completed drawing job** | Guest drawing preparation, intermediate memory traffic, control-list construction and repeated renderer preparation | **In progress, current serial candidate.** Actual paired host/guest sampling selects the deferred drawing-preparation queue; native orchestration is being implemented and qualified through callbacks, queue publication and device/IRQ frontiers. |
 | 4 | **Memory operation to fully published result** | Instruction-by-instruction copying/filling plus repeated module invalidation, tag maintenance and dirty tracking | **Open, queued.** Previous gameplay-only attribution did not qualify complete bulk operations. |
 | 5 | **File/module load to executable module ready** | Repeated sector handling, copying, validation, relocation, linking, hashing and native binding | **Selected native verification job implemented and qualified in the real load-to-ready pipeline.** Three matched pairs use 23.4–33.3% fewer process cycles during loading; later gameplay is neutral/inconclusive. Kernel I/O, linking and scheduling stay authoritative. |
 | 6 | **Frequently executed OS-9 service jobs** | Recompiled kernel algorithms and internal dispatch that a complete native operation could replace | **Open, queued.** Service attribution and boundary contracts are remaining implementation work. |
@@ -57,7 +57,8 @@ subsystem boundaries or a requirement to adopt every proposed optimization.
   Missing workload attribution, contracts and differential fixtures are work
   within this goal. Work serially, checking in with the owner after each.
   Candidate **5** has now completed its serial implementation and qualification
-  below. **Stopped for owner check-in before selecting another candidate.**
+  below. Owner continued after check-in; **candidate 3 is now active** on
+  `perf/native-drawing-jobs-20261028`. Stop for review after that candidate.
 - Scanout selection is `-DCDI_VIDEO_BACKEND=LLE` or
   `-DCDI_VIDEO_BACKEND=HLE`. The repository default remains LLE.
 - HLE computes joint source/matte color spans, consolidating contribution,

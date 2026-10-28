@@ -58,6 +58,9 @@ void debug_trace_store(uint32_t addr, uint32_t val, int size);
  * Device event rings snapshot this value so a hardware access can be joined
  * back to the full CPU trace without arming a future capture. */
 uint64_t debug_trace_sequence(void);
+/* Read a retained instruction-entry clock point with the CPU held. Used by
+ * differential fixtures to select actual reference interrupt frontiers. */
+int debug_trace_point(uint64_t seq, uint32_t *pc, uint64_t *cycles);
 
 /* Always-on CIAP access ring.  The CIAP model owns the records because reads
  * may have device side effects; the debug server only takes a side-effect-free

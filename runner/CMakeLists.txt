@@ -32,6 +32,17 @@ else()
     message(FATAL_ERROR "CDI_LOADER_BACKEND must be LLE or HLE")
 endif()
 
+# Guest drawing preparation has an independent build-time faithful choice.
+set(CDI_DRAWING_BACKEND "LLE" CACHE STRING "Deferred drawing preparation: LLE or HLE")
+set_property(CACHE CDI_DRAWING_BACKEND PROPERTY STRINGS LLE HLE)
+if(CDI_DRAWING_BACKEND STREQUAL "HLE")
+    set(CDI_DRAWING_HLE 1)
+elseif(CDI_DRAWING_BACKEND STREQUAL "LLE")
+    set(CDI_DRAWING_HLE 0)
+else()
+    message(FATAL_ERROR "CDI_DRAWING_BACKEND must be LLE or HLE")
+endif()
+
 # Generated C is dropped in by the recompiler and compiled in here. It
 # #includes cdi_runtime.h + game_extras.h from runner/include.
 #   - bios/generated/*.c     : the recompiled CD-RTOS system ROM (Phase 1, boots).
@@ -67,6 +78,7 @@ add_executable(CdiRuntime
     src/cdi_bus.c
     src/cdi_native.c
     src/cdi_loader_jobs.c
+    src/cdi_drawing_jobs.c
     ../common/cdi_sha256.c
     src/runtime.c
     src/mcd212.c
@@ -121,6 +133,11 @@ set_source_files_properties(src/cdi_loader_jobs.c
     "${CMAKE_CURRENT_SOURCE_DIR}/../bios/generated/cdrtos_dispatch.c"
     PROPERTIES COMPILE_DEFINITIONS "CDI_LOADER_HLE=$<BOOL:$<TARGET_PROPERTY:CDI_NATIVE_LOADER>>")
 set_property(TARGET CdiRuntime PROPERTY CDI_NATIVE_LOADER ${CDI_LOADER_HLE})
+set_source_files_properties(src/cdi_drawing_jobs.c PROPERTIES
+    COMPILE_DEFINITIONS "CDI_DRAWING_HLE=$<BOOL:$<TARGET_PROPERTY:CDI_NATIVE_DRAWING>>")
+set_property(SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/../bios/generated/cdrtos_dispatch.c"
+    APPEND PROPERTY COMPILE_DEFINITIONS "CDI_DRAWING_HLE=$<BOOL:$<TARGET_PROPERTY:CDI_NATIVE_DRAWING>>")
+set_property(TARGET CdiRuntime PROPERTY CDI_NATIVE_DRAWING ${CDI_DRAWING_HLE})
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../bios/generated/bios_identity.h")
     target_compile_definitions(CdiRuntime PRIVATE CDI_BIOS_IDENTITY_BUILD=1)
 endif()
@@ -156,7 +173,7 @@ if(EXISTS "${CDI_GAME_GENERATED_DIR}/module_sources.cmake")
 endif()
 set(PROVENANCE_INPUTS "${CMAKE_CURRENT_BINARY_DIR}/runtime-provenance-inputs.cmake")
 file(GENERATE OUTPUT "${PROVENANCE_INPUTS}" CONTENT
-    "set(PROVENANCE_FILES [==[${PROVENANCE_FILES}]==])\nset(PROVENANCE_COMPILER [==[${CMAKE_C_COMPILER};${CMAKE_C_COMPILER_ID};${CMAKE_C_COMPILER_VERSION}]==])\nset(PROVENANCE_OPTIONS [==[${CMAKE_BUILD_TYPE};${CMAKE_C_FLAGS};${CMAKE_C_FLAGS_RELEASE};scanout=${CDI_VIDEO_BACKEND};loader=${CDI_LOADER_BACKEND};$<TARGET_PROPERTY:CdiRuntime,COMPILE_DEFINITIONS>;$<TARGET_PROPERTY:CdiRuntime,COMPILE_OPTIONS>]==])\n")
+    "set(PROVENANCE_FILES [==[${PROVENANCE_FILES}]==])\nset(PROVENANCE_COMPILER [==[${CMAKE_C_COMPILER};${CMAKE_C_COMPILER_ID};${CMAKE_C_COMPILER_VERSION}]==])\nset(PROVENANCE_OPTIONS [==[${CMAKE_BUILD_TYPE};${CMAKE_C_FLAGS};${CMAKE_C_FLAGS_RELEASE};scanout=${CDI_VIDEO_BACKEND};loader=${CDI_LOADER_BACKEND};drawing=${CDI_DRAWING_BACKEND};$<TARGET_PROPERTY:CdiRuntime,COMPILE_DEFINITIONS>;$<TARGET_PROPERTY:CdiRuntime,COMPILE_OPTIONS>]==])\n")
 set_property(TARGET CdiRuntime APPEND PROPERTY LINK_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/../tools/build_provenance.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt")

@@ -29,6 +29,7 @@ static Binding bindings[BINDING_CAPACITY];
 static uint32_t binding_count;
 static CdiNativeState stats;
 static uint64_t epoch,event_count;
+uint64_t g_cdi_native_invalidation_epoch;
 enum { EVENT_CAPACITY=1024 };
 static CdiNativeEvent events[EVENT_CAPACITY];
 /* Coverage is cumulative across streamed images, not a trace ring. A hash
@@ -60,6 +61,7 @@ static uint32_t tag_index(uint32_t address) {
     return address<CDI_RAM0_SIZE ? address/2 : WORDS_PER_BANK+(address-CDI_RAM1_BASE)/2;
 }
 void cdi_native_reset(void) {
+    g_cdi_native_invalidation_epoch++;
     memset(tag_indices,0,sizeof tag_indices);tag_count=0;
     memset(bindings,0,sizeof bindings);binding_count=0;
     memset(&stats,0,sizeof stats);stats.compiled=(uint32_t)g_cdi_native_module_count;
@@ -77,7 +79,8 @@ void cdi_native_notify_write(uint32_t address, uint32_t size) {
     for (uint32_t i=0;i<binding_count;i++) {
         Binding *b=&bindings[i];
         if (address<(uint64_t)b->base+b->size && end>b->base) {
-            if (b->valid) { stats.invalidations++;stats.active--;event(b,CDI_NATIVE_INVALIDATE); }
+            if (b->valid) { stats.invalidations++;g_cdi_native_invalidation_epoch++;
+                stats.active--;event(b,CDI_NATIVE_INVALIDATE); }
             b->valid=0;b->checked=0;
         }
     }
@@ -151,6 +154,29 @@ int cdi_native_dispatch(uint32_t address) {
     if (!b || !b->module->has_offset(address-b->base)) return 0;
     stats.dispatches++;
     return b->module->dispatch(b->base,address-b->base);
+}
+CdiNativeFunction cdi_native_find_function(const uint8_t digest[32], uint32_t offset,
+                                          const CdiNativeModule **module) {
+    if (module) *module=NULL;
+    for (size_t i=0;i<g_cdi_native_module_count;i++) {
+        const CdiNativeModule *m=&g_cdi_native_modules[i];
+        if (memcmp(m->sha256,digest,32)) continue;
+        for (size_t j=0;j<m->entry_count;j++) if (m->entries[j].offset==offset) {
+            if (module) *module=m;
+            return m->entries[j].function;
+        }
+    }
+    return NULL;
+}
+int cdi_native_job_binding(const CdiNativeModule *module, uint32_t caller,
+                          uint32_t *base, uint64_t *token) {
+    for (uint32_t i=0;i<binding_count;i++) {
+        const Binding *b=&bindings[i];
+        if (b->valid && b->module==module && caller>=b->base && caller-b->base<b->size) {
+            *base=b->base;*token=(b->epoch<<16)|(i+1);return 1;
+        }
+    }
+    return 0;
 }
 uint64_t cdi_native_execution_token(uint32_t base,CdiNativeDispatch expected) {
     for (uint32_t i=0;i<binding_count;i++) {
