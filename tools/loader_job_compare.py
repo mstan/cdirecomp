@@ -106,11 +106,14 @@ def run(exe,args,label):
             if proc.poll() is None:proc.terminate()
             proc.wait(timeout=10)
 
-def semantic(state):
+def semantic(state,presentation='headless'):
     d=copy.deepcopy(state);d.pop('loader_jobs',None)
     for key in ('insns','blocks','interp','irq_first_seq'):d['status'].pop(key,None)
     for key in ('scanout_jobs','fused_jobs','reused_jobs'):d['video_state'].pop(key,None)
     d['native_state'].pop('dispatches',None)
+    if presentation=='dummy':
+        # Host-time SDL queue consumption is not guest transport or PCM output.
+        for key in ('queued_frames','dropped_frames'):d['audio_state'].pop(key,None)
     for name in ('native_events','ikat_events'):
         for event in d[name].get('events',[]):event.pop('trace_seq',None)
     return d
@@ -157,7 +160,7 @@ def main():
             result,state=run(getattr(args,name),args,f'{prefix}-{name}');states[name]=state
             if name=='candidate' and not args.reference_control:assert state['loader_jobs'].get('words',0)>0,'Native job was not exercised'
             if pair:results.append(result)
-        left,right=semantic(states['reference']),semantic(states['candidate'])
+        left,right=semantic(states['reference'],args.presentation),semantic(states['candidate'],args.presentation)
         differences=[key for key in left if left[key]!=right[key]]
         contract={'pair':prefix,'equal':not differences,'differences':differences};contracts.append(contract)
         (args.output/'contracts.json').write_text(json.dumps(contracts,indent=2))
