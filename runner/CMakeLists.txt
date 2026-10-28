@@ -141,6 +141,7 @@ foreach(SOURCE IN LISTS PROVENANCE_SOURCES)
 endforeach()
 file(GLOB_RECURSE PROVENANCE_HEADERS CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/include/*.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/../common/*.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/../external/m68k-recomp-core/common/*.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/../recompiler/src/*.h"
