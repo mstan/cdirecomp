@@ -1,5 +1,5 @@
 """Matched real module loading, ending at its verified native execution entry."""
-import argparse,copy,hashlib,json,os,pathlib,socket,statistics,subprocess,time
+import argparse,copy,hashlib,json,os,pathlib,platform,shutil,socket,statistics,subprocess,time
 import psutil
 from bios_options_smoke import request
 from build_provenance import verify
@@ -11,8 +11,10 @@ def run(exe,args,label):
     out=args.output/label;out.mkdir()
     env=os.environ.copy();env.update(CDI_PACE_SPEED='32',SDL_AUDIODRIVER='dummy',
         CDI_PLAYER_CONFIG_PATH=str(args.output/'player.cfg'),TEMP=str(args.output),TMP=str(args.output))
+    if args.presentation=='dummy':env.update(SDL_VIDEODRIVER='dummy',SDL_RENDER_DRIVER='software')
     command=[str(exe.resolve()),str(args.rom.resolve()),'--disc',str(args.disc.resolve()),
-        '--headless','--fault-hold','--port',str(args.port),'--input-script',SCRIPT]
+        '--fault-hold','--port',str(args.port),'--input-script',SCRIPT]
+    if args.presentation=='headless':command.append('--headless')
     if args.end_frame:command+=['--stop-frame',str(args.end_frame)]
     samples=[];started=time.monotonic();host_before=psutil.cpu_times();armed=False
     with (out/'stdout.log').open('w') as stdout,(out/'stderr.log').open('w') as stderr:
@@ -87,15 +89,25 @@ def main():
     p.add_argument('--expect-crc-error',action='store_true')
     p.add_argument('--reference-control',action='store_true',help='Explicit A/A run; no native activity expected')
     p.add_argument('--cpu-core',type=int,help='Matched process-local affinity; does not change other applications')
+    p.add_argument('--presentation',choices=('headless','dummy'),default='headless')
     args=p.parse_args()
     with socket.socket() as probe:assert probe.connect_ex(('127.0.0.1',args.port))!=0
     args.output.mkdir(parents=True,exist_ok=False)
+    harness=args.output/'harness';harness.mkdir()
+    for name in ('loader_job_compare.py','bios_options_smoke.py','build_provenance.py',
+                 'hotelmario_controller_probe.py','hotelmario_launch_probe.py','scanout_hle_compare.py'):
+        shutil.copy2(pathlib.Path(__file__).with_name(name),harness/name)
     (args.output/'player.cfg').write_text('[input]\ncapture_mouse = false\n[rtc]\nsync_host_on_startup = false\n')
     meta={'schema':1,'reference':verify(args.reference),'candidate':verify(args.candidate),
         'rom':identity(args.rom),'disc':identity(disc_bin_path(args.disc)),'script':SCRIPT,
-        'end_contract':{'pc':args.stop_pc,'frame':args.end_frame,'expect_crc_error':args.expect_crc_error},
+        'end_contract':{'pc':None if args.end_frame else args.stop_pc,'frame':args.end_frame,'expect_crc_error':args.expect_crc_error},
         'reference_control':args.reference_control,
         'cpu_core':args.cpu_core,
+        'machine':{'platform':platform.platform(),'processor':platform.processor(),
+                   'processor_identifier':os.environ.get('PROCESSOR_IDENTIFIER'),'logical_cpus':psutil.cpu_count()},
+        'settings':{'presentation':args.presentation,'audio':'dummy','pace_speed':32,
+                    'rtc_sync_host_on_startup':False,'start_frame':args.start_frame},
+        'harness':[identity(x) for x in sorted(harness.iterdir())],
         'source':subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),
         'source_diff':subprocess.check_output(['git','diff'],text=True),
         'core_diff':subprocess.check_output(['git','-C','external/m68k-recomp-core','diff'],text=True)}
@@ -118,7 +130,10 @@ def main():
         a=next(r for r in results if r['label']==f'pair{pair}-reference')
         b=next(r for r in results if r['label']==f'pair{pair}-candidate')
         savings.append(100*(1-b['cpu_ms']/a['cpu_ms']))
-    summary={'schema':1,'status':'collected; assess samples and variation','scope':'Hotel Mario USA real main-module load to first native entry',
+    scope=(f'Hotel Mario USA scripted gameplay fields {args.start_frame}..{args.end_frame}' if args.end_frame else
+           'Hotel Mario USA real main-module CRC rejection' if args.expect_crc_error else
+           'Hotel Mario USA real main-module load to first native entry')
+    summary={'schema':1,'status':'collected; assess samples and variation','scope':scope,
         'results':results,'contracts':contracts,'paired_cpu_savings_percent':savings,
         'median_cpu_savings_percent':statistics.median(savings)}
     (args.output/'campaign-evidence.json').write_text(json.dumps(summary,indent=2));print(json.dumps(summary,indent=2))
