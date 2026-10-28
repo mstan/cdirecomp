@@ -38,6 +38,15 @@ uint32_t mcd212_video_copy_frame(uint32_t *dst, uint32_t capacity,
 uint64_t mcd212_video_frame_hash(uint16_t *width, uint16_t *height,
                                  uint64_t *generation);
 
+/* Stable publication snapshot. Copy only when the visible image or geometry
+ * differs from previous_content; field generation still advances every field.
+ * LLE retains its original per-field copy behavior. A zero return does not
+ * suppress presentation/redraw of the existing texture. */
+uint32_t mcd212_video_copy_changed_frame(uint32_t *dst, uint32_t capacity,
+                                         uint64_t previous_content,
+                                         uint16_t *width, uint16_t *height,
+                                         uint64_t *generation, uint64_t *content);
+
 typedef struct {
     uint16_t x, y;
     uint16_t pattern[16];
@@ -54,6 +63,7 @@ typedef struct {
     uint32_t plane_line_first[2], plane_line_nonblack[2];
     uint64_t plane_line_hash[2];
     uint64_t clut_hash;
+    uint64_t scanout_jobs, fused_jobs;
 } Mcd212VideoDebugState;
 
 /* Side-effect-free snapshot of the hardware-cursor control state.  The BIOS

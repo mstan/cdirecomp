@@ -54,6 +54,18 @@ The hand-written CD-i machine the generated C links against. Contract:
 
 ## Observability (the spine — read DEBUG.md, TCP.md)
 
+The runtime also supports `-DCDI_VIDEO_BACKEND=LLE` (default) or `HLE`.
+The native frame job combines source/matte spans with contribution,
+transparency, composition, exact frame identity, retained display storage and
+content-based frontend copying/upload. Register/control sequencing, guest
+memory and field/event timing stay authoritative. It retains the same decoded
+plane/verdict diagnostics and canonical frame hashes as the reference.
+Unchanged images reuse their exact hash and texture content while field
+generation and presentation/redraw cadence continue. Backend selection changes
+only the implementation/startup objects, rather than the generated CPU code.
+The differential component target links separate reference/native machines;
+the production HLE path does not run the reference beside each job.
+
 Always-on, queried after the fact; never arm-then-run.
 
 - **Execution-trace ring** (262144 entries): every instruction's PC + full

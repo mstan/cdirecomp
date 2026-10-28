@@ -9,6 +9,18 @@ set(CMAKE_C_STANDARD 11)
 # TU when this is OFF, so it is always safe to list in the source set below.
 option(CDI_COSIM_BUILD "Build the MC-CDI-016 differential co-simulation instrument (RAM/CPU state hashing + fault injection)" ON)
 
+# Same scanout contract, independent implementations. HLE consolidates source
+# decode, matte/contribution/transparency and output into native color spans.
+set(CDI_VIDEO_BACKEND "LLE" CACHE STRING "Scanout implementation: LLE or HLE")
+set_property(CACHE CDI_VIDEO_BACKEND PROPERTY STRINGS LLE HLE)
+if(CDI_VIDEO_BACKEND STREQUAL "HLE")
+    set(CDI_VIDEO_HLE 1)
+elseif(CDI_VIDEO_BACKEND STREQUAL "LLE")
+    set(CDI_VIDEO_HLE 0)
+else()
+    message(FATAL_ERROR "CDI_VIDEO_BACKEND must be LLE or HLE")
+endif()
+
 # Generated C is dropped in by the recompiler and compiled in here. It
 # #includes cdi_runtime.h + game_extras.h from runner/include.
 #   - bios/generated/*.c     : the recompiled CD-RTOS system ROM (Phase 1, boots).
@@ -88,6 +100,11 @@ if(MSVC)
 endif()
 
 target_compile_definitions(CdiRuntime PRIVATE $<$<BOOL:${CDI_COSIM_BUILD}>:CDI_COSIM=1>)
+# Restrict the selection macro to the implementation and startup identity.
+# Switching backends must not rebuild the generated CPU/game translation units.
+set_source_files_properties(src/mcd212_video.c src/main.c PROPERTIES
+    COMPILE_DEFINITIONS "CDI_VIDEO_HLE=$<BOOL:$<TARGET_PROPERTY:CDI_NATIVE_SCANOUT>>")
+set_property(TARGET CdiRuntime PROPERTY CDI_NATIVE_SCANOUT ${CDI_VIDEO_HLE})
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../bios/generated/bios_identity.h")
     target_compile_definitions(CdiRuntime PRIVATE CDI_BIOS_IDENTITY_BUILD=1)
 endif()
@@ -122,7 +139,7 @@ if(EXISTS "${CDI_GAME_GENERATED_DIR}/module_sources.cmake")
 endif()
 set(PROVENANCE_INPUTS "${CMAKE_CURRENT_BINARY_DIR}/runtime-provenance-inputs.cmake")
 file(GENERATE OUTPUT "${PROVENANCE_INPUTS}" CONTENT
-    "set(PROVENANCE_FILES [==[${PROVENANCE_FILES}]==])\nset(PROVENANCE_COMPILER [==[${CMAKE_C_COMPILER};${CMAKE_C_COMPILER_ID};${CMAKE_C_COMPILER_VERSION}]==])\nset(PROVENANCE_OPTIONS [==[${CMAKE_BUILD_TYPE};${CMAKE_C_FLAGS};${CMAKE_C_FLAGS_RELEASE};$<TARGET_PROPERTY:CdiRuntime,COMPILE_DEFINITIONS>;$<TARGET_PROPERTY:CdiRuntime,COMPILE_OPTIONS>]==])\n")
+    "set(PROVENANCE_FILES [==[${PROVENANCE_FILES}]==])\nset(PROVENANCE_COMPILER [==[${CMAKE_C_COMPILER};${CMAKE_C_COMPILER_ID};${CMAKE_C_COMPILER_VERSION}]==])\nset(PROVENANCE_OPTIONS [==[${CMAKE_BUILD_TYPE};${CMAKE_C_FLAGS};${CMAKE_C_FLAGS_RELEASE};scanout=${CDI_VIDEO_BACKEND};$<TARGET_PROPERTY:CdiRuntime,COMPILE_DEFINITIONS>;$<TARGET_PROPERTY:CdiRuntime,COMPILE_OPTIONS>]==])\n")
 set_property(TARGET CdiRuntime APPEND PROPERTY LINK_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/../tools/build_provenance.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt")
@@ -178,7 +195,24 @@ if(BUILD_TESTING)
         src/mcd212_video.c
     )
     target_include_directories(Mcd212VideoTest PRIVATE include)
+    set_property(TARGET Mcd212VideoTest PROPERTY CDI_NATIVE_SCANOUT ${CDI_VIDEO_HLE})
     add_test(NAME mcd212_video COMMAND Mcd212VideoTest)
+
+    # Link independent reference and native machines into one differential
+    # test. Production never executes the reference alongside an HLE job.
+    add_library(Mcd212VideoReference OBJECT src/mcd212_video.c)
+    target_include_directories(Mcd212VideoReference PRIVATE include)
+    foreach(API reset control begin_frame draw_line end_frame copy_frame copy_changed_frame
+                frame_hash debug_cursor debug_state debug_clut debug_plane_row
+                debug_verdict_row)
+        target_compile_definitions(Mcd212VideoReference PRIVATE
+            mcd212_video_${API}=lle_mcd212_video_${API})
+    endforeach()
+    add_executable(Mcd212VideoParityTest tests/mcd212_video_parity_test.c
+        src/mcd212_video.c $<TARGET_OBJECTS:Mcd212VideoReference>)
+    target_include_directories(Mcd212VideoParityTest PRIVATE include)
+    set_property(TARGET Mcd212VideoParityTest PROPERTY CDI_NATIVE_SCANOUT 1)
+    add_test(NAME mcd212_scanout_contract COMMAND Mcd212VideoParityTest)
 
     add_executable(M68kArithTest
         tests/m68k_arith_test.c

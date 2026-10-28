@@ -37,17 +37,17 @@ It shares the two-tier structure and spirit of the sibling projects
   recompiled system ROM.</sub>
 </p>
 
-## Philosophy: low-level, static, native-first
+## Philosophy: faithful reference, static execution and native jobs
 
 The guiding inspiration for cdirecomp is to be **LLE (low-level emulation) and
 static / native-first**:
 
-- **Low-level, not HLE.** There is **no hand-written OS-9 HLE layer.** The whole
-  **CD-RTOS system ROM is recompiled and executed** as native C. A game's
-  `TRAP #0` OS-9 system calls dispatch into the *recompiled* kernel, and kernel
-  state lives in emulated RAM exactly as it does on hardware. Only the hardware
-  chips are modeled by hand. (psxrecomp showed that stubbing the BIOS leads to
-  silent failure; CD-i takes the opposite, faithful route.)
+- **Faithful LLE reference and qualified native HLE.** The whole **CD-RTOS
+  system ROM is recompiled and executed** as native C. Current OS-9 calls
+  dispatch into that kernel, with authoritative state in guest RAM. Complete
+  native jobs can replace expensive work across existing subsystem boundaries
+  when they satisfy the LLE contract and pass built-game performance checks.
+  Fabricated OS results and shadow kernel state remain prohibited.
 - **Static, not interpreted.** The 68000 code is translated **ahead of time to
   C** and compiled to a native binary. A clean-room interpreter is kept only as
   the correctness floor for RAM-resident / not-yet-statically-promoted code.
@@ -129,8 +129,14 @@ What is **not** done yet:
   backlog, driven by real applications as they are brought up.
 
 The 2026-10-09 checkpoint is committed for default-branch integration.
-Gameplay implementation and campaign probes remain paused. LLE is the default;
-no HLE was added in this work.
+LLE remains the default build. The active HLE campaign adds an explicitly
+selected native scanout/frame-publication backend. Its first qualified bounded
+Hotel Mario gameplay workload used 23.0–26.0% less process CPU per field across
+three alternating pairs, with identical complete RAM, CPU/device/audio state
+and all 13,000 completed frames. This is a software-scanout result on the
+recorded Windows host under background load; it does not certify other games,
+all gameplay or a hardware presentation backend. See
+[the HLE burndown](docs/HLE-BURNDOWN.md) for raw evidence and remaining work.
 
 See [ISSUES.md](ISSUES.md) for the tested/untested matrix, exact build identities,
 evidence paths, Beads references and resume notes. `TODO.md`, `PLAN.md`, and

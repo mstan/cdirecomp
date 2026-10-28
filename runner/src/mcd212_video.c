@@ -15,6 +15,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifndef CDI_VIDEO_HLE
+#define CDI_VIDEO_HLE 0
+#endif
+
 enum { PLANE_A, PLANE_B, PLANE_COUNT };
 enum {
     CODING_OFF,
@@ -90,6 +94,10 @@ typedef struct {
     _Atomic int published_buffer;
     _Atomic uint64_t generation;
     _Atomic uint64_t publish_sequence;
+    _Atomic uint64_t published_hash;
+    _Atomic uint64_t content_generation;
+    uint64_t scanout_jobs;
+    uint64_t fused_jobs;
 } VideoPipeline;
 
 static VideoPipeline video;
@@ -168,6 +176,8 @@ void mcd212_video_reset(void) {
     atomic_store_explicit(&video.published_buffer, 0, memory_order_relaxed);
     atomic_store_explicit(&video.generation, 0, memory_order_relaxed);
     atomic_store_explicit(&video.publish_sequence, 0, memory_order_relaxed);
+    atomic_store_explicit(&video.published_hash, 0, memory_order_relaxed);
+    atomic_store_explicit(&video.content_generation, 0, memory_order_relaxed);
     video.width = video.published_width = 768;
     video.height = video.published_height = 280;
 }
@@ -702,10 +712,171 @@ static void compose_line(uint16_t line) {
     draw_cursor(destination, line);
 }
 
+#if CDI_VIDEO_HLE
+/* A scanout job owns source consumption through final pixels and diagnostic
+ * snapshots. Its boundaries are changes in source color or matte state, not
+ * the decoder/contribution/transparency/compositor helper boundaries. RLE7
+ * streams feed it directly; other formats retain their faithful decoders.
+ * There is no cached guest memory or shadow register state between jobs. */
+typedef struct {
+    uint32_t address;
+    uint32_t color;
+    unsigned end;
+    unsigned pixels;
+    unsigned produced;
+    unsigned scale;
+    uint16_t consumed;
+    int direct;
+} ScanoutSource;
+
+static ScanoutSource scanout_source(int plane, uint32_t address,
+                                     uint32_t address_a, uint16_t width) {
+    PlaneSetup *setup = &video.registers.plane[plane];
+    ScanoutSource source = {0};
+    uint16_t source_width = width;
+    source.address = address;
+    if (setup->file_type == FILE_RUN_LENGTH &&
+        setup->bits_per_pixel == BITS_HIGH_8) {
+        width = video.width;
+    }
+    source.scale = width <= 384u ? 2u : 1u;
+    source.pixels = width;
+    source.direct = !setup->hold_enabled &&
+        setup->coding >= CODING_CLUT8 &&
+        setup->file_type == FILE_RUN_LENGTH &&
+        setup->bits_per_pixel != BITS_DOUBLE_4 &&
+        (unsigned)width * source.scale == video.width;
+    if (source.direct) {
+        /* Match the reference's cleared, unused decoded-row tail. */
+        memset(video.decoded[plane] + video.width, 0,
+               (MCD212_VIDEO_MAX_WIDTH - video.width) * sizeof(uint32_t));
+    } else {
+        source.consumed = decode_plane(plane, address, address_a, source_width);
+        apply_pixel_hold(plane);
+    }
+    return source;
+}
+
+static void scanout_next(int plane, ScanoutSource *source, unsigned x) {
+    if (x < source->end) return;
+    if (source->direct) {
+        uint8_t format = dram_byte(source->address + source->consumed++);
+        unsigned count = 1;
+        unsigned remaining = source->pixels - source->produced;
+        if (format & 0x80u) {
+            count = dram_byte(source->address + source->consumed++);
+            if (!count) count = remaining;
+        }
+        if (count > remaining) count = remaining;
+        source->produced += count;
+        source->end = source->produced * source->scale;
+        source->color = clut_lookup(plane, format & 0x7Fu);
+    } else {
+        const uint32_t *row = video.decoded[plane];
+        source->color = row[x];
+        source->end = x + 1;
+        while (source->end < video.width &&
+               row[source->end] == source->color) source->end++;
+    }
+}
+
+static unsigned scanout_matte_end(const MatteState *matte) {
+    unsigned end = video.width;
+    unsigned plane;
+    for (plane = 0; plane < PLANE_COUNT; plane++) {
+        if (matte->next[plane] < matte->limit[plane]) {
+            unsigned next = video.registers.matte_command[matte->next[plane]] & 0x3FFu;
+            if (next < end) end = next;
+        }
+    }
+    return end;
+}
+
+static void scanout_span(uint16_t line, unsigned x, unsigned end,
+                          uint32_t raw_a, uint32_t raw_b,
+                          const MatteState *matte) {
+    const VideoRegisters *r = &video.registers;
+    uint32_t a = apply_contribution(raw_a, matte->factor[0]);
+    uint32_t b = apply_contribution(raw_b, matte->factor[1]);
+    int transparent_a = transparent_pixel(PLANE_A, raw_a, matte->flag);
+    int transparent_b = transparent_pixel(PLANE_B, raw_b, matte->flag);
+    int front_transparent = r->plane_b_front ? transparent_b : transparent_a;
+    int back_transparent = r->plane_b_front ? transparent_a : transparent_b;
+    uint8_t verdict = (uint8_t)((transparent_a ? 1u : 0u) |
+                                (transparent_b ? 2u : 0u));
+    uint32_t pixel;
+    size_t offset = (size_t)line * video.width;
+    uint32_t *destination = video.frame[video.drawing_buffer] + offset;
+    uint32_t *snap_a = video.plane_frame[PLANE_A] + offset;
+    uint32_t *snap_b = video.plane_frame[PLANE_B] + offset;
+    uint8_t *verdicts = video.verdict_frame + offset;
+    if (r->mixing && !transparent_a && !transparent_b) {
+        pixel = add_planes(a, b);
+        verdict |= 0x20u;
+    } else if (!front_transparent) {
+        pixel = (r->plane_b_front ? b : a) | 0xFF000000u;
+        verdict |= 0x04u;
+    } else if (!back_transparent) {
+        pixel = (r->plane_b_front ? a : b) | 0xFF000000u;
+        verdict |= 0x08u;
+    } else {
+        pixel = yrgb_color(r->backdrop);
+        verdict |= 0x10u;
+    }
+    for (; x < end; x++) {
+        destination[x] = pixel;
+        snap_a[x] = raw_a | 0xFF000000u;
+        snap_b[x] = raw_b | 0xFF000000u;
+        verdicts[x] = verdict;
+    }
+}
+
+static void scanout_job(uint32_t address_a, uint32_t address_b,
+                         uint16_t line, uint16_t width_a, uint16_t width_b,
+                         uint16_t *bytes_a, uint16_t *bytes_b) {
+    ScanoutSource a = scanout_source(PLANE_A, address_a, address_a, width_a);
+    ScanoutSource b = scanout_source(PLANE_B, address_b, address_a, width_b);
+    MatteState matte;
+    unsigned x = 0;
+    initialize_matte_state(&matte);
+    if (a.direct || b.direct) video.fused_jobs++;
+    while (x < video.width) {
+        unsigned end;
+        unsigned i;
+        scanout_next(PLANE_A, &a, x);
+        scanout_next(PLANE_B, &b, x);
+        apply_matte_commands(&matte, x);
+        end = a.end < b.end ? a.end : b.end;
+        if (scanout_matte_end(&matte) < end) end = scanout_matte_end(&matte);
+        /* Preserve the same decoded-row diagnostics without a separate
+         * expand/hold/composite pass over the direct source. */
+        if (a.direct)
+            for (i = x; i < end; i++) video.decoded[PLANE_A][i] = a.color;
+        if (b.direct)
+            for (i = x; i < end; i++) video.decoded[PLANE_B][i] = b.color;
+        scanout_span(line, x, end, a.color, b.color, &matte);
+        x = end;
+    }
+    draw_cursor(video.frame[video.drawing_buffer] + (size_t)line * video.width, line);
+    if (bytes_a) *bytes_a = video.registers.plane[PLANE_B].coding == CODING_RGB555
+                               ? b.consumed : a.consumed;
+    if (bytes_b) *bytes_b = b.consumed;
+}
+#endif
+
 void mcd212_video_draw_line(uint32_t address_a, uint32_t address_b,
                             uint16_t line, uint16_t source_width_a,
                             uint16_t source_width_b,
                             uint16_t *bytes_a, uint16_t *bytes_b) {
+    video.scanout_jobs++;
+#if CDI_VIDEO_HLE
+    /* Out-of-range lines still have reference decode/consumption semantics. */
+    if (line < video.height) {
+        scanout_job(address_a, address_b, line, source_width_a, source_width_b,
+                    bytes_a, bytes_b);
+        return;
+    }
+#endif
     uint16_t consumed_a = decode_plane(PLANE_A, address_a, address_a,
                                        source_width_a);
     uint16_t consumed_b = decode_plane(PLANE_B, address_b, address_a,
@@ -719,18 +890,87 @@ void mcd212_video_draw_line(uint32_t address_a, uint32_t address_b,
     if (bytes_b) *bytes_b = consumed_b;
 }
 
+static uint64_t hash_frame_bytes(const uint32_t *pixels, size_t byte_count) {
+    const uint8_t *bytes = (const uint8_t *)pixels;
+    uint64_t hash = 0x14650FB0739D0383ULL;
+    size_t i;
+    for (i = 0; i < byte_count; i++) {
+        hash ^= bytes[i];
+        hash *= 0x00000100000001B3ULL;
+    }
+    return hash;
+}
+
 void mcd212_video_end_frame(void) {
     int completed = video.drawing_buffer;
+#if CDI_VIDEO_HLE
+    int previous = atomic_load_explicit(&video.published_buffer, memory_order_relaxed);
+    size_t byte_count = (size_t)video.width * video.height * sizeof(uint32_t);
+    int same_pixels = !memcmp(video.frame[previous], video.frame[completed], byte_count);
+    int same_geometry = video.width == video.published_width &&
+                        video.height == video.published_height;
+    int initialized = atomic_load_explicit(&video.generation, memory_order_relaxed) != 0;
+    int same_content = initialized && same_pixels && same_geometry;
+    uint64_t hash = same_content
+        ? atomic_load_explicit(&video.published_hash, memory_order_relaxed)
+        : hash_frame_bytes(video.frame[completed], byte_count);
+#endif
     atomic_fetch_add_explicit(&video.publish_sequence, 1, memory_order_acq_rel);
     atomic_store_explicit(&video.published_buffer, completed, memory_order_release);
     video.published_width = video.width;
     video.published_height = video.height;
+#if CDI_VIDEO_HLE
+    atomic_store_explicit(&video.published_hash, hash, memory_order_relaxed);
+    if (!same_content)
+        atomic_fetch_add_explicit(&video.content_generation, 1, memory_order_relaxed);
+#else
+    /* The reference republishes and presents every field, as before. */
+    atomic_fetch_add_explicit(&video.content_generation, 1, memory_order_relaxed);
+#endif
     atomic_fetch_add_explicit(&video.generation, 1, memory_order_release);
     atomic_fetch_add_explicit(&video.publish_sequence, 1, memory_order_release);
     video.drawing_buffer ^= 1;
     /* Undrawn scanlines retain the previous field's display memory. */
+#if CDI_VIDEO_HLE
+    /* Both full buffers were identical at the preceding field boundary.
+     * Drawing writes only inside the current visible prefix. Copying that
+     * changed prefix restores the full-buffer invariant, including hidden
+     * storage that can reappear after a geometry change. */
+    if (!same_pixels)
+        memcpy(video.frame[video.drawing_buffer], video.frame[completed], byte_count);
+#else
     memcpy(video.frame[video.drawing_buffer], video.frame[completed],
            sizeof video.frame[completed]);
+#endif
+}
+
+uint32_t mcd212_video_copy_changed_frame(uint32_t *destination, uint32_t capacity,
+                                         uint64_t previous_content,
+                                         uint16_t *width, uint16_t *height,
+                                         uint64_t *generation, uint64_t *content) {
+    uint64_t before, after, field = 0, identity = 0;
+    uint16_t w = 0, h = 0;
+    uint32_t copied = 0;
+    do {
+        before = atomic_load_explicit(&video.publish_sequence, memory_order_acquire);
+        if (before & 1u) { after = before + 1u; continue; }
+        w = video.published_width;
+        h = video.published_height;
+        field = atomic_load_explicit(&video.generation, memory_order_acquire);
+        identity = atomic_load_explicit(&video.content_generation, memory_order_relaxed);
+        copied = field && identity != previous_content ? (uint32_t)w * h : 0;
+        if (destination && copied) {
+            int front = atomic_load_explicit(&video.published_buffer, memory_order_acquire);
+            if (capacity < copied) video_error("framebuffer destination too small", capacity);
+            memcpy(destination, video.frame[front], (size_t)copied * sizeof(uint32_t));
+        }
+        after = atomic_load_explicit(&video.publish_sequence, memory_order_acquire);
+    } while (before != after || (after & 1u));
+    if (width) *width = w;
+    if (height) *height = h;
+    if (generation) *generation = field;
+    if (content) *content = identity;
+    return copied;
 }
 
 uint32_t mcd212_video_copy_frame(uint32_t *destination, uint32_t capacity,
@@ -776,7 +1016,6 @@ uint64_t mcd212_video_frame_hash(uint16_t *width, uint16_t *height,
     uint16_t w = 0;
     uint16_t h = 0;
     do {
-        size_t i;
         size_t byte_count;
         int front;
         const uint8_t *bytes;
@@ -790,13 +1029,15 @@ uint64_t mcd212_video_frame_hash(uint16_t *width, uint16_t *height,
         front = atomic_load_explicit(&video.published_buffer, memory_order_acquire);
         bytes = (const uint8_t *)video.frame[front];
         byte_count = (size_t)w * h * sizeof(uint32_t);
-        hash = 0x14650FB0739D0383ULL;
-        for (i = 0; i < byte_count; i++) {
-            hash ^= bytes[i];
-            hash *= 0x00000100000001B3ULL;
-        }
         completed_generation =
             atomic_load_explicit(&video.generation, memory_order_acquire);
+#if CDI_VIDEO_HLE
+        hash = completed_generation
+            ? atomic_load_explicit(&video.published_hash, memory_order_relaxed)
+            : hash_frame_bytes((const uint32_t *)bytes, byte_count);
+#else
+        hash = hash_frame_bytes((const uint32_t *)bytes, byte_count);
+#endif
         after = atomic_load_explicit(&video.publish_sequence, memory_order_acquire);
     } while (before != after || (after & 1u));
     if (width) *width = w;
@@ -825,6 +1066,8 @@ void mcd212_video_debug_state(Mcd212VideoDebugState *out) {
     size_t i;
     if (!out) return;
     memset(out, 0, sizeof *out);
+    out->scanout_jobs = video.scanout_jobs;
+    out->fused_jobs = video.fused_jobs;
     for (i = 0; i < PLANE_COUNT; i++) {
         size_t x;
         out->plane_line_hash[i] = 0x14650FB0739D0383ULL;
