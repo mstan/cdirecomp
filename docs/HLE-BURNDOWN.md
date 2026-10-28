@@ -333,11 +333,14 @@ scanout. The implementation is portable C under the existing build-time HLE
 choice; LLE remains available.
 
 The first key included the cursor restart field even when blinking was off.
-It matched all differential contracts but reused only 6,480/3,118,800 jobs;
-the retained pair was 2.169540 versus 2.196779 CPU ms/field. This attempt is
-**not adopted**. Its complete pair, source diff, executable and source snapshots
-are retained in `line-reuse-pairs` / `line-key-attempt`; later partial samples
-were stopped and excluded once the decision was resolved.
+It matched all differential contracts but reused only 6,480/3,118,800 jobs.
+Two retained pairs completed before cancellation: 2.169540 versus 2.196779 and
+2.106275 versus 2.133391 CPU ms/field. No benefit was established; these small
+differences alone are not a proven regression beyond measurement variation.
+This attempt is **not adopted**. Both complete pairs, source diff, executable
+and source snapshots are retained in `line-reuse-pairs` / `line-key-attempt`,
+with `unadopted-evidence.json` retaining both comparisons. The incomplete third
+pair was stopped and excluded once the decision was resolved.
 
 The corrected key excludes only that nonsemantic restart field when blinking
 is disabled. It reuses 2,575,818/3,118,800 jobs. `line-reuse-key-pairs` retains

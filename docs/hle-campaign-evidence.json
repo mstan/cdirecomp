@@ -714,9 +714,28 @@
     },
     {
       "name": "line-reuse-pairs",
-      "reason": "Nonsemantic cursor restart-field key prevented almost all reuse; no benefit in complete retained pair; partial later runs excluded",
-      "evidence": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\line-reuse-pairs\\stopped.json",
-      "source_and_binary": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\line-key-attempt"
+      "reason": "Nonsemantic cursor restart-field key prevented almost all reuse; neither of two complete retained pairs established a benefit. Small timing differences alone do not prove a regression beyond variation. Third incomplete pair excluded.",
+      "evidence": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\line-reuse-pairs\\unadopted-evidence.json",
+      "source_and_binary": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\line-key-attempt",
+      "complete_retained_pairs": 2,
+      "contracts": [
+        {
+          "left": "pair1-reference",
+          "right": "pair1-candidate",
+          "equal": true,
+          "differences": []
+        },
+        {
+          "left": "pair2-reference",
+          "right": "pair2-candidate",
+          "equal": true,
+          "differences": []
+        }
+      ],
+      "paired_cpu_savings_percent": [
+        -1.2555187637969256,
+        -1.28741046020997
+      ]
     }
   ],
   "candidate_dispositions": [
