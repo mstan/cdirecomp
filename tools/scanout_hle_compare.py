@@ -175,7 +175,7 @@ def contract(output: Path, a: str, b: str, presentation: str,
     # counts remain recorded; headless has no consumer, so even those should
     # match in this workload.
     for state in (left, right):
-        for key in ("scanout_jobs", "fused_jobs"):
+        for key in ("scanout_jobs", "fused_jobs", "reused_jobs"):
             state["video_state"].pop(key, None)
         if presentation == "dummy":
             # SDL consumes PCM on host time. Only its queue/drop counters can
@@ -290,7 +290,7 @@ def main() -> None:
                "reference_cpu_ms_per_field": a, "candidate_cpu_ms_per_field": b,
                "paired_cpu_savings_percent": savings,
                "median_cpu_savings_percent": statistics.median(savings),
-               "status": "measured improvement" if min(savings) > 3 else "review individual samples",
+               "status": "collected; assess per-game samples and variation",
                "scope": "one built title, fixed early-gameplay interval; no broader title/platform/release claim"}
     (args.output / "campaign-evidence.json").write_text(json.dumps(summary, indent=2))
     print(json.dumps({key: summary[key] for key in (

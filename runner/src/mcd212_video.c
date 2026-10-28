@@ -73,6 +73,22 @@ typedef struct {
     uint8_t external_video;
 } VideoRegisters;
 
+#if CDI_VIDEO_HLE
+/* A completed line is reusable only when its entire input contract is equal.
+ * Compare authoritative source bytes, rather than maintaining write-side tags.
+ * Output/plane/verdict storage already retains the last result for each row. */
+enum { LINE_SOURCE_CAPACITY = MCD212_VIDEO_MAX_WIDTH * 2u };
+typedef struct {
+    VideoRegisters registers;
+    uint32_t address[PLANE_COUNT];
+    uint16_t width[PLANE_COUNT], consumed[PLANE_COUNT];
+    uint8_t source[PLANE_COUNT][LINE_SOURCE_CAPACITY];
+    uint32_t decoded[PLANE_COUNT][MCD212_VIDEO_MAX_WIDTH];
+    uint8_t valid;
+} CompletedLine;
+static CompletedLine completed_lines[MCD212_VIDEO_MAX_HEIGHT];
+#endif
+
 typedef struct {
     VideoRegisters registers;
     uint32_t decoded[PLANE_COUNT][MCD212_VIDEO_MAX_WIDTH];
@@ -98,6 +114,7 @@ typedef struct {
     _Atomic uint64_t content_generation;
     uint64_t scanout_jobs;
     uint64_t fused_jobs;
+    uint64_t reused_jobs;
 } VideoPipeline;
 
 static VideoPipeline video;
@@ -159,6 +176,9 @@ static uint8_t plane_b_coding(unsigned code) {
 void mcd212_video_reset(void) {
     unsigned factor;
     memset(&video, 0, sizeof video);
+#if CDI_VIDEO_HLE
+    memset(completed_lines, 0, sizeof completed_lines);
+#endif
     for (factor = 0; factor < 64; factor++) {
         unsigned component;
         for (component = 0; component < 256; component++)
@@ -315,6 +335,10 @@ void mcd212_video_begin_frame(uint16_t base_width, uint16_t base_height,
     uint32_t height = interlaced ? (uint32_t)base_height * 2u : base_height;
     if (width > MCD212_VIDEO_MAX_WIDTH || height > MCD212_VIDEO_MAX_HEIGHT)
         video_error("invalid display geometry", (width << 16) | height);
+#if CDI_VIDEO_HLE
+    if (width != video.width || height != video.height)
+        memset(completed_lines, 0, sizeof completed_lines);
+#endif
     video.width = (uint16_t)width;
     video.height = (uint16_t)height;
 }
@@ -862,6 +886,69 @@ static void scanout_job(uint32_t address_a, uint32_t address_b,
                                ? b.consumed : a.consumed;
     if (bytes_b) *bytes_b = b.consumed;
 }
+
+static const uint8_t *line_source(uint32_t address, uint16_t count) {
+    extern uint8_t g_ram0[CDI_RAM0_SIZE];
+    extern uint8_t g_ram1[CDI_RAM1_SIZE];
+    if (!count) return g_ram0;
+    if (count > LINE_SOURCE_CAPACITY) return NULL;
+    if (address < CDI_RAM0_SIZE && count <= CDI_RAM0_SIZE - address)
+        return g_ram0 + address;
+    if (address >= CDI_RAM1_BASE && address - CDI_RAM1_BASE < CDI_RAM1_SIZE &&
+        count <= CDI_RAM1_SIZE - (address - CDI_RAM1_BASE))
+        return g_ram1 + address - CDI_RAM1_BASE;
+    return NULL;
+}
+
+static void reusable_line(uint32_t a, uint32_t b, uint16_t line,
+                         uint16_t wa, uint16_t wb,
+                         uint16_t *used_a, uint16_t *used_b) {
+    CompletedLine *job = &completed_lines[line];
+    VideoRegisters key = video.registers;
+    const uint8_t *source[PLANE_COUNT];
+    const CursorSetup *cursor = &video.registers.cursor;
+    unsigned plane;
+    /* RGB555 couples the two sources and may read more A bytes than its
+     * published consumption. Keep the existing job until that input contract
+     * is separately captured. Blinking cursor rows depend on field phase. */
+    int eligible = video.registers.plane[PLANE_B].coding != CODING_RGB555 &&
+        !(cursor->enabled && cursor->off_units && line >= cursor->y &&
+          line < cursor->y + 16u);
+    /* The restart field has no output effect without blinking. Control lists
+     * commonly rewrite CE every field, even for a disabled cursor. */
+    if (!cursor->enabled || !cursor->off_units) key.cursor.start_field = 0;
+    if (eligible && job->valid && job->address[0] == a && job->address[1] == b &&
+        job->width[0] == wa && job->width[1] == wb &&
+        !memcmp(&job->registers, &key, sizeof job->registers)) {
+        for (plane = 0; plane < PLANE_COUNT; plane++) {
+            source[plane] = line_source(job->address[plane], job->consumed[plane]);
+            if (!source[plane] || memcmp(source[plane], job->source[plane],
+                                        job->consumed[plane])) break;
+        }
+        if (plane == PLANE_COUNT) {
+            memcpy(video.decoded, job->decoded, sizeof video.decoded);
+            if (used_a) *used_a = job->consumed[0];
+            if (used_b) *used_b = job->consumed[1];
+            video.reused_jobs++;
+            return;
+        }
+    }
+    job->valid = 0;
+    scanout_job(a, b, line, wa, wb, &job->consumed[0], &job->consumed[1]);
+    if (used_a) *used_a = job->consumed[0];
+    if (used_b) *used_b = job->consumed[1];
+    if (!eligible) return;
+    job->address[0] = a; job->address[1] = b;
+    job->width[0] = wa; job->width[1] = wb;
+    for (plane = 0; plane < PLANE_COUNT; plane++) {
+        source[plane] = line_source(job->address[plane], job->consumed[plane]);
+        if (!source[plane]) return;
+        memcpy(job->source[plane], source[plane], job->consumed[plane]);
+    }
+    job->registers = key;
+    memcpy(job->decoded, video.decoded, sizeof job->decoded);
+    job->valid = 1;
+}
 #endif
 
 void mcd212_video_draw_line(uint32_t address_a, uint32_t address_b,
@@ -872,8 +959,8 @@ void mcd212_video_draw_line(uint32_t address_a, uint32_t address_b,
 #if CDI_VIDEO_HLE
     /* Out-of-range lines still have reference decode/consumption semantics. */
     if (line < video.height) {
-        scanout_job(address_a, address_b, line, source_width_a, source_width_b,
-                    bytes_a, bytes_b);
+        reusable_line(address_a, address_b, line, source_width_a, source_width_b,
+                      bytes_a, bytes_b);
         return;
     }
 #endif
@@ -1068,6 +1155,7 @@ void mcd212_video_debug_state(Mcd212VideoDebugState *out) {
     memset(out, 0, sizeof *out);
     out->scanout_jobs = video.scanout_jobs;
     out->fused_jobs = video.fused_jobs;
+    out->reused_jobs = video.reused_jobs;
     for (i = 0; i < PLANE_COUNT; i++) {
         size_t x;
         out->plane_line_hash[i] = 0x14650FB0739D0383ULL;

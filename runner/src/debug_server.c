@@ -770,7 +770,7 @@ static void resp_video_state(char *out, int outlen) {
         "\"plane_line_fnv1a_a\":\"%016llx\","
         "\"plane_line_fnv1a_b\":\"%016llx\","
         "\"clut_fnv1a\":\"%016llx\","
-        "\"scanout_jobs\":%llu,\"fused_jobs\":%llu,"
+        "\"scanout_jobs\":%llu,\"fused_jobs\":%llu,\"reused_jobs\":%llu,"
         "\"cursor_pattern\":\"",
         csr1r, csr2r, r[0x10], r[0x00], r[0x12], r[0x02],
         r[0x18], r[0x08], r[0x14], r[0x04], r[0x1A], r[0x0A],
@@ -795,7 +795,8 @@ static void resp_video_state(char *out, int outlen) {
         (unsigned long long)video.plane_line_hash[1],
         (unsigned long long)video.clut_hash,
         (unsigned long long)video.scanout_jobs,
-        (unsigned long long)video.fused_jobs);
+        (unsigned long long)video.fused_jobs,
+        (unsigned long long)video.reused_jobs);
     for (int i = 0; i < 16 && n < outlen - 8; i++)
         n += snprintf(out + n, outlen - n, "%04X", cursor.pattern[i]);
     snprintf(out + n, outlen - n, "\"}");

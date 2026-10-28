@@ -310,3 +310,47 @@ acceptance gaps. The next step is to profile the remaining built execution
 cost and select the next complete job, including whether unchanged source and
 register state can avoid a whole scanout job, or whether board-event spans are
 now the larger opportunity. Neither hypothesis is an adopted improvement.
+
+### Completed-line native job qualification
+
+Gameplay-only residual sampling of the coarse native build selected scanout:
+220/491 samples in decode/composition/transparency/matte, another 26 in frame
+publication, versus 46 in the board-event chain. These are perturbed selection
+samples, not timing results; retain `profile-residual.json` and
+`residual-selection.json` beneath the evidence root.
+
+The native frame job now retains the last completed line's complete input
+contract: persistent video controls, addresses, source geometry and the exact
+authoritative source bytes consumed. Equal inputs reuse the existing retained
+frame/plane/verdict result and restore the decoded-row diagnostics. Every MCD
+control instruction, source-pointer update, event and IRQ still executes.
+Geometry changes invalidate all line results, including changes back to an
+earlier geometry. No guest-write dirty tags or shadow guest state are used.
+RGB555's coupled source contract and blinking cursor rows retain ordinary
+scanout. The implementation is portable C under the existing build-time HLE
+choice; LLE remains available.
+
+The first key included the cursor restart field even when blinking was off.
+It matched all differential contracts but reused only 6,480/3,118,800 jobs;
+the retained pair was 2.169540 versus 2.196779 CPU ms/field. This attempt is
+**not adopted**. Its complete pair, source diff, executable and source snapshots
+are retained in `line-reuse-pairs` / `line-key-attempt`; later partial samples
+were stopped and excluded once the decision was resolved.
+
+The corrected key excludes only that nonsemantic restart field when blinking
+is disabled. It reuses 2,575,818/3,118,800 jobs. `line-reuse-key-pairs` retains
+three alternating built-game pairs against the preceding qualified native job:
+
+| Pair | Previous native CPU ms/field | Completed-line job CPU ms/field | CPU reduction |
+| --- | --- | --- | --- |
+| 1 | 2.042535 | 1.290871 | 36.80% |
+| 2 | 2.070839 | 1.238239 | 40.21% |
+| 3 | 2.070593 | 1.235873 | 40.31% |
+
+Median incremental CPU reduction is **40.21%**, with complete canonical guest
+contracts equal in every warm/retained comparison. Do not add this percentage
+to the earlier combined-package percentage. Differential component coverage
+now includes 50,688 line jobs and 4,792 observed reuse hits, direct source-byte
+mutations, CE rewrites across publication, controls, geometry and retained
+interlaced storage. Windows runtime tests and Linux GCC portable LLE/HLE
+fixtures/parity pass. Final consumer/frontend integration remains pending.

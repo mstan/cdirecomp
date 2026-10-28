@@ -63,7 +63,7 @@ typedef struct {
     uint32_t plane_line_first[2], plane_line_nonblack[2];
     uint64_t plane_line_hash[2];
     uint64_t clut_hash;
-    uint64_t scanout_jobs, fused_jobs;
+    uint64_t scanout_jobs, fused_jobs, reused_jobs;
 } Mcd212VideoDebugState;
 
 /* Side-effect-free snapshot of the hardware-cursor control state.  The BIOS

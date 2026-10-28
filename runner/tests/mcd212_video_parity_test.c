@@ -31,8 +31,8 @@ static uint32_t delivered[2][MCD212_VIDEO_MAX_WIDTH * MCD212_VIDEO_MAX_HEIGHT];
 static uint64_t content[2];
 static uint8_t verdict[2][MCD212_VIDEO_MAX_WIDTH];
 static uint32_t random_state = 0x21268070u;
-static unsigned case_id, line_id, jobs, fused;
-static uint64_t previous_fused;
+static unsigned case_id, line_id, jobs, fused, reused;
+static uint64_t previous_fused, previous_reused;
 
 static uint32_t random_word(void) {
     random_state ^= random_state << 13;
@@ -60,7 +60,10 @@ static void compare_line(uint32_t a, uint32_t b, uint16_t wa, uint16_t wb) {
     lle_mcd212_video_debug_state(&state[1]);
     fused += (unsigned)(state[0].fused_jobs - previous_fused);
     previous_fused = state[0].fused_jobs;
+    reused += (unsigned)(state[0].reused_jobs - previous_reused);
+    previous_reused = state[0].reused_jobs;
     state[0].fused_jobs = state[1].fused_jobs = 0;
+    state[0].reused_jobs = state[1].reused_jobs = 0;
     CHECK(!memcmp(&state[0], &state[1], sizeof state[0]));
     for (int plane = 0; plane < 2; plane++) {
         unsigned width = mcd212_video_debug_plane_row(plane, line_id, rows[0], MCD212_VIDEO_MAX_WIDTH);
@@ -109,6 +112,7 @@ int main(void) {
         mcd212_video_reset();
         lle_mcd212_video_reset();
         previous_fused = 0;
+        previous_reused = 0;
         memset(content, 0, sizeof content);
         if (!case_id) {
             CHECK(mcd212_video_frame_hash(NULL, NULL, NULL) ==
@@ -147,7 +151,8 @@ int main(void) {
                        ((random_word() & 63) << 10) | x);
         }
         control(0, 0xCD000000u | (2 << 12) | (random_word() % (base * 2)));
-        control(0, 0xCE880000u | (random_word() & 0x0047800Fu));
+        uint32_t cursor_control = 0xCE880000u | (random_word() & 0x0047800Fu);
+        control(0, cursor_control);
         for (unsigned row = 0; row < 16; row++)
             control(0, 0xCF000000u | (row << 16) | (random_word() & 0xFFFF));
         for (unsigned field = 0; field < 3; field++) {
@@ -163,12 +168,42 @@ int main(void) {
                 }
                 compare_line(0x1000, CDI_RAM1_BASE + 0x2000,
                              (uint16_t)field_base, (uint16_t)field_base);
+                /* Hit the complete job, then change authoritative bytes and
+                 * controls without relying on write-side invalidation. */
+                compare_line(0x1000, CDI_RAM1_BASE + 0x2000,
+                             (uint16_t)field_base, (uint16_t)field_base);
+                g_ram0[0x1000] ^= 0x7fu;
+                g_ram1[0x2000] ^= 0x7fu;
+                compare_line(0x1000, CDI_RAM1_BASE + 0x2000,
+                             (uint16_t)field_base, (uint16_t)field_base);
             }
             compare_frame();
+            if (field == 0) {
+                /* Reuse across publication, including interlaced retained
+                 * rows. Registers and bytes are still authoritative. */
+                mcd212_video_begin_frame((uint16_t)field_base, 6, interlaced);
+                lle_mcd212_video_begin_frame((uint16_t)field_base, 6, interlaced);
+                line_id = 2;
+                compare_line(0x1000, CDI_RAM1_BASE + 0x2000,
+                             (uint16_t)field_base, (uint16_t)field_base);
+                control(0, 0xD8000000u | (random_word() & 15));
+                compare_line(0x1000, CDI_RAM1_BASE + 0x2000,
+                             (uint16_t)field_base, (uint16_t)field_base);
+                compare_frame();
+                mcd212_video_begin_frame((uint16_t)field_base, 6, interlaced);
+                lle_mcd212_video_begin_frame((uint16_t)field_base, 6, interlaced);
+                /* Rewriting CE changes restart-field bookkeeping. Only
+                 * blinking cursor rows have a corresponding output input. */
+                control(0, cursor_control);
+                compare_line(0x1000, CDI_RAM1_BASE + 0x2000,
+                             (uint16_t)field_base, (uint16_t)field_base);
+                compare_frame();
+            }
             if (field == 1) compare_frame(); /* identical field, no draw work */
         }
     }
     CHECK(fused != 0);
-    printf("scanout contract: PASS %u jobs, %u direct-source observations\n", jobs, fused);
+    CHECK(reused != 0);
+    printf("scanout contract: PASS %u jobs, %u direct-source observations, %u reused jobs\n", jobs, fused, reused);
     return 0;
 }
