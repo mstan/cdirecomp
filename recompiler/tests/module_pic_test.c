@@ -20,6 +20,8 @@ static uint8_t memory[0x8000];
 static uint32_t active_base,interrupt_pc;
 static uint32_t jumped;
 static int failures,traps,absolute_calls,invalid;
+static unsigned tokens;
+static int expect_coarse;
 static jmp_buf interrupt;
 #define CHECK(x) do { if (!(x)) { fprintf(stderr,"FAIL line %d: %s\n",__LINE__,#x);failures++; } } while (0)
 uint8_t m68k_read8(uint32_t addr) { CHECK(addr<sizeof memory);return memory[addr%sizeof memory]; }
@@ -36,7 +38,7 @@ void m68k_trap_vector(uint8_t vector) {
     CHECK(m68k_read16(g_cpu.PC)==1);traps++;
 }
 uint64_t cdi_native_execution_token(uint32_t base,CdiNativeDispatch expected) {
-    CHECK(base==active_base && expected==fixture_dispatch);return 42;
+    CHECK(base==active_base && expected==fixture_dispatch);tokens++;return 42;
 }
 int cdi_native_instruction_valid(uint32_t addr,CdiNativeDispatch expected,uint64_t token) {
     return !invalid && token==42 && expected==fixture_dispatch && addr>=active_base && addr<active_base+0x200;
@@ -55,7 +57,7 @@ void hybrid_jmp_interpret(uint32_t addr) { jumped=addr; }
 static void start(uint32_t base,const uint8_t *image) {
     memcpy(memory+base,image,0x200);memset(&g_cpu,0,sizeof g_cpu);
     active_base=base;invalid=g_redirect_pending=rte_pending=g_rte_resume=0;
-    traps=absolute_calls=0;g_cpu.A[7]=0x7f00;
+    traps=absolute_calls=0;tokens=0;g_native_insn_count=0;g_cpu.A[7]=0x7f00;
 }
 static void state(void) {
     CHECK(g_cpu.A[0]==active_base+0xa0);
@@ -64,9 +66,11 @@ static void state(void) {
     CHECK(g_cpu.D[5]==1 && g_cpu.D[7]==7);
     CHECK(traps==1 && absolute_calls==1 && !g_redirect_pending);
     CHECK(g_cpu.A[7]==0x7f00);
+    if (expect_coarse) CHECK(tokens*2<g_native_insn_count);
 }
 int main(int argc,char **argv) {
-    uint8_t image[0x200];if (argc!=2) return 1;
+    expect_coarse=argc==3 && !strcmp(argv[2],"--expect-coarse");
+    uint8_t image[0x200];if (argc!=2 && !expect_coarse) return 1;
     FILE *file=fopen(argv[1],"rb");if (!file) return 1;
     int read=fread(image,1,sizeof image,file)==sizeof image;fclose(file);if (!read) return 1;
     CHECK(fixture_has_offset(0x52) && fixture_has_offset(0xb2) && fixture_has_offset(0x7e));
