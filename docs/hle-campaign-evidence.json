@@ -3,7 +3,7 @@
   "owner_issue": "beads-oatv",
   "campaign_issue": "beads-2wy8.1",
   "consumer_issue": "beads-7t8h",
-  "status": "in_progress; candidate5 qualified and stopped for serial owner check-in",
+  "status": "owner-requested pause; candidate3 implementation and measurements retained; final handoff pending",
   "engine_head": "85c869ee808b438905f2c1bc29a46d30f27647f8",
   "core_head": "3955bf3311f55e031836f70b5c1839e95b81f9cf",
   "game_head": "16353fc849ef8056af891e2c3b7d3e29ae3a41da",
@@ -764,18 +764,16 @@
     {
       "candidate": 3,
       "name": "Graphics service to completed drawing",
-      "status": "open_queued",
-      "validated_portion": "renderer preparation consolidated into candidates1/2; native callback continuations into7",
+      "status": "implemented_measured_owner_pause",
+      "validated_portion": "Complete deferred drawing queue service, executing actual guest callbacks and publishing authoritative queue/buffer state. Not a rewrite of every graphics callback or scene algorithm.",
       "evidence": [
-        "profile-residual.json",
-        "profile-final.json",
-        "combined-native-pairs",
-        "line-reuse-key-pairs"
+        "docs/drawing-job-evidence.json"
       ],
-      "reason": "The old interpreter hotspot was a dynamic callback queue processor at module offset0x17018, not an established single drawing/copy contract. Final sampling has16/344 samples in named game bodies. This does not attribute all indirect cost or qualify a graphics-service replacement.",
-      "prerequisite": "Capture one demonstrably expensive drawing/callback job at its caller boundary, including queue ownership/head/tail, callback effects, interrupts and output memory; construct a boundary differential fixture and a workload that exercises it.",
+      "reason": "Native drawing queue implemented and integrated; differential and built-game contracts pass. Headless cycle gains exceed controls; SDL software is neutral/inconclusive. Owner paused before final review and PR handoff.",
+      "prerequisite": "Explicit owner continuation.",
       "prior_deferral_rejected": true,
-      "work_remaining": "Capture one demonstrably expensive drawing/callback job at its caller boundary, including queue ownership/head/tail, callback effects, interrupts and output memory; construct a boundary differential fixture and a workload that exercises it."
+      "work_remaining": "Review retained results and limitations; finish narrative/Beads updates, stacked PRs and disposable-scratch cleanup. No next candidate started.",
+      "job": "Complete deferred drawing queue service, executing actual guest callbacks and publishing authoritative queue/buffer state. Not a rewrite of every graphics callback or scene algorithm."
     },
     {
       "candidate": 4,
@@ -890,8 +888,14 @@
     "report": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\cleanup-report.json",
     "ledger": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\resource-ledger.json"
   },
-  "current_serial_candidate": null,
+  "current_serial_candidate": 3,
   "completed_serial_candidate": 5,
   "awaiting_owner_checkin": true,
-  "loader_job_evidence": "docs/loader-job-evidence.json"
+  "loader_job_evidence": "docs/loader-job-evidence.json",
+  "drawing_job_evidence": "docs/drawing-job-evidence.json",
+  "latest_qualified_heads": {
+    "engine_implementation": "faf11af17c2c5ac923065ea98add4356ab2a4a6f",
+    "core": "cd1e5e28dc26ec6a887197aac7eaaf8c8c870019",
+    "consumer": "a9052e749d994c97e90b7a2bc3c8f75c66685f0f"
+  }
 }

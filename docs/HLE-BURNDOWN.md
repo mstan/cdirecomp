@@ -554,3 +554,41 @@ retained in `loader-job-evidence.json`. Remote backup sync is an administrative
 gap, separate from this candidate's completed engineering qualification.
 
 Evidence: `G:/Temp/Codex/cdirecomp/load-job-20261028`.
+
+### Candidate 3 checkpoint — owner-requested pause, 2026-10-28
+
+Native deferred drawing orchestration is implemented on
+`perf/native-drawing-jobs-20261028`, source `faf11af`. It executes the actual
+drawing callbacks and publishes authoritative queue/buffer state, preserving
+device quanta, IRQs, invalidation and faults. Independent build-time drawing
+selection is integrated in the consumer on
+`perf/native-drawing-job-20261028`, `a9052e7`. Generic default remains LLE.
+
+All 58 actual generated-reference differential cases pass, including bitmap
+painting and repeated CPU materialization followed by continuation. All 13
+runtime tests, seven compiler tests and function-alias integration pass.
+Final Linux HLE=0/HLE=1 strict compilation passes.
+
+Three warmed alternating same-source HLE/LLE gameplay pairs match complete
+CPU/RAM/device/audio state and every frame through 13,000. Process-cycle
+reductions are 5.88%, 7.25%, 5.82% (median **5.88%**), against identical-build
+controls of +2.86% and −0.43%. Observed CPU reductions are 5.85%, 8.01%, 7.40%,
+but CPU controls vary by up to 7.99%, so CPU time alone does not prove the gain.
+The final SDL dummy/software warm and retained contracts also match; its
+retained −2.78% CPU/−1.73% cycle difference is **neutral/inconclusive** within
+control variation. No whole-game, other-title or hardware-driver claim.
+
+Earlier comparisons with the older binary also made rebuilt LLE look faster;
+those gains are not attributed to this native job. The first direct native
+experiment was mixed. The second publishes only changed registers instead of
+copying the full CPU repeatedly; all earlier raw results remain retained.
+
+Machine-readable evidence: [drawing-job-evidence.json](drawing-job-evidence.json).
+Raw root: `C:/Users/Matthew/AppData/Local/Temp/Codex/cdirecomp/drawing-job-20261028`.
+Code and supported integration are committed locally. The existing three PRs
+remain open and unmerged; no candidate-3 PR has been opened. Final review,
+narrative/Beads handoff and disposable-scratch cleanup are pending continuation.
+Builds, generated sources and immutable snapshots are retained for that handoff.
+Owner saves/settings and delivery folders were untouched; QA was muted and
+background-only. No other candidate was started. **Work is paused at the
+owner's request; resume only after explicit continuation.**
