@@ -24,6 +24,7 @@ from bios_options_smoke import request
 from build_provenance import verify
 from hotelmario_controller_probe import snapshot, memory
 from hotelmario_launch_probe import disc_bin_path, save_ppm
+from collect_module_seeds import collect as collect_module_targets
 
 SCRIPT = ("1000:16,1018:0,6000:16,6018:0,6250:16,6270:0,7400:16,7420:0,"
           "8000:4,8120:0,8200:16,8220:0,8400:32,8420:0,"
@@ -47,8 +48,10 @@ def run(exe: Path, args, label: str) -> dict:
                            SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS="0")
     command = [str(exe.resolve()), str(args.rom.resolve()), "--disc",
                str(args.disc.resolve()), "--port", str(args.port),
-               "--fault-hold", "--stop-frame", str(args.end),
+               "--fault-hold",
                "--input-script", SCRIPT]
+    command += (["--stop-seq", str(args.stop_seq)] if args.stop_seq else
+                ["--stop-frame", str(args.end)])
     if args.presentation == "headless":
         command.append("--headless")
     samples = []
@@ -95,6 +98,7 @@ def run(exe: Path, args, label: str) -> dict:
                 "video_frame", "video_state", "audio_state", "native_state",
                 "emu_ikat_state", "ikat_events", "native_events", "interp_report")}
             evidence["gameplay_at_end"] = snapshot(args.port, status)
+            evidence["module_targets"] = collect_module_targets(args.port)
             # The permanent frame ring covers the complete deterministic run.
             # Drain it after the timed endpoint, not through expensive video
             # queries while the runtime is being measured.
@@ -163,7 +167,8 @@ def run(exe: Path, args, label: str) -> dict:
             proc.wait(timeout=10)
 
 
-def contract(output: Path, a: str, b: str, presentation: str) -> dict:
+def contract(output: Path, a: str, b: str, presentation: str,
+             cpu_implementations_differ: bool = False) -> dict:
     left = json.loads((output / a / "evidence.json").read_text())
     right = json.loads((output / b / "evidence.json").read_text())
     # Only native implementation counters can differ. Host audio queue/drop
@@ -178,6 +183,24 @@ def contract(output: Path, a: str, b: str, presentation: str) -> dict:
             # part of the exact contract.
             for key in ("queued_frames", "dropped_frames"):
                 state["audio_state"].pop(key, None)
+        if cpu_implementations_differ:
+            # These describe which host implementation executed an instruction,
+            # not guest state. Keep total trace sequence/cycles, the complete
+            # register tail, all device events/output and RAM under comparison.
+            for key in ("insns", "interp"):
+                state["status"].pop(key, None)
+            state["native_state"].pop("dispatches", None)
+            # Native binding is implementation bookkeeping. Its event may be
+            # recorded before/after the tier's pending cycle flush. Retain the
+            # image/base/type/epoch and trace sequence, excluding only that
+            # implementation timestamp. IKAT hardware event timing stays exact;
+            # its PC attribution can name the just-completed or next opcode.
+            for event in state["native_events"]["events"]:
+                event.pop("cycles", None)
+            for event in state["ikat_events"]["events"]:
+                event.pop("pc", None)
+            state.pop("interp_report", None)
+            state.pop("module_targets", None)
     differences = [key for key in left if left[key] != right[key]]
     for base in (0, 0x200000):
         name = f"ram-{base:06x}.bin"
@@ -192,8 +215,8 @@ def contract(output: Path, a: str, b: str, presentation: str) -> dict:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("lle", type=Path)
-    parser.add_argument("hle", type=Path)
+    parser.add_argument("reference", type=Path)
+    parser.add_argument("candidate", type=Path)
     parser.add_argument("rom", type=Path)
     parser.add_argument("disc", type=Path)
     parser.add_argument("--output", required=True, type=Path)
@@ -204,6 +227,11 @@ def main() -> None:
     parser.add_argument("--speed", type=int, default=32)
     parser.add_argument("--timeout", type=float, default=180)
     parser.add_argument("--presentation", choices=("headless", "dummy"), default="headless")
+    parser.add_argument("--package", default="native scanout spans + exact frame publication/content reuse")
+    parser.add_argument("--reference-package", default="reference LLE scanout and original native module catalog")
+    parser.add_argument("--cpu-implementations-differ", action="store_true")
+    parser.add_argument("--stop-seq", type=int,
+                        help="common instruction-entry hold immediately after end field")
     args = parser.parse_args()
     if not 0 < args.start < args.end or not 1 <= args.pairs <= 10:
         parser.error("require 0 < start < end and 1..10 pairs")
@@ -215,14 +243,18 @@ def main() -> None:
             parser.error(f"port {args.port} already has a listener")
     args.output.mkdir(parents=True, exist_ok=False)
     root = Path(__file__).resolve().parents[1]
-    provenance = {"LLE": verify(args.lle), "HLE": verify(args.hle)}
+    provenance = {"reference": verify(args.reference), "candidate": verify(args.candidate)}
     identity_data = {"schema": 1, "game": "Hotel Mario (USA)",
-                     "optimization_package": "native scanout spans + exact frame publication/content reuse",
+                     "optimization_package": args.package,
+                     "reference_package": args.reference_package,
+                     "cpu_implementations_differ": args.cpu_implementations_differ,
+                     "stop_seq": args.stop_seq,
                      "platform": platform.platform(), "cpu_count": os.cpu_count(),
                      "rom": identity(args.rom), "disc": identity(disc_bin_path(args.disc)),
                      "provenance": provenance, "script": SCRIPT,
                      "source_head": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip(),
                      "core_head": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root / "external/m68k-recomp-core", text=True).strip(),
+                     "core_changes": subprocess.check_output(["git", "diff"], cwd=root / "external/m68k-recomp-core", text=True),
                      "game_head": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root.parent / "HotelMarioRecomp", text=True).strip(),
                      "source_diff": subprocess.check_output(["git", "diff"], cwd=root, text=True),
                      "harness": identity(Path(__file__)),
@@ -235,31 +267,34 @@ def main() -> None:
     (args.output / "identity.json").write_text(json.dumps(identity_data, indent=2))
     shutil.copyfile(Path(__file__), args.output / "harness.py")
     # Warm each binary before alternating the retained timed pairs.
-    run(args.lle, args, "warm-LLE")
-    run(args.hle, args, "warm-HLE")
+    run(args.reference, args, "warm-reference")
+    run(args.candidate, args, "warm-candidate")
     results = []
-    contracts = [contract(args.output, "warm-LLE", "warm-HLE", args.presentation)]
+    contracts = [contract(args.output, "warm-reference", "warm-candidate", args.presentation,
+                          args.cpu_implementations_differ)]
     for pair in range(args.pairs):
-        order = (("LLE", args.lle), ("HLE", args.hle))
+        order = (("reference", args.reference), ("candidate", args.candidate))
         if pair & 1:
             order = tuple(reversed(order))
         for backend, exe in order:
             results.append(run(exe, args, f"pair{pair + 1}-{backend}"))
-        contracts.append(contract(args.output, f"pair{pair + 1}-LLE", f"pair{pair + 1}-HLE", args.presentation))
-    a = [s["cpu_ms_per_field"] for s in results if s["label"].endswith("LLE")]
-    b = [s["cpu_ms_per_field"] for s in results if s["label"].endswith("HLE")]
+        contracts.append(contract(args.output, f"pair{pair + 1}-reference", f"pair{pair + 1}-candidate",
+                                  args.presentation, args.cpu_implementations_differ))
+    a = [s["cpu_ms_per_field"] for s in results if s["label"].endswith("-reference")]
+    b = [s["cpu_ms_per_field"] for s in results if s["label"].endswith("-candidate")]
     savings = [100 * (1 - h / l) for l, h in zip(a, b)]
     summary = {"schema": 1, "game": "Hotel Mario (USA)",
                "optimization_package": identity_data["optimization_package"],
+               "reference_package": identity_data["reference_package"],
                "samples": results, "contracts": contracts,
-               "lle_cpu_ms_per_field": a, "hle_cpu_ms_per_field": b,
+               "reference_cpu_ms_per_field": a, "candidate_cpu_ms_per_field": b,
                "paired_cpu_savings_percent": savings,
                "median_cpu_savings_percent": statistics.median(savings),
                "status": "measured improvement" if min(savings) > 3 else "review individual samples",
                "scope": "one built title, fixed early-gameplay interval; no broader title/platform/release claim"}
     (args.output / "campaign-evidence.json").write_text(json.dumps(summary, indent=2))
     print(json.dumps({key: summary[key] for key in (
-        "game", "optimization_package", "lle_cpu_ms_per_field", "hle_cpu_ms_per_field",
+        "game", "optimization_package", "reference_cpu_ms_per_field", "candidate_cpu_ms_per_field",
         "paired_cpu_savings_percent", "median_cpu_savings_percent", "status")}, indent=2))
 
 

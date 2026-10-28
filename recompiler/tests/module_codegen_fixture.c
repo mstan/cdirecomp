@@ -2,13 +2,15 @@
 #include "code_generator.h"
 #include "codegen_diag.h"
 #include "function_finder.h"
+#include "m68k_decoder.h"
 #include <stdio.h>
 #include <string.h>
 
 static void word(uint8_t *p,unsigned at,unsigned value) { p[at]=value>>8;p[at+1]=value; }
 int main(int argc,char **argv) {
     bool negative=argc==3 && !strcmp(argv[2],"--test-falloff");
-    if (argc!=2 && !negative) return 1;
+    bool dense=argc==3 && !strcmp(argv[2],"--dense-entries");
+    if (argc!=2 && !negative && !dense) return 1;
     uint8_t image[0x200]={0};
     const unsigned words[]={
         0x41fa,0x004c, /* lea $a0(pc),a0 */
@@ -34,11 +36,24 @@ int main(int argc,char **argv) {
     word(image,0xd6,0x4efb);word(image,0xd8,0x8000); /* JMP (PC,A0.W), +0 */
     word(image,0x110,0x4e75);
     GenesisRom rom={0};rom.rom_data=image;rom.rom_size=sizeof image;rom.initial_pc=0x52;
-    uint32_t entries[]={0x52,0xc0,0xd0,0x1fe};
+    uint32_t entries[64]={0x52,0xc0,0xd0,0x1fe};
+    int nentries=negative?4:3;
+    if (dense) {
+        /* Continuation observations are valid instruction starts, including
+         * straight-line instructions. Preserve resume access without forcing
+         * each one into a separately dispatched native body. */
+        for (uint32_t pc=0x52;pc<0x52+2*(sizeof words/sizeof words[0]);) {
+            M68KInstr instruction;
+            if (!m68k_decode(&rom,pc,&instruction)) return 1;
+            entries[nentries++]=pc;
+            pc+=instruction.byte_length;
+            if (instruction.mnemonic==MN_TRAP && !(instruction.words[0]&15u)) pc+=2;
+        }
+    }
     if (negative) word(image,0x1fe,0x4e71); /* NOP with no legal successor */
     GameConfig cfg={0};game_config_init_empty(&cfg);
     cfg.function_aliases=true;cfg.async_resume_entries=true;cfg.trap0_inline_service_word=true;
-    cfg.extra_funcs=entries;cfg.extra_func_count=negative?4:3;
+    cfg.extra_funcs=entries;cfg.extra_func_count=nentries;
     ProtectedRange header={0,0x52};cfg.protected_ranges=&header;cfg.protected_range_count=1;
     FunctionList functions={0};function_finder_run_module(&rom,&functions,&cfg);
     AnnotationTable annotations={0};

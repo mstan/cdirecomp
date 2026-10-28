@@ -40,7 +40,7 @@ subsystem boundaries or a requirement to adopt every proposed optimization.
 | 4 | **Memory operation to fully published result** | Instruction-by-instruction copying/filling plus repeated module invalidation, tag maintenance and dirty tracking | Concrete repeated machinery exists; its gameplay cost remains unmeasured. |
 | 5 | **File/module load to executable module ready** | Repeated sector handling, copying, validation, relocation, linking, hashing and native binding | Coherent cross-subsystem candidate. Preserve authoritative guest loader/kernel state and observable transport behavior. |
 | 6 | **Frequently executed OS-9 service jobs** | Recompiled kernel algorithms and internal dispatch that a complete native operation could replace | Substantially unexplored because this repository previously prohibited OS HLE. Select services by measured cost. |
-| 7 | **Native execution spans** | Repeated dispatch, interpreter handoffs, instruction bookkeeping and checks between operations with no observable intervening event | **Next selected investigation.** A small existing game routine dominates the interpreted-PC census; the retained seeded native tree already covers it. Reuse and measure that work before inventing another interpreter/OS mechanism. |
+| 7 | **Native execution spans** | Repeated dispatch, interpreter handoffs, instruction bookkeeping and checks between operations with no observable intervening event | **Implemented and qualified.** Reused the existing observed native catalog, then coalesced legal PIC continuations into shared native bodies. SDK `3955bf3`; incremental 3-pair median CPU reduction 23.77% versus the seeded catalog, with exact canonical guest contracts. |
 | 8 | **Complete CD/XA streaming jobs** | Repeated work across sector selection, decoding, buffer ownership, DMA/refill, guest drivers and audio handoff | Existing pieces are native; the opportunity is consolidating the complete job. Benefit unmeasured. |
 | 9 | **Whole-board event advancement** | Calling timer, input transport, CD/audio, RTC, raster and pacing machinery after every instruction | Concrete candidate, lower priority: roughly 5-6% of the sampled execution. Preserve event ordering and interrupt boundaries. |
 | 10 | **Frame to host presentation** | Redundant frame copies, texture uploads, conversions and presentation preparation | **Redundant copy/upload portion consolidated into candidate 2.** SDL dummy/software frontend A/B passes exact guest/frame/PCM contracts; one retained pair saves 33.2% CPU/field. Hardware-driver presentation cost remains unqualified and needs its own actual-window/backend profile. |
@@ -234,3 +234,79 @@ remains bound. Memory/module ownership candidates still require actual cost
 attribution, rather than an assumption that image invalidation causes the
 large interpreter count. No Ghidra registry key matched either CD-i or Hotel;
 literal OS-service replacement would need an exposed authoritative fixture.
+
+### Native execution jobs qualified
+
+The retained 1,205-entry catalog is now reproducible as
+`hotelmario/module-seeds.txt` (SHA-256
+`37bbc003f41a49968013cd3874f417f795c212805b6da7e2231897c7507443a4`).
+These are observed entry offsets bound to full original module hashes, not
+generated game code or a relaxation of image/code-lifetime validation.
+
+Reusing that catalog with the current frame job first reduced a retained
+incremental pair from 3.842231 to 2.158798 ms/field (43.81%). This one-pair
+diagnostic is retained in `seeded-native-entry-probe`; coverage counts alone
+were not used to adopt it.
+
+That output still performed 73,286,926 host native dispatches. Inspection found
+linear observed instruction continuations emitted as separate native bodies.
+The shared-core change `3955bf3311f55e031836f70b5c1839e95b81f9cf`
+(`beads-cpjc`, under `beads-rxq`, related to this issue and the campaign)
+admits legally reached fall-through entries into the existing canonical-owner
+proof only for position-independent asynchronous-resume modules. The final
+hard-boundary fixed point, every instruction resume and code-lifetime check
+remain. Flat-ROM behavior and the separate Genesis source profile are unchanged.
+
+The new dense-PIC fixture fails the original coarse-execution budget and passes
+the new generator. All seven compiler checks and the existing flat-ROM
+function-alias integration suite pass. All 174 Hotel Mario modules were
+regenerated with the same seed input and compiled; no generated C was edited.
+
+`coarse-native-pairs/campaign-evidence.json` records warmed alternating pairs
+against that same seeded catalog with the original per-entry dispatch:
+
+| Pair | Per-entry CPU ms/field | Coarse job CPU ms/field | CPU reduction |
+| --- | --- | --- | --- |
+| 1 | 2.064112 | 1.573527 | 23.77% |
+| 2 | 2.623531 | 1.566840 | 40.28% |
+| 3 | 2.352973 | 1.844618 | 21.60% |
+
+The median incremental CPU reduction is 23.77%; host native dispatches fall
+to 1,692,743. The latter is supporting evidence, not the performance result.
+
+`combined-native-pairs/campaign-evidence.json` directly measures the complete
+package against original-catalog/reference-LLE scanout, rather than adding
+the gains from different experiments:
+
+| Pair | Original reference CPU ms/field | Complete native package CPU ms/field | CPU reduction |
+| --- | --- | --- | --- |
+| 1 | 5.343216 | 2.238074 | 58.11% |
+| 2 | 4.978299 | 2.126456 | 57.29% |
+| 3 | 5.029593 | 2.031250 | 59.61% |
+
+Median complete-package CPU reduction is **58.11%** for this fixed gameplay
+interval. Reference binary size is 29,908,046 bytes; candidate is 33,891,700.
+Retained sampled peak RSS is about 207.68 MB versus 211.38-211.40 MB, a roughly
+3.7 MB increase. Host CPU occupancy varied and is retained in each raw result;
+these are process-CPU measurements, not quiet-host latency or hardware-GPU
+claims. Do not extrapolate to untested titles, stages or settings.
+
+All pairs retain exact full RAM, canonical CPU state, device state, PCM hash,
+final register/instruction/cycle tail and every framebuffer/control hash.
+CPU-tier comparisons park at common instruction-entry sequence **150976126**
+immediately after field 13,000. A frame-end hold alone observes the interpreter
+after its PC increment and native code before its next entry, producing a
+diagnostic PC mismatch despite identical instruction-entry histories. The
+initial mismatch is retained in `seeded-native-probe`; it is not passed off as
+an accepted comparison. Host implementation instruction/dispatch counts,
+native-binding implementation timestamps and IKAT opcode-attribution PC are
+explicitly excluded from CPU-tier semantic equality; actual event sequence,
+hardware timing/payload and all guest outputs/state remain compared. All raw
+diagnostics are retained.
+
+The owning burndown remains active. Frame/CPU job qualification does not close
+the other candidate investigations or the existing full-campaign/audio/save
+acceptance gaps. The next step is to profile the remaining built execution
+cost and select the next complete job, including whether unchanged source and
+register state can avoid a whole scanout job, or whether board-event spans are
+now the larger opportunity. Neither hypothesis is an adopted improvement.

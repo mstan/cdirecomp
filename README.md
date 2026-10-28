@@ -166,7 +166,7 @@ build/recompiler/CdiRecompBios.exe bios/cdi490a.rom --emit
 
 # Recompile Hotel Mario's executable OS-9 modules from your own disc.
 # named-offset32 explicitly opts into this game's Subr export-table layout.
-build/recompiler/CdiRecomp.exe "path/to/Hotel Mario (USA).cue" --emit --out hotelmario/generated --subr-exports named-offset32
+build/recompiler/CdiRecomp.exe "path/to/Hotel Mario (USA).cue" --emit --out hotelmario/generated --subr-exports named-offset32 --module-seeds hotelmario/module-seeds.txt
 
 # Runtime (CdiRuntime) — hardware models + native/interpreted guest execution
 cmake -S runner -B build/runner-release -G Ninja -DCMAKE_BUILD_TYPE=Release
