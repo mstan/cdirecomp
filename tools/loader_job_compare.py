@@ -83,6 +83,7 @@ def main():
     p.add_argument('--arm-frame',type=int,default=0)
     p.add_argument('--end-frame',type=int)
     p.add_argument('--expect-crc-error',action='store_true')
+    p.add_argument('--reference-control',action='store_true',help='Explicit A/A run; no native activity expected')
     args=p.parse_args()
     with socket.socket() as probe:assert probe.connect_ex(('127.0.0.1',args.port))!=0
     args.output.mkdir(parents=True,exist_ok=False)
@@ -90,6 +91,7 @@ def main():
     meta={'schema':1,'reference':verify(args.reference),'candidate':verify(args.candidate),
         'rom':identity(args.rom),'disc':identity(disc_bin_path(args.disc)),'script':SCRIPT,
         'end_contract':{'pc':args.stop_pc,'frame':args.end_frame,'expect_crc_error':args.expect_crc_error},
+        'reference_control':args.reference_control,
         'source':subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),
         'source_diff':subprocess.check_output(['git','diff'],text=True),
         'core_diff':subprocess.check_output(['git','-C','external/m68k-recomp-core','diff'],text=True)}
@@ -100,7 +102,7 @@ def main():
         order=('reference','candidate') if pair%2 else ('candidate','reference')
         for name in order:
             result,state=run(getattr(args,name),args,f'{prefix}-{name}');states[name]=state
-            if name=='candidate':assert state['loader_jobs'].get('words',0)>0,'Native job was not exercised'
+            if name=='candidate' and not args.reference_control:assert state['loader_jobs'].get('words',0)>0,'Native job was not exercised'
             if pair:results.append(result)
         left,right=semantic(states['reference']),semantic(states['candidate'])
         differences=[key for key in left if left[key]!=right[key]]
