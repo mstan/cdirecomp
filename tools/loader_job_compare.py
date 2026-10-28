@@ -19,6 +19,7 @@ def run(exe,args,label):
         proc=subprocess.Popen(command,env=env,stdout=stdout,stderr=stderr,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
         try:
             process=psutil.Process(proc.pid)
+            if args.cpu_core is not None:process.cpu_affinity([args.cpu_core])
             while time.monotonic()-started<120:
                 if proc.poll() is not None:raise RuntimeError(f'{label}: runtime exited')
                 try:s=request(args.port,{'cmd':'status'},timeout=1)
@@ -55,6 +56,7 @@ def run(exe,args,label):
             f=(args.start_frame-lo['status']['frame'])/(hi['status']['frame']-lo['status']['frame'])
             cpu_start=lo['cpu_s']+f*(hi['cpu_s']-lo['cpu_s'])
             result={'label':label,'binary':identity(exe),'command':command,'start_frame':args.start_frame,
+                'cpu_affinity':process.cpu_affinity(),
                 'end_frame':s['frame'],'cpu_ms':1000*(samples[-1]['cpu_s']-cpu_start),
                 'peak_rss_bytes':max(v['rss_bytes'] for v in samples),'start_bracket':[lo,hi],
                 'host_cpu_before':host_before._asdict(),'host_cpu_after':host_after._asdict(),
@@ -84,6 +86,7 @@ def main():
     p.add_argument('--end-frame',type=int)
     p.add_argument('--expect-crc-error',action='store_true')
     p.add_argument('--reference-control',action='store_true',help='Explicit A/A run; no native activity expected')
+    p.add_argument('--cpu-core',type=int,help='Matched process-local affinity; does not change other applications')
     args=p.parse_args()
     with socket.socket() as probe:assert probe.connect_ex(('127.0.0.1',args.port))!=0
     args.output.mkdir(parents=True,exist_ok=False)
@@ -92,6 +95,7 @@ def main():
         'rom':identity(args.rom),'disc':identity(disc_bin_path(args.disc)),'script':SCRIPT,
         'end_contract':{'pc':args.stop_pc,'frame':args.end_frame,'expect_crc_error':args.expect_crc_error},
         'reference_control':args.reference_control,
+        'cpu_core':args.cpu_core,
         'source':subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),
         'source_diff':subprocess.check_output(['git','diff'],text=True),
         'core_diff':subprocess.check_output(['git','-C','external/m68k-recomp-core','diff'],text=True)}
