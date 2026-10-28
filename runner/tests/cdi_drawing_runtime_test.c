@@ -16,6 +16,14 @@ extern void mcd212_reset(void);
 extern uint32_t cdi_module_000_base;
 extern uint64_t g_stop_seq,g_stop_frame;
 static uint32_t rand_state;
+static int sync_each_clock;
+void __real_glue_check_vblank(void);
+void __wrap_glue_check_vblank(void) {
+    __real_glue_check_vblank();
+    /* Exercise repeated debugger materialization followed by continuing the
+     * same native segment. The reference has already materialized its CPU. */
+    if(sync_each_clock)cdi_drawing_sync_cpu();
+}
 static uint32_t random32(void){rand_state^=rand_state<<13;rand_state^=rand_state>>17;rand_state^=rand_state<<5;return rand_state;}
 static void put(uint32_t a,uint32_t v){m68k_write32(a,v);}
 static int load(const char *path,uint8_t *p,size_t size){FILE *f=fopen(path,"rb");if(!f)return 0;size_t n=fread(p,1,size,f);fclose(f);return n==size;}
@@ -30,6 +38,7 @@ int main(int argc,char **argv){
     unsigned queued=(unsigned)strtoul(argv[7],NULL,0),variant=(unsigned)strtoul(argv[8],NULL,0);
     unsigned irq_cycle=(unsigned)strtoul(argv[9],NULL,0);rand_state=(uint32_t)strtoul(argv[10],NULL,0);
     unsigned wrap=(unsigned)strtoul(argv[11],NULL,0);
+    sync_each_clock=variant==6;
     cdi_media_init();runtime_init();runtime_reset_cpu_interrupt_state();periph_reset();nvram_reset();cdi_input_reset();mcd212_reset();
     g_total_cycles=g_frame_count=g_native_insn_count=0;g_cycle_accumulator=g_audio_cycle_counter=0;g_vblank_threshold=1;
     g_stop_seq=native?0:UINT64_MAX;g_stop_frame=0;g_hold_on_fault=0;

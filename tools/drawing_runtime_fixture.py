@@ -27,7 +27,7 @@ def main():
     args=['-std=c11','-O2','-I'+str(repo/'runner/include'),'-I'+str(repo/'common'),
         str(repo/'runner/tests/cdi_drawing_runtime_test.c'),*[str(x) for x in objects],str(renamed)]
     args+=['-LC:/msys64/mingw64/lib','-lSDL2','-lws2_32'] if windows else ['-lSDL2','-pthread']
-    args+=['-o',str(exe)];rsp=a.output/'link.rsp'
+    args+=['-Wl,--wrap=glue_check_vblank','-o',str(exe)];rsp=a.output/'link.rsp'
     rsp.write_text('\n'.join('"'+x.replace('\\','/')+'"' for x in args))
     subprocess.run([str(compiler),'@'+str(rsp)],check=True)
     if windows:shutil.copy2(a.build/'SDL2.dll',a.output/'SDL2.dll')
@@ -58,6 +58,8 @@ def main():
     for count in (1,3,15):
         for wrap in (0,1):run_case(8,count,wrap=wrap)
     for variant in (1,2,3,4,5):run_case(8,1,variant=variant,wrap=1)
+    run_case(8,0,variant=6)
+    run_case(8,3,variant=6,wrap=1)
     timed=sorted({cycle for (variant,pc),cycle in frontiers.items() if variant in (0,1) and cycle>0})
     # IRQ targets come from actual original operations, including callbacks and
     # wrapping. The native implementation never defines its own passing oracle.

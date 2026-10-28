@@ -18,7 +18,11 @@ static CdiDrawingJobState stats;
 static const CdiNativeModule *drawing_module;
 typedef struct { uint32_t base; uint64_t token,epoch; } DrawFrame;
 typedef struct {
-    M68KState before;
+    uint32_t d0,d4,d5,a0,a5,a6,sp;
+    uint16_t sr;
+} DrawRegisters;
+typedef struct {
+    DrawRegisters before;
     DrawFrame *frame;
     uint32_t read[4],pc;
     unsigned first,count,completed;
@@ -54,7 +58,10 @@ static void add(M68KState *s,uint32_t a,uint32_t b) {
 /* Exceptional state only: no memory access, clocks, callbacks or side effects.
  * Production folds each completed queue segment directly below. */
 static M68KState prefix(const DrawFlight *f) {
-    M68KState s=f->before;
+    M68KState s=g_cpu;
+    s.D[0]=f->before.d0;s.D[4]=f->before.d4;s.D[5]=f->before.d5;
+    s.A[0]=f->before.a0;s.A[5]=f->before.a5;s.A[6]=f->before.a6;
+    s.A[7]=f->before.sp;s.SR=f->before.sr;
     for(unsigned i=0;i<f->completed;i++)switch(f->first+i) {
     case 0:s.A[7]-=4;s.A[5]=s.A[7];break;
     case 1:s.A[7]-=16;break;
@@ -82,25 +89,28 @@ static M68KState prefix(const DrawFlight *f) {
     }
     s.PC=f->pc;return s;
 }
-static M68KState finish(const DrawFlight *f) {
-    M68KState s=f->before;
+/* A completed segment publishes only its changed registers. Other guest
+ * registers never left the authoritative CPU; full state is materialized
+ * only at exceptional frontiers above, not copied around every empty poll. */
+static void finish(const DrawFlight *f) {
+    M68KState *s=&g_cpu;
     switch(f->first) {
-    case 0:s.A[5]=s.A[7]-4;s.A[7]-=20;s.D[4]=s.D[0];
-        if(f->count==7){s.D[5]=0;logic(&s,0);}else logic(&s,s.D[4]);break;
-    case 7:s.D[0]=f->read[0];compare(&s,s.D[0],f->read[1]);break;
-    case 10:s.D[0]=f->read[1];s.A[0]=f->read[3];s.A[7]-=4;logic(&s,s.D[0]);break;
-    case 15:s.D[0]=f->read[1];s.SR&=(uint16_t)~SR_X;
-        if(f->read[0]<8)s.SR|=SR_X;
-        if(f->count==5)logic(&s,f->read[3]);else compare(&s,s.D[0],f->read[2]);break;
-    case 20:s.SR&=(uint16_t)~SR_X;if(s.D[5]==UINT32_MAX)s.SR|=SR_X;
-        s.D[5]++;compare(&s,s.D[5],s.D[4]);break;
-    case 21:compare(&s,s.D[5],s.D[4]);break;
-    case 24:logic(&s,f->read[1]);break;
-    case 26:s.D[4]=f->read[0];s.D[5]=f->read[1];s.A[0]=f->read[2];
-        s.A[7]=s.A[5]+4;s.A[5]=f->read[3];break;
+    case 0:s->A[5]=f->before.sp-4;s->A[7]=f->before.sp-20;s->D[4]=f->before.d0;
+        if(f->count==7){s->D[5]=0;logic(s,0);}else logic(s,s->D[4]);break;
+    case 7:s->D[0]=f->read[0];compare(s,s->D[0],f->read[1]);break;
+    case 10:s->D[0]=f->read[1];s->A[0]=f->read[3];s->A[7]=f->before.sp-4;logic(s,s->D[0]);break;
+    case 15:s->D[0]=f->read[1];s->SR&=(uint16_t)~SR_X;
+        if(f->read[0]<8)s->SR|=SR_X;
+        if(f->count==5)logic(s,f->read[3]);else compare(s,s->D[0],f->read[2]);break;
+    case 20:s->SR&=(uint16_t)~SR_X;if(f->before.d5==UINT32_MAX)s->SR|=SR_X;
+        s->D[5]=f->before.d5+1;compare(s,s->D[5],s->D[4]);break;
+    case 21:compare(s,s->D[5],s->D[4]);break;
+    case 24:logic(s,f->read[1]);break;
+    case 26:s->D[4]=f->read[0];s->D[5]=f->read[1];s->A[0]=f->read[2];
+        s->A[7]=f->before.a5+4;s->A[5]=f->read[3];break;
     default:break;
     }
-    s.PC=f->pc;return s;
+    s->PC=f->pc;
 }
 static int irq_ready(void) {
     if(!g_recomp_irq_armed || !recomp_pending_irq_mask())return 0;
@@ -112,13 +122,13 @@ static void fallback(DrawFlight *f) {
 /* Reads/writes occur at their actual operation frontiers. Even a callback
  * that changes A6, ring bounds, D4/D5 or its return address stays authoritative. */
 static int memory_action(DrawFlight *f,unsigned op) {
-    const M68KState *s=&f->before;
-    uint32_t *r=f->read,a6=s->A[6],sp=s->A[7],a;
+    const DrawRegisters *s=&f->before;
+    uint32_t *r=f->read,a6=s->a6,sp=s->sp,a;
     switch(op) {
-    case 0:if(!ram_range(sp-4,4))return 0;m68k_write32(sp-4,s->A[5]);break;
+    case 0:if(!ram_range(sp-4,4))return 0;m68k_write32(sp-4,s->a5);break;
     case 1:if(!ram_range(sp-20,16))return 0;
-        m68k_write32(sp-8,s->A[0]);m68k_write32(sp-12,s->D[5]);
-        m68k_write32(sp-16,s->D[4]);m68k_write32(sp-20,s->D[0]);break;
+        m68k_write32(sp-8,s->a0);m68k_write32(sp-12,s->d5);
+        m68k_write32(sp-16,s->d4);m68k_write32(sp-20,s->d0);break;
     case 7:if(!ram_range(a6-0x6E52,4))return 0;r[0]=m68k_read32(a6-0x6E52);break;
     case 8:if(!ram_range(a6-0x6E4E,4))return 0;r[1]=m68k_read32(a6-0x6E4E);break;
     case 10:if(!ram_range(a6-0x6E4E,4))return 0;r[0]=m68k_read32(a6-0x6E4E);break;
@@ -134,15 +144,18 @@ static int memory_action(DrawFlight *f,unsigned op) {
         r[3]=m68k_read32(a6-0x6E5A);m68k_write32(a6-0x6E4E,r[3]);break;
     case 24:case 25:if(!ram_range(a6-0x6E5A,16))return 0;
         r[op-24]=m68k_read32(a6-0x6E5A);m68k_write32(a6-(op==24?0x6E52:0x6E4E),r[op-24]);break;
-    case 26:a=s->A[5]-12;if(!ram_range(a,12))return 0;
+    case 26:a=s->a5-12;if(!ram_range(a,12))return 0;
         r[0]=m68k_read32(a);r[1]=m68k_read32(a+4);r[2]=m68k_read32(a+8);break;
-    case 27:if(!ram_range(s->A[5],4))return 0;r[3]=m68k_read32(s->A[5]);break;
+    case 27:if(!ram_range(s->a5,4))return 0;r[3]=m68k_read32(s->a5);break;
     default:break;
     }
     return 1;
 }
 static int segment(DrawFrame *frame,unsigned first,unsigned count) {
-    DrawFlight f={.before=g_cpu,.frame=frame,.first=first,.count=count};active=&f;
+    DrawFlight f;
+    f.before=(DrawRegisters){g_cpu.D[0],g_cpu.D[4],g_cpu.D[5],g_cpu.A[0],
+                            g_cpu.A[5],g_cpu.A[6],g_cpu.A[7],g_cpu.SR};
+    f.frame=frame;f.first=first;f.count=count;f.completed=0;active=&f;
     for(unsigned i=0;i<count;i++) {
         unsigned op=first+i;f.completed=i;f.pc=op_pc(frame,op);g_cpu.PC=f.pc;
         if(frame->epoch!=g_cdi_native_invalidation_epoch) {
@@ -160,7 +173,7 @@ static int segment(DrawFrame *frame,unsigned first,unsigned count) {
             if(f.read[1]<=f.read[2]){f.count=count=4;break;}
         }
     }
-    g_cpu=finish(&f);active=NULL;return 1;
+    finish(&f);active=NULL;return 1;
 }
 int cdi_drawing_dispatch(RecompFuncPtr function) {
     DrawFrame frame;
@@ -205,7 +218,7 @@ int cdi_drawing_dispatch(RecompFuncPtr function) {
     }
     segment(&frame,26,3);return 1;
 }
-void cdi_drawing_sync_cpu(void) {if(active){g_cpu=prefix(active);active=NULL;}}
+void cdi_drawing_sync_cpu(void) {if(active)g_cpu=prefix(active);}
 void cdi_drawing_reset(void) {
     static const uint8_t digest[32]={
         0x55,0xef,0xd9,0x3e,0x44,0xfd,0xc3,0x1a,0xce,0xae,0xd4,0xd2,0x65,0x1d,0x64,0x8c,
