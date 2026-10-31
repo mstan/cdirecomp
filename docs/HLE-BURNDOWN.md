@@ -2,7 +2,9 @@
 
 Saved at the owner's request on 2026-10-27. The owner subsequently activated
 the end-to-end slash goal; individual implementation and qualification have
-resumed, working solo.
+resumed. On 2026-10-31 the owner authorized independent subagent review after
+each remaining candidate, branch PRs for retained changes, and assignment of
+the next candidate. Measurement and acceptance gates remain serial.
 
 Owning issue: `beads-oatv`, under framework epic `beads-ttbl`, related to the
 central `optimization campaign` (`beads-2wy8.1`) with label
@@ -44,10 +46,12 @@ subsystem boundaries or a requirement to adopt every proposed optimization.
 | 8 | **Complete CD/XA streaming jobs** | Repeated work across sector selection, decoding, buffer ownership, DMA/refill, guest drivers and audio handoff | **Open, queued.** Complete streaming integration and actual seek/channel/refill qualification remain work to perform. |
 | 9 | **Whole-board event advancement** | Calling timer, input transport, CD/audio, RTC, raster and pacing machinery after every instruction | **Open, queued.** The naïve bulk-sum counterexample is a design constraint, not a rejection of a correct native span. |
 | 10 | **Frame to host presentation** | Redundant frame copies, texture uploads, conversions and presentation preparation | Copy/upload consolidated into 2 and qualified through SDL dummy/software. **Hardware-driver qualification remains open, queued.** |
+| 11 | **GPU resident jobs and high-resolution rendering** | CPU rendering at enhanced pixel density, expanded frame uploads, duplicate native/enhanced preparation and unbounded scale-dependent intermediates | **New, open and queued; guidance tracked only.** Implement the owner's GPU rendering guide under `beads-ttbl.3`: required 16x at full native speed with headroom on the owner's PC, desired 32x/64x, later lower-end targets. Hardware qualification can satisfy 10 jointly only after both contracts pass. |
 
 ## Current checkpoint
 
-- Branch: `perf/native-scanout-hle-20261027`, based on framework `f3c8d57`.
+- Current engine branch: `perf/native-drawing-jobs-20261028`; supported consumer
+  branch: `HotelMarioRecomp/perf/native-drawing-job-20261028`.
 - Qualified engine checkpoints: `a83c317` (frame job), `e92baf8` (coarse native
   catalog), `85c869e` (completed-line jobs). Shared core: `3955bf3`.
 - Supported consumer integration: `16353fc` on
@@ -56,9 +60,13 @@ subsystem boundaries or a requirement to adopt every proposed optimization.
   candidates 3/4/5/6/8/9 and hardware presentation still require actual work.
   Missing workload attribution, contracts and differential fixtures are work
   within this goal. Work serially, checking in with the owner after each.
-  Candidate **5** has now completed its serial implementation and qualification
-  below. Owner continued after check-in; **candidate 3 is now active** on
-  `perf/native-drawing-jobs-20261028`. Stop for review after that candidate.
+  Candidate **5** has completed its serial implementation and qualification
+  below. The owner resumed the entire remaining set on 2026-10-31;
+  **candidate 3 is now under independent review** after implementation and
+  built-game measurement. After each independent keep/fix/reject review,
+  create branch PRs for retained work and assign the next candidate. Do not
+  merge without owner approval. Remaining work is 4, 6, 8, 9, hardware 10 and
+  the new GPU rendering candidate 11. Reuse accepted 1/2/5/7 evidence.
 - Scanout selection is `-DCDI_VIDEO_BACKEND=LLE` or
   `-DCDI_VIDEO_BACKEND=HLE`. The repository default remains LLE.
 - HLE computes joint source/matte color spans, consolidating contribution,
@@ -640,3 +648,70 @@ a new game qualification. Historical quiet-host gates and accepted gameplay
 checks were not changed or repeated. Adding the pool does not authorize a
 new benchmark matrix. **Candidate 5 remains qualified; stop at this serial
 checkpoint. Candidate 3 remains paused, and no other candidate was started.**
+
+### Candidate 11: GPU high-resolution rendering
+
+Added at the owner's explicit request on 2026-10-31. This work was **not**
+covered by the previous candidate-10 copy/upload and hardware-presentation
+entry. Owning issue: `beads-ttbl.3`, related to `beads-oatv` and the optimization
+campaign. Source: [GPU-HIGH-RESOLUTION-RENDERING-GUIDE.md](C:/Users/Matthew/Desktop/GPU-HIGH-RESOLUTION-RENDERING-GUIDE.md),
+SHA256 `644ec4bb9efa5330351908e78e81ce9df2ebee7f71187c64f3cf19c27f8521bd`.
+Status is **tracked only**, with no GPU implementation or high-scale result
+claimed. The owner has resumed the remaining burndown; historical pause and
+checkpoint notes above describe earlier stops.
+
+The required outcome is **16x internal resolution at full native cadence with
+measured headroom on the owner's PC first**. Desired outcomes are 32x and 64x;
+16x on Steam Deck and server/lower-end hardware follows later. Set numerical
+budgets from this engine's baseline. The guide's historical approximately 90%
+figure is unverified and must never be used as a target or a claimed result.
+
+The implementation must satisfy the complete job contract:
+
+1. Publish compact immutable raster/draw jobs at a natural boundary. Keep CPU
+   preparation independent of scale; share the same preparation with exact
+   native output. Reuse the existing frame, line and source-identity work.
+2. Keep source data resident on the GPU and upload jobs plus changed source
+   ranges. Invalidate for every guest CPU/DMA writer, reset, state restore and
+   rollback. Never upload an expanded enhanced frame each field.
+3. Draw ordered visible work on the GPU at the selected density. Bound targets
+   and intermediates by the job/tile rather than a full scale-squared shadow
+   arena. Admit high scales using actual memory/texture limits and degrade
+   presentation gracefully with a logged reason.
+4. Preserve native framebuffer, guest-memory and canonical state/hash results
+   exactly at every scale and against the pre-change build. Preserve all guest
+   framebuffer readbacks and render-to-texture behavior. Enhanced output stays
+   outside canonical serialization, hashes and guest reads; invalidate its
+   caches/history on current-build save/load, rollback and reset.
+5. Keep enhancements local to presentation/netplay display settings by default.
+   Any GPU result feeding simulation requires integer-exact cross-vendor and
+   backend qualification plus mixed-peer rollback, a common profile selected
+   before frame 0 and a software fallback. Do not invent asset detail.
+6. Keep the same-contract portable CPU fallback and build/run it on another
+   compatible target. Gate optional host features without breaking other
+   supported builds. Old save-state compatibility is not required.
+
+Qualification must retain matched built-game before/after evidence, exact
+source/binary identities, settings, raw samples and host load/capacity records:
+
+- Establish CPU cost, per-pass **GPU timestamps**, upload bytes and process/GPU
+  memory at 1x, 2x, 4x and the current maximum. Separate upscaling overhead from
+  native-pass cost; use GPU timestamps at 1x/4x/maximum before and after.
+- Prove CPU preparation and per-frame upload do not grow with scale, while
+  native pixels/RAM/state remain exact. Actually exercise current-build
+  save/load, rollback, reset, guest readbacks and real window resize.
+- Qualify required 16x speed/headroom and bounded high-scale memory/admission
+  on the owner's PC first. Keep desired/lower-end results distinct from the
+  required acceptance. Enlarging a native SDL texture alone does not establish
+  the guide's internal-resolution and resident-job contract.
+- Read the in-house reference commits in `F:/Projects/gbarecomp/gbarecomp`:
+  `4edc278`, `ba32c62`, `f646f81`, `ffa4f2f`, `4ea8f55`, `a385e0b`, `4261f07`.
+  Design from hardware documentation, this ecosystem and that in-house work;
+  do not copy, translate or cite third-party renderer source or embed the
+  independent accuracy oracle into the shipping path.
+
+Candidate 10's remaining hardware-driver checks may be consolidated into this
+implementation only after the shared actual-window/backend profile, resize,
+expose and pixel-readback contracts pass. Neither dummy/software evidence nor
+this added checklist completes either candidate. Apply the independent final
+subagent keep/fix/reject review and branch-PR handoff before moving on.

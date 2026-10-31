@@ -3,7 +3,7 @@
   "owner_issue": "beads-oatv",
   "campaign_issue": "beads-2wy8.1",
   "consumer_issue": "beads-7t8h",
-  "status": "owner-requested pause; candidate3 implementation and measurements retained; final handoff pending",
+  "status": "in_progress; owner resumed all remaining candidates; candidate3 independent review active",
   "engine_head": "85c869ee808b438905f2c1bc29a46d30f27647f8",
   "core_head": "3955bf3311f55e031836f70b5c1839e95b81f9cf",
   "game_head": "16353fc849ef8056af891e2c3b7d3e29ae3a41da",
@@ -764,15 +764,15 @@
     {
       "candidate": 3,
       "name": "Graphics service to completed drawing",
-      "status": "implemented_measured_owner_pause",
+      "status": "implemented_measured_independent_review_pending",
       "validated_portion": "Complete deferred drawing queue service, executing actual guest callbacks and publishing authoritative queue/buffer state. Not a rewrite of every graphics callback or scene algorithm.",
       "evidence": [
         "docs/drawing-job-evidence.json"
       ],
       "reason": "Native drawing queue implemented and integrated; differential and built-game contracts pass. Headless cycle gains exceed controls; SDL software is neutral/inconclusive. Owner paused before final review and PR handoff.",
-      "prerequisite": "Explicit owner continuation.",
+      "prerequisite": "Independent final review and PR handoff; owner continuation granted2026-10-31.",
       "prior_deferral_rejected": true,
-      "work_remaining": "Review retained results and limitations; finish narrative/Beads updates, stacked PRs and disposable-scratch cleanup. No next candidate started.",
+      "work_remaining": "Resolve objective reviewer findings, open stacked engine/consumer PRs for retained work, clean disposable scratch, then assign next candidate.",
       "job": "Complete deferred drawing queue service, executing actual guest callbacks and publishing authoritative queue/buffer state. Not a rewrite of every graphics callback or scene algorithm."
     },
     {
@@ -871,6 +871,49 @@
       "deferred_extension": "Hardware-driver presentation cost",
       "prerequisite": "A matched actual hardware-window/backend profile with resize/expose and pixel readback, retaining normal presentation settings and owner focus. SDL dummy/software coverage establishes the functional handoff only.",
       "hardware_extension_status": "open_queued"
+    },
+    {
+      "candidate": 11,
+      "name": "Resident GPU raster jobs and high-resolution output",
+      "status": "open_queued",
+      "implementation_state": "tracked_only",
+      "owner_issue": "beads-ttbl.3",
+      "guide": {
+        "path": "C:\\Users\\Matthew\\Desktop\\GPU-HIGH-RESOLUTION-RENDERING-GUIDE.md",
+        "sha256": "644ec4bb9efa5330351908e78e81ce9df2ebee7f71187c64f3cf19c27f8521bd",
+        "owner_directive_date": "2026-10-30",
+        "added": "2026-10-31"
+      },
+      "required": "16x internal resolution at full native cadence with measured headroom on owner PC first",
+      "desired": [
+        "32x and64x with bounded memory/graceful admission",
+        "Later16x on Steam Deck and server/lower-end hardware"
+      ],
+      "job": "Immutable scale-independent CPU raster preparation shared by exact native and enhanced output; resident GPU sources, dirty uploads, ordered visible jobs, bounded intermediates and same-contract portable fallback",
+      "qualification": [
+        "Own1x/2x/4x/current-max CPU, per-pass GPU timestamps, upload and process/GPU memory baseline",
+        "Before/after GPU timestamps at1x/4x/max, scale-independent CPU/uploads, required16x speed/headroom",
+        "Exact native framebuffer/RAM/state/hash/readbacks at every scale; enhanced data excluded from canonical state and guest reads",
+        "Actual current-build save/load, rollback, reset, window resize/expose; presentation cache invalidation",
+        "Portable fallback build/run on another compatible target; native saves preserved",
+        "Matched built-game A/B, raw samples, frozen identities/settings, host telemetry and shared leases",
+        "Independent subagent keep/fix/reject and PR for retained changes; no unapproved merge"
+      ],
+      "source_rules": "Read in-house gbarecomp commits; no third-party renderer source copying/translation/citation; oracle independent; never invent detail or cite the unverified90% claim as a result/target",
+      "reference_commits": [
+        "4edc278",
+        "ba32c62",
+        "f646f81",
+        "ffa4f2f",
+        "4ea8f55",
+        "a385e0b",
+        "4261f07"
+      ],
+      "prerequisite": "Implement and qualify the complete job; guide addition alone is not completion",
+      "related_candidate": 10,
+      "evidence": [
+        "docs/HLE-BURNDOWN.md#candidate-11-gpu-high-resolution-rendering"
+      ]
     }
   ],
   "boundary_policy": "Current exact instruction-history comparison applies to CPU-preserving frame and AOT changes. A future native OS/memory/drawing replacement may change interior instruction execution; qualify caller-visible input/output, authoritative guest state, time/events/interrupts and errors at the complete job boundary instead of imposing internal LLE algorithms.",
@@ -890,7 +933,7 @@
   },
   "current_serial_candidate": 3,
   "completed_serial_candidate": 5,
-  "awaiting_owner_checkin": true,
+  "awaiting_owner_checkin": false,
   "loader_job_evidence": "docs/loader-job-evidence.json",
   "drawing_job_evidence": "docs/drawing-job-evidence.json",
   "latest_qualified_heads": {
@@ -909,5 +952,9 @@
     "python": "C:/Users/Matthew/.pyenv/pyenv-win/versions/3.12.5/python.exe",
     "policy": "Physical-host capacity reservations and measured CPU/GPU/RAM/workspace headroom; no process-name or idle-machine veto. Exact JSON argv/env on Windows. Matched pairs stay on one host/configuration.",
     "evidence": "G:\\Temp\\Codex\\cdirecomp\\load-job-20261028\\reaudit-20261030\\target-pool.json"
+  },
+  "review_workflow": {
+    "authorized_subagents": true,
+    "rule": "Independent keep/fix/reject review after each candidate, branch PRs for retained meaningful changes, then assign next candidate. Preserve serial measurement/disposition gates and require owner approval to merge."
   }
 }
