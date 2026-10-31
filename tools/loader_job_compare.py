@@ -72,6 +72,7 @@ def run(exe,args,label):
                 'video_frame','video_state','audio_state','native_state','native_events','ikat_events')}
             state['loader_jobs']=request(args.port,{'cmd':'loader_jobs'})
             state['drawing_jobs']=request(args.port,{'cmd':'drawing_jobs'})
+            state['memory_jobs']=request(args.port,{'cmd':'memory_jobs'})
             if args.expect_crc_error:
                 assert state['get_registers']['d1']&0xFFFF==0xE8 and state['get_registers']['sr']&1,state['get_registers']
             frames=[];cursor=1
@@ -99,7 +100,7 @@ def run(exe,args,label):
                 'process_cycles':samples[-1]['process_cycles']-cycle_start if cycle_start is not None else None,
                 'peak_rss_bytes':max(v['rss_bytes'] for v in samples),'start_bracket':[lo,hi],
                 'host_cpu_before':host_before._asdict(),'host_cpu_after':host_after._asdict(),
-                'loader_jobs':state['loader_jobs'],'drawing_jobs':state['drawing_jobs']}
+                'loader_jobs':state['loader_jobs'],'drawing_jobs':state['drawing_jobs'],'memory_jobs':state['memory_jobs']}
             (out/'result.json').write_text(json.dumps(result,indent=2));print(json.dumps(result),flush=True)
             return result,state
         finally:
@@ -108,7 +109,7 @@ def run(exe,args,label):
             proc.wait(timeout=10)
 
 def semantic(state,presentation='headless'):
-    d=copy.deepcopy(state);d.pop('loader_jobs',None);d.pop('drawing_jobs',None)
+    d=copy.deepcopy(state);d.pop('loader_jobs',None);d.pop('drawing_jobs',None);d.pop('memory_jobs',None)
     for key in ('insns','blocks','interp','irq_first_seq'):d['status'].pop(key,None)
     for key in ('scanout_jobs','fused_jobs','reused_jobs'):d['video_state'].pop(key,None)
     d['native_state'].pop('dispatches',None)
@@ -131,7 +132,7 @@ def main():
     p.add_argument('--reference-control',action='store_true',help='Explicit A/A run; no native activity expected')
     p.add_argument('--cpu-core',type=int,help='Matched process-local affinity; does not change other applications')
     p.add_argument('--presentation',choices=('headless','dummy'),default='headless')
-    p.add_argument('--native-job',choices=('loader','drawing'),default='loader')
+    p.add_argument('--native-job',choices=('loader','drawing','memory'),default='loader')
     args=p.parse_args()
     with socket.socket() as probe:assert probe.connect_ex(('127.0.0.1',args.port))!=0
     args.output.mkdir(parents=True,exist_ok=False)
@@ -162,7 +163,7 @@ def main():
         for name in order:
             result,state=run(getattr(args,name),args,f'{prefix}-{name}');states[name]=state
             if name=='candidate' and not args.reference_control:
-                job,key=('drawing_jobs','jobs') if args.native_job=='drawing' else ('loader_jobs','words')
+                job,key=({'drawing':('drawing_jobs','jobs'),'memory':('memory_jobs','jobs')}.get(args.native_job,('loader_jobs','words')))
                 assert state[job].get(key,0)>0,'Native job was not exercised'
             if pair:results.append(result)
         left,right=semantic(states['reference'],args.presentation),semantic(states['candidate'],args.presentation)

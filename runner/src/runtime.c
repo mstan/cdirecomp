@@ -11,6 +11,7 @@
 #include "cdi_native.h"
 #include "cdi_loader_jobs.h"
 #include "cdi_drawing_jobs.h"
+#include "cdi_memory_jobs.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -280,6 +281,7 @@ void runtime_init(void) {
     cdi_loader_reset();
     cdi_native_reset();
     cdi_drawing_reset();
+    cdi_memory_reset();
     /* SCC68070 reset entry costs 43 processor clocks. Native seeds the
      * post-reset registers directly, so carry that exception
      * time in the first generated instruction's accumulator: seq 0 remains the
