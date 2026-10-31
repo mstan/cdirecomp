@@ -592,3 +592,44 @@ Builds, generated sources and immutable snapshots are retained for that handoff.
 Owner saves/settings and delivery folders were untouched; QA was muted and
 background-only. No other candidate was started. **Work is paused at the
 owner's request; resume only after explicit continuation.**
+
+### Candidate 5 completion re-audit and target pool, 2026-10-30
+
+The reactivated bounded goal names candidate 5 only. Reused its accepted
+evidence: all five retained binaries and their complete link-time source
+inputs verify, the three PR heads are unchanged, and equality was recomputed
+from 40 retained raw runs covering loading, corrupt-module errors, later
+bindings/unload, gameplay and the SDL software frontend. The 74 production
+firmware differential cases and supporting test logs remain intact. No new
+game runs, builds or optimization experiments were needed. The measured
+loading result remains **23.98% fewer process cycles**; later gameplay remains
+neutral/inconclusive. The native verification job is integrated in the real
+load-to-ready pipeline, whose I/O, allocation, relocation, linking, unload,
+scheduling and errors remain authoritative kernel operations.
+
+Retired another 96,540,256 bytes of obsolete build objects and duplicate
+staging outputs. Preserved `hle-build/inputs` at its original path because
+passing receipts reference its frozen consumer CMake source. Passing binaries,
+raw samples, native saves/settings and the separately paused candidate-3
+workspace remain intact. Audit, cleanup and PR evidence are indexed in
+[loader-job-evidence.json](loader-job-evidence.json).
+
+Use the installed shared capacity pool for future compatible workloads:
+this PC, SERVER and Steam Deck SSH. The client is
+`C:/Users/Matthew/.local/bin/benchmark_hosts.py`, invoked with
+`C:/Users/Matthew/.pyenv/pyenv-win/versions/3.12.5/python.exe`.
+`probe` measures capacity; `run --os windows|linux --owner beads-oatv
+--job-file <JSON>` reserves realistic CPU/GPU/RAM/workspace budgets and rotates
+compatible targets. Use exact JSON `argv`/`env` on Windows. Both Deck SSH
+aliases share one physical-host ledger, with existing identities and strict
+host-key checks. Other games, compilers and services do not automatically
+exclude a target. Keep every matched pair on one host/configuration and
+retain telemetry and identities. Missing required telemetry does not pass;
+Deck timing requires a verified Linux build/runtime/backend first.
+
+All three hosts passed today's declared CPU-only capacity probe. The read-only
+evidence audit also completed under a local capacity reservation; this is not
+a new game qualification. Historical quiet-host gates and accepted gameplay
+checks were not changed or repeated. Adding the pool does not authorize a
+new benchmark matrix. **Candidate 5 remains qualified; stop at this serial
+checkpoint. Candidate 3 remains paused, and no other candidate was started.**

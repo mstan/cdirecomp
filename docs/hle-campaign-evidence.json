@@ -897,5 +897,17 @@
     "engine_implementation": "faf11af17c2c5ac923065ea98add4356ab2a4a6f",
     "core": "cd1e5e28dc26ec6a887197aac7eaaf8c8c870019",
     "consumer": "a9052e749d994c97e90b7a2bc3c8f75c66685f0f"
+  },
+  "loader_completion_audit": "docs/loader-job-evidence.json#reaudit_20261030",
+  "benchmark_target_pool": {
+    "targets": [
+      "local",
+      "server",
+      "steamdeck"
+    ],
+    "tool": "C:/Users/Matthew/.local/bin/benchmark_hosts.py",
+    "python": "C:/Users/Matthew/.pyenv/pyenv-win/versions/3.12.5/python.exe",
+    "policy": "Physical-host capacity reservations and measured CPU/GPU/RAM/workspace headroom; no process-name or idle-machine veto. Exact JSON argv/env on Windows. Matched pairs stay on one host/configuration.",
+    "evidence": "G:\\Temp\\Codex\\cdirecomp\\load-job-20261028\\reaudit-20261030\\target-pool.json"
   }
 }
