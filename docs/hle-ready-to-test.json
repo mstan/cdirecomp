@@ -2,14 +2,14 @@
   "schema": 1,
   "owner_issue": "beads-oatv",
   "campaign_issue": "beads-2wy8.1",
-  "current_candidate": 3,
+  "current_candidate": 4,
   "rule": "Prepared, built, tested and accepted are distinct. Preserve independent review and serial per-game measurement/disposition gates. Capacity refusal changes useful preparation, not acceptance.",
   "items": [
     {
       "candidate": 3,
       "state": "accepted",
       "acceptance": "independent_KEEP_neutral_performance",
-      "scope": "All post-fix correctness and built-runtime gates pass; independent reviewer keeps with neutral/inconclusive timing. PR publication/cleanup remains.",
+      "scope": "Accepted complete native queue job; independent KEEP with neutral/inconclusive timing; stacked PRs open and unmerged; audited disposable cleanup complete.",
       "implementation": "49c6b21b6fa2312cdb8ecbab6bef5866681b64d8",
       "consumer": "2123474ded8ab6d962c48ed2531f3e4afe797207",
       "ready_job": null,
@@ -23,15 +23,20 @@
       "compatible_target": "local Windows for these frozen local artifact paths; stage and verify equivalent Windows payload before SERVER use",
       "reviewer": "review_drawing_candidate",
       "raw_root": "G:\\Temp\\Codex\\cdirecomp\\hle-burndown-20261031",
-      "completed_job": "G:\\Temp\\Codex\\cdirecomp\\hle-burndown-20261031\\time-fixed-drawing-job.json"
+      "completed_job": "G:\\Temp\\Codex\\cdirecomp\\hle-burndown-20261031\\time-fixed-drawing-job.json",
+      "pull_requests": [
+        "https://github.com/mstan/cdirecomp/pull/2",
+        "https://github.com/mstan/HotelMarioRecomp/pull/2"
+      ],
+      "cleanup_report": "G:/Temp/Codex/cdirecomp/drawing-review-20261031/cleanup.json"
     },
     {
       "candidate": 4,
       "state": "prepared",
       "implementation": "not_started",
       "acceptance": "not_evaluated",
-      "prepared_scope": "Exact real loading-phase profiling job only; native memory/publication job remains to implement after attribution.",
-      "prerequisite": "Candidate3 final keep/PR gate; if its baseline changes, update the exact frozen binary before profiling.",
+      "prepared_scope": "Exact real loading-phase profiling job prepared; owning issue claimed; profiling not run and native memory/publication implementation not started.",
+      "prerequisite": null,
       "ready_job": "G:\\Temp\\Codex\\cdirecomp\\hle-burndown-20261031\\prepared-memory4\\profile-job.json",
       "driver": {
         "path": "G:\\Temp\\Codex\\cdirecomp\\hle-burndown-20261031\\prepared-memory4\\profile-memory.py",
@@ -49,7 +54,8 @@
         "workspace_gib": 1
       },
       "compatible_target": "Windows with the frozen executable, assets, Python3.12+psutil and MinGW nm; local paths currently prepared",
-      "required_next": "Select measured complete copy/fill/publication boundary; include overlaps, faults, IRQ-visible progress, code invalidation and authoritative guest state."
+      "required_next": "Select measured complete copy/fill/publication boundary; include overlaps, faults, IRQ-visible progress, code invalidation and authoritative guest state.",
+      "owner_issue": "beads-ttbl.4"
     },
     {
       "candidate": 6,

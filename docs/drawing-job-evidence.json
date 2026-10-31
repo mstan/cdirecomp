@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "candidate": 3,
-  "status": "validated complete native queue job; independent review KEEP; final performance neutral/inconclusive; branch PR handoff pending",
+  "status": "accepted complete native queue job; independent KEEP; neutral/inconclusive performance; stacked branch PRs open and unmerged",
   "owner_issue": "beads-oatv",
   "campaign_issue": "beads-2wy8.1",
   "consumer_issue": "beads-7t8h",
@@ -758,5 +758,22 @@
     "audit": "G:/Temp/Codex/cdirecomp/drawing-review-20261031/audit.json",
     "rationale": "Bounded identity/caller admission, authoritative guest/callback state, independent faithful fallback, exact reference/observation contracts and a contained native service job. Retention is not a speedup claim."
   },
-  "cleanup_status": "Final audited disposal pending subagent PR handoff; keep current build/generated cache for candidate4 and all immutable input snapshots. New frozen builds reuse old C register-snapshot input files."
+  "cleanup_status": "Audited disposable compile objects/component CMake scratch removed (1309598 bytes); current C build/generated cache, all immutable source/input snapshots, raw results/failures and passing fixtures retained.",
+  "publication": {
+    "engine": {
+      "url": "https://github.com/mstan/cdirecomp/pull/2",
+      "head_at_creation": "4ab28cfc90e9290c2e3340776b8fa825eec157f9",
+      "base": "a10bd45a08941a3789013c8decca3f9177489de9",
+      "branch": "perf/native-drawing-jobs-20261028"
+    },
+    "consumer": {
+      "url": "https://github.com/mstan/HotelMarioRecomp/pull/2",
+      "head_at_creation": "2123474ded8ab6d962c48ed2531f3e4afe797207",
+      "base": "cf5a4ed70909fa59b8eee3c5a08b841696257cac",
+      "branch": "perf/native-drawing-job-20261028"
+    },
+    "state": "open_unmerged",
+    "review": "independent_KEEP_neutral_inconclusive"
+  },
+  "cleanup_report": "G:/Temp/Codex/cdirecomp/drawing-review-20261031/cleanup.json"
 }

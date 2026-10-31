@@ -772,8 +772,15 @@
       "reason": "Independent review KEEP after fixed real debugger regressions,58 differential cases and matched built-game equality; final timing neutral/inconclusive within current controls.",
       "prerequisite": null,
       "prior_deferral_rejected": true,
-      "work_remaining": "Create stacked branch PRs and audited cleanup, then assign next candidate; do not merge without owner approval.",
-      "job": "Complete deferred drawing queue service, executing actual guest callbacks and publishing authoritative queue/buffer state. Not a rewrite of every graphics callback or scene algorithm."
+      "work_remaining": null,
+      "job": "Complete deferred drawing queue service, executing actual guest callbacks and publishing authoritative queue/buffer state. Not a rewrite of every graphics callback or scene algorithm.",
+      "pull_requests": [
+        "https://github.com/mstan/cdirecomp/pull/2",
+        "https://github.com/mstan/HotelMarioRecomp/pull/2"
+      ],
+      "independent_disposition": "KEEP",
+      "performance_classification": "neutral/inconclusive; no proven win or reproducible regression",
+      "publication": "open unmerged stacked PRs"
     },
     {
       "candidate": 4,
@@ -931,8 +938,8 @@
     "report": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\cleanup-report.json",
     "ledger": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\resource-ledger.json"
   },
-  "current_serial_candidate": 3,
-  "completed_serial_candidate": 5,
+  "current_serial_candidate": 4,
+  "completed_serial_candidate": 3,
   "awaiting_owner_checkin": false,
   "loader_job_evidence": "docs/loader-job-evidence.json",
   "drawing_job_evidence": "docs/drawing-job-evidence.json",
@@ -956,5 +963,22 @@
   "review_workflow": {
     "authorized_subagents": true,
     "rule": "Independent keep/fix/reject review after each candidate, branch PRs for retained meaningful changes, then assign next candidate. Preserve serial measurement/disposition gates and require owner approval to merge."
-  }
+  },
+  "drawing_job_publication": {
+    "engine": {
+      "url": "https://github.com/mstan/cdirecomp/pull/2",
+      "head_at_creation": "4ab28cfc90e9290c2e3340776b8fa825eec157f9",
+      "base": "a10bd45a08941a3789013c8decca3f9177489de9",
+      "branch": "perf/native-drawing-jobs-20261028"
+    },
+    "consumer": {
+      "url": "https://github.com/mstan/HotelMarioRecomp/pull/2",
+      "head_at_creation": "2123474ded8ab6d962c48ed2531f3e4afe797207",
+      "base": "cf5a4ed70909fa59b8eee3c5a08b841696257cac",
+      "branch": "perf/native-drawing-job-20261028"
+    },
+    "state": "open_unmerged",
+    "review": "independent_KEEP_neutral_inconclusive"
+  },
+  "candidate4_owner_issue": "beads-ttbl.4"
 }

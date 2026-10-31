@@ -38,7 +38,7 @@ subsystem boundaries or a requirement to adopt every proposed optimization.
 | --- | --- | --- | --- |
 | 1 | **Qualify the scanout candidate already written** | Repeated decoding, transparency, contribution and composition work across pixels | **Qualified as part of the combined native frame job.** Three alternating Hotel Mario pairs save 23.0-26.0% CPU/field with complete contract equality. Scanout-only performance remains inconclusive. |
 | 2 | **Complete frame production and publication** | Repeated framebuffer hashing, copying, diagnostic reconstruction and publication work | **Implemented and qualified with candidate 1.** Exact content identity, retained storage and frontend handoff remove duplicate work without changing field cadence. |
-| 3 | **Graphics service to completed drawing job** | Guest drawing preparation, intermediate memory traffic, control-list construction and repeated renderer preparation | **Qualified native queue job; independent review KEEP, final performance neutral/inconclusive.** Real callbacks, queue publication and device/IRQ frontiers match. Reviewer-found debugger stops are fixed and regression-tested. Branch PR handoff is current; historical pre-fix gains are not a current speedup claim. |
+| 3 | **Graphics service to completed drawing job** | Guest drawing preparation, intermediate memory traffic, control-list construction and repeated renderer preparation | **Qualified native queue job; independent review KEEP, final performance neutral/inconclusive.** Real callbacks, queue publication and device/IRQ frontiers match. Reviewer-found debugger stops are fixed and regression-tested. Stacked [engine PR #2](https://github.com/mstan/cdirecomp/pull/2) and [consumer PR #2](https://github.com/mstan/HotelMarioRecomp/pull/2) are open and unmerged; historical pre-fix gains are not a current speedup claim. |
 | 4 | **Memory operation to fully published result** | Instruction-by-instruction copying/filling plus repeated module invalidation, tag maintenance and dirty tracking | **Open, queued.** Previous gameplay-only attribution did not qualify complete bulk operations. |
 | 5 | **File/module load to executable module ready** | Repeated sector handling, copying, validation, relocation, linking, hashing and native binding | **Selected native verification job implemented and qualified in the real load-to-ready pipeline.** Three matched pairs use 23.4–33.3% fewer process cycles during loading; later gameplay is neutral/inconclusive. Kernel I/O, linking and scheduling stay authoritative. |
 | 6 | **Frequently executed OS-9 service jobs** | Recompiled kernel algorithms and internal dispatch that a complete native operation could replace | **Open, queued.** Service attribution and boundary contracts are remaining implementation work. |
@@ -64,7 +64,8 @@ subsystem boundaries or a requirement to adopt every proposed optimization.
   below. The owner resumed the entire remaining set on 2026-10-31;
   **candidate 3 now has independent KEEP review** after implementation,
   objective debugger repair and fresh built-game measurement, classified
-  neutral/inconclusive. Branch PR handoff is current. After each independent keep/fix/reject review,
+  neutral/inconclusive. Stacked branch PRs are open and unmerged; candidate 4 is
+  next under `beads-ttbl.4`. After each independent keep/fix/reject review,
   create branch PRs for retained work and assign the next candidate. Do not
   merge without owner approval. Remaining work is 4, 6, 8, 9, hardware 10 and
   the new GPU rendering candidate 11. Reuse accepted 1/2/5/7 evidence.
@@ -755,3 +756,26 @@ profiling job and realistic resource budget prepared; it has not been run or
 implemented. Remaining candidates retain their individual measurement and
 independent final review gates. Continue from candidate 3's PR handoff to the
 next candidate without repeating accepted gameplay checks.
+
+### Candidate 3 publication and cleanup checkpoint, 2026-10-31
+
+Independent disposition is **KEEP**, with neutral/inconclusive performance.
+The stacked [engine PR #2](https://github.com/mstan/cdirecomp/pull/2) targets
+`perf/native-scanout-hle-20261027` (`a10bd45`); [Hotel Mario PR #2](https://github.com/mstan/HotelMarioRecomp/pull/2)
+targets `perf/native-jobs-20261028` (`cf5a4ed`). Creation heads are `4ab28cf`
+and `2123474`; tested implementation remains `49c6b21`. Both are open and
+unmerged. The independent review, raw evidence and exact identities remain
+indexed in [drawing-job-evidence.json](drawing-job-evidence.json).
+
+Audited cleanup removed 1,309,598 bytes of disposable compile scratch.
+Current C: build/generated cache, **all immutable source/input snapshots**,
+raw failures/results and passing debugger/reference fixtures remain. The new
+G: frozen builds depend on the older C: register-snapshot input files; those
+are permanent retained evidence for this campaign. Cleanup receipt:
+`G:/Temp/Codex/cdirecomp/drawing-review-20261031/cleanup.json`.
+
+Proceed directly to candidate **4**, owning issue `beads-ttbl.4`, on an
+isolated branch. Its exact profiling recipe is prepared, not measured. Select
+and implement a complete native memory operation through authoritative
+publication, then qualify correctness and built-game behavior and obtain an
+independent final review. Broad burndown and campaign remain open.
