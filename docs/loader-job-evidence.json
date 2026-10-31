@@ -6308,7 +6308,13 @@
         "state": "OPEN"
       }
     },
-    "scope": "Reactivated candidate5 only; candidate3 remains at owner-requested pause. No additional optimization candidate started."
+    "scope": "Reactivated candidate5 only; candidate3 remains at owner-requested pause. No additional optimization candidate started.",
+    "beads_sync": {
+      "path": "G:\\Temp\\Codex\\cdirecomp\\load-job-20261028\\reaudit-20261030\\beads-sync.json",
+      "bytes": 1322,
+      "sha256": "af62781cb4aa053dbd4e2510076eaa04614db0f7aa2283ced0655b775b3e8bcc"
+    },
+    "beads_sync_status": "central updates saved and covered by a successful subsequent shared push"
   },
   "cleanup_reaudit_report": "G:\\Temp\\Codex\\cdirecomp\\load-job-20261028\\reaudit-20261030\\cache-cleanup.json"
 }

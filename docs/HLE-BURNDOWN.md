@@ -627,6 +627,13 @@ exclude a target. Keep every matched pair on one host/configuration and
 retain telemetry and identities. Missing required telemetry does not pass;
 Deck timing requires a verified Linux build/runtime/backend first.
 
+Within authorized scope, unavailable capacity must not stall preparation:
+prepare isolated prototypes, switches, fixtures, frozen baselines and exact
+runnable jobs with realistic budgets for later testing. Keep prepared, built,
+tested and accepted states distinct, and preserve each item's independent
+serial measurement/disposition gate. This does not resume owner-paused work,
+permit extra subagents, bypass reservations or qualify unmeasured changes.
+
 All three hosts passed today's declared CPU-only capacity probe. The read-only
 evidence audit also completed under a local capacity reservation; this is not
 a new game qualification. Historical quiet-host gates and accepted gameplay
