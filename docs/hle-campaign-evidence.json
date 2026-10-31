@@ -3,7 +3,7 @@
   "owner_issue": "beads-oatv",
   "campaign_issue": "beads-2wy8.1",
   "consumer_issue": "beads-7t8h",
-  "status": "in_progress; owner resumed all remaining candidates; candidate3 independent review active",
+  "status": "in_progress; candidate3 independently retained with neutral timing; branch PR handoff, then candidate4",
   "engine_head": "85c869ee808b438905f2c1bc29a46d30f27647f8",
   "core_head": "3955bf3311f55e031836f70b5c1839e95b81f9cf",
   "game_head": "16353fc849ef8056af891e2c3b7d3e29ae3a41da",
@@ -764,15 +764,15 @@
     {
       "candidate": 3,
       "name": "Graphics service to completed drawing",
-      "status": "implemented_measured_independent_review_pending",
+      "status": "validated_keep_neutral_pr_handoff",
       "validated_portion": "Complete deferred drawing queue service, executing actual guest callbacks and publishing authoritative queue/buffer state. Not a rewrite of every graphics callback or scene algorithm.",
       "evidence": [
         "docs/drawing-job-evidence.json"
       ],
-      "reason": "Native drawing queue implemented and integrated; differential and built-game contracts pass. Headless cycle gains exceed controls; SDL software is neutral/inconclusive. Owner paused before final review and PR handoff.",
-      "prerequisite": "Independent final review and PR handoff; owner continuation granted2026-10-31.",
+      "reason": "Independent review KEEP after fixed real debugger regressions,58 differential cases and matched built-game equality; final timing neutral/inconclusive within current controls.",
+      "prerequisite": null,
       "prior_deferral_rejected": true,
-      "work_remaining": "Resolve objective reviewer findings, open stacked engine/consumer PRs for retained work, clean disposable scratch, then assign next candidate.",
+      "work_remaining": "Create stacked branch PRs and audited cleanup, then assign next candidate; do not merge without owner approval.",
       "job": "Complete deferred drawing queue service, executing actual guest callbacks and publishing authoritative queue/buffer state. Not a rewrite of every graphics callback or scene algorithm."
     },
     {
@@ -937,9 +937,9 @@
   "loader_job_evidence": "docs/loader-job-evidence.json",
   "drawing_job_evidence": "docs/drawing-job-evidence.json",
   "latest_qualified_heads": {
-    "engine_implementation": "faf11af17c2c5ac923065ea98add4356ab2a4a6f",
+    "engine_implementation": "49c6b21b6fa2312cdb8ecbab6bef5866681b64d8",
     "core": "cd1e5e28dc26ec6a887197aac7eaaf8c8c870019",
-    "consumer": "a9052e749d994c97e90b7a2bc3c8f75c66685f0f"
+    "consumer": "2123474ded8ab6d962c48ed2531f3e4afe797207"
   },
   "loader_completion_audit": "docs/loader-job-evidence.json#reaudit_20261030",
   "benchmark_target_pool": {

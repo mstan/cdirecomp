@@ -1,18 +1,18 @@
 {
   "schema": 1,
   "candidate": 3,
-  "status": "implemented and measured; owner-requested pause before final review, PRs and cleanup",
+  "status": "validated complete native queue job; independent review KEEP; final performance neutral/inconclusive; branch PR handoff pending",
   "owner_issue": "beads-oatv",
   "campaign_issue": "beads-2wy8.1",
   "consumer_issue": "beads-7t8h",
   "game": "Hotel Mario (USA)",
-  "engine_implementation": "faf11af17c2c5ac923065ea98add4356ab2a4a6f",
+  "engine_implementation": "49c6b21b6fa2312cdb8ecbab6bef5866681b64d8",
   "core_head": "cd1e5e28dc26ec6a887197aac7eaaf8c8c870019",
-  "consumer_head": "a9052e749d994c97e90b7a2bc3c8f75c66685f0f",
+  "consumer_head": "2123474ded8ab6d962c48ed2531f3e4afe797207",
   "package": "Previously qualified native frame/coarse PIC/line-reuse/module-verification jobs plus SHA-bound native deferred drawing orchestration",
   "reference_package": "Same new generator/runtime and optimization package, with DrawingBackend=LLE instead of HLE",
   "scope": "Complete deferred drawing queue service, executing actual guest callbacks and publishing authoritative queue/buffer state. Not a rewrite of every graphics callback or scene algorithm.",
-  "raw_evidence_root": "C:\\Users\\Matthew\\AppData\\Local\\Temp\\Codex\\cdirecomp\\drawing-job-20261028",
+  "raw_evidence_root": "G:\\Temp\\Codex\\cdirecomp\\hle-burndown-20261031",
   "selection": {
     "profile": {
       "path": "C:\\Users\\Matthew\\AppData\\Local\\Temp\\Codex\\cdirecomp\\drawing-job-20261028\\drawing-profile.json",
@@ -35,66 +35,84 @@
     "notes": "ASLR-correct paired host/guest suspended-thread sampling, selection only; 256-byte bucket includes queue/device overhead. Actual bitmap callback at module+0x19E4."
   },
   "performance": {
-    "classification": "headless process cycles positive; SDL software neutral/inconclusive",
+    "classification": "neutral/inconclusive in final headless and SDL software workloads; no proven speedup or reproducible regression",
     "fields": [
       9400,
       13000
     ],
     "pairs": 3,
-    "control_pairs": 2,
-    "median_cpu_reduction_percent": 7.403294117647096,
-    "median_process_cycle_reduction_percent": 5.879577372515454,
+    "control_pairs": 1,
+    "frontend_pairs": 1,
+    "cpu_reduction_percent": [
+      -2.507836990595602,
+      8.891712745131708,
+      7.288953500111073
+    ],
+    "process_cycle_reduction_percent": [
+      -2.4469097945193585,
+      9.497201146762556,
+      7.438118170114683
+    ],
+    "observed_median_cpu_reduction_percent": 7.288953500111073,
+    "observed_median_cycle_reduction_percent": 7.438118170114683,
     "control_cpu_differences_percent": [
-      3.969849246231172,
-      -7.986111111111116
+      8.719201359388261
     ],
     "control_cycle_differences_percent": [
-      2.8603569268065954,
-      -0.4311672238948461
+      10.013733236200274
     ],
-    "interpretation": "Final headless HLE cycle reductions 5.82-7.25% exceed same-binary controls (-0.43%, +2.86%). CPU reductions are observed, but CPU controls vary by up to7.99%, so CPU time alone is not proof. SDL retained pair is -2.78% CPU/-1.73% cycles, within control variation; no SDL gain or reproducible regression established.",
-    "method": "Warm both binaries, alternate order, process-local logical CPU15 affinity, real deterministic controller input, isolated RTC/config, muted. Complete state capture outside timing. Raw Windows process cycles are not converted to time.",
-    "frontend": "One warmed retained SDL dummy/software pair; complete PCM identity, excluding host-time queued/dropped PCM counters.",
-    "startup": "Full boot/loading correctness compared; startup latency not separately qualified as a performance win.",
-    "reassessment": "Initial older-binary comparisons were positive but the rebuilt LLE control also improved. The first direct same-source HLE/LLE experiment was mixed, so no isolated gain is claimed from it. Second implementation publishes only changed registers, retaining full materialization at exceptional frontiers. All first-attempt results and identities remain retained.",
+    "frontend_cpu_reduction_percent": [
+      6.473126716359356
+    ],
+    "frontend_cycle_reduction_percent": [
+      6.3462333499009755
+    ],
+    "interpretation": "The fixed-source mixed A/B differences lie within the contemporaneous identical-LLE control variation (10.0137% cycles,8.7192% CPU). Positive point estimates/medians are not proven wins. A single -2.45% slower headless pair is not a reproducible regression. SDL software remains neutral/inconclusive.",
+    "method": "Warm both builds; alternate pair order; same source/compiler/options except independent DrawingBackend; logical CPU15; fixed real controller input/RTC/config; muted. Keep capture outside timing and retain all raw host/process samples.",
+    "capacity_reservation": {
+      "path": "G:\\Temp\\Codex\\cdirecomp\\hle-burndown-20261031\\timing-reservation-retry.json",
+      "bytes": 1801,
+      "sha256": "f8a7d5555afed83f9b468b60d094e3ac79185fcb853d441ae7524a6d8ec74548"
+    },
     "costs": [
       {
         "label": "pair1-reference",
-        "bytes": 34051752,
-        "peak_rss_bytes": 217239552
+        "binary_bytes": 34051803,
+        "peak_rss_bytes": 216739840
       },
       {
         "label": "pair1-candidate",
-        "bytes": 34058857,
-        "peak_rss_bytes": 217178112
+        "binary_bytes": 34059563,
+        "peak_rss_bytes": 216657920
       },
       {
         "label": "pair2-candidate",
-        "bytes": 34058857,
-        "peak_rss_bytes": 217178112
+        "binary_bytes": 34059563,
+        "peak_rss_bytes": 216662016
       },
       {
         "label": "pair2-reference",
-        "bytes": 34051752,
-        "peak_rss_bytes": 217243648
+        "binary_bytes": 34051803,
+        "peak_rss_bytes": 216739840
       },
       {
         "label": "pair3-reference",
-        "bytes": 34051752,
-        "peak_rss_bytes": 217239552
+        "binary_bytes": 34051803,
+        "peak_rss_bytes": 216743936
       },
       {
         "label": "pair3-candidate",
-        "bytes": 34058857,
-        "peak_rss_bytes": 217174016
+        "binary_bytes": 34059563,
+        "peak_rss_bytes": 216657920
       }
-    ]
+    ],
+    "reassessment": "Initial older-binary comparisons were positive but the rebuilt LLE control also improved. The first direct same-source HLE/LLE experiment was mixed, so no isolated gain is claimed from it. Second implementation publishes only changed registers, retaining full materialization at exceptional frontiers. All first-attempt results and identities remain retained. Final independent review required an observation fix. Remeasured the changed source; current results are neutral and do not inherit the historical gain."
   },
   "correctness": {
     "production_generated_reference": {
-      "path": "C:\\Users\\Matthew\\AppData\\Local\\Temp\\Codex\\cdirecomp\\drawing-job-20261028\\register-job-fixture-final\\summary.json",
+      "path": "G:\\Temp\\Codex\\cdirecomp\\hle-burndown-20261031\\native-differential-fixed\\summary.json",
       "bytes": 111370,
-      "sha256": "8796a283de216b8d29498ea22a3d6f1efcbc4a2169e8f42c309cb857d0aad2f3"
+      "sha256": "c74e99a02c85ddda7b2b2c5b769f2aae67f69537e55664437dc6a636d209ee10"
     },
     "cases": 58,
     "coverage": [
@@ -138,17 +156,212 @@
     "portable_checks": "Windows Release build and Linux GCC final HLE=0/HLE=1 strict syntax compilation. No assembly/SIMD/new platform dependency; no Linux runtime performance claim.",
     "faithful_build": "Supported DrawingBackend=LLE matches prior package through13000 and records zero drawing jobs.",
     "supported_equivalence": {
-      "path": "C:\\Users\\Matthew\\AppData\\Local\\Temp\\Codex\\cdirecomp\\drawing-job-20261028\\register-supported-equivalence.json",
-      "bytes": 5247,
-      "sha256": "8206f78998a55c3ed6d375e89705de86ac42b13f31a6da9f30dd36130fdb61f4"
+      "path": "G:\\Temp\\Codex\\cdirecomp\\hle-burndown-20261031\\fixed-supported-equivalence.json",
+      "bytes": 2957,
+      "sha256": "b6116dc8eb3023bdaa19c4febf3a0bff3780fd60c2faa491a3f96e9319ed7ff7"
     },
     "generated_body_equivalence": {
       "path": "C:\\Users\\Matthew\\AppData\\Local\\Temp\\Codex\\cdirecomp\\drawing-job-20261028\\generated-equivalence.json",
       "bytes": 299,
       "sha256": "c4d59c39c1c0379fb2fe82f14c841d3f394e8e42081cef1de0dc195e99380292"
+    },
+    "debugger_regression_before": {
+      "path": "G:\\Temp\\Codex\\cdirecomp\\hle-burndown-20261031\\debugger-before\\summary.json",
+      "bytes": 93863,
+      "sha256": "f2f6a093499d02ad96546d5057220693a61185e4e46e6fdb1639c94306605459"
+    },
+    "debugger_regression_after": {
+      "path": "G:\\Temp\\Codex\\cdirecomp\\hle-burndown-20261031\\debugger-fixed\\summary.json",
+      "bytes": 94566,
+      "sha256": "433c2996a5eaf5b8b0190a32086e9ae1b734f69b69cd1b2c59dfc95039df71cd"
+    },
+    "debugger_cases": 2,
+    "fix": "Per-operation atomic observation epoch; release publication after stop arm/delayed activation, acquire before skipped operations; invalidation first; materialize and resume faithful current operation.",
+    "portable_logs": [
+      {
+        "path": "G:\\Temp\\Codex\\cdirecomp\\hle-burndown-20261031\\linux-fix-HLE0.log",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "path": "G:\\Temp\\Codex\\cdirecomp\\hle-burndown-20261031\\linux-fix-HLE1.log",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    ],
+    "qualification_lease": {
+      "path": "G:\\Temp\\Codex\\cdirecomp\\hle-burndown-20261031\\fix-reservation.json",
+      "bytes": 1795,
+      "sha256": "8b50a5495d05180cdc51245b39517c79e6f37353f3942bf46aa2fe3d7d1412e0"
+    },
+    "supporting_suite_scope": "The prior13 runtime/7 compiler/alias checks remain supporting evidence; changed native job freshly compared in58 production cases,2 real debugger cases and final built-game pairs."
+  },
+  "experiments": [
+    {
+      "name": "fixed-control",
+      "role": "current same-binary A/A control",
+      "implementation": "49c6b21b6fa2312cdb8ecbab6bef5866681b64d8",
+      "evidence": {
+        "path": "G:\\Temp\\Codex\\cdirecomp\\hle-burndown-20261031\\fixed-control\\campaign-evidence.json",
+        "bytes": 7089,
+        "sha256": "ace0792c0369ad4bd225119665696722371b41c6956ba81284c9b798c9bea917"
+      },
+      "identity": {
+        "path": "G:\\Temp\\Codex\\cdirecomp\\hle-burndown-20261031\\fixed-control\\identity.json",
+        "bytes": 380804,
+        "sha256": "d098389a48c48fc2b5bbb4f53394ea9fb2b2f9af009a76c525856ab8809cfa4a"
+      },
+      "contracts": [
+        {
+          "pair": "warm",
+          "equal": true,
+          "differences": []
+        },
+        {
+          "pair": "pair1",
+          "equal": true,
+          "differences": []
+        }
+      ],
+      "cpu_reduction_percent": [
+        8.719201359388261
+      ],
+      "process_cycle_reduction_percent": [
+        10.013733236200274
+      ]
+    },
+    {
+      "name": "fixed-backend-pairs",
+      "role": "post-fix matched same-source HLE/LLE",
+      "implementation": "49c6b21b6fa2312cdb8ecbab6bef5866681b64d8",
+      "evidence": {
+        "path": "G:\\Temp\\Codex\\cdirecomp\\hle-burndown-20261031\\fixed-backend-pairs\\campaign-evidence.json",
+        "bytes": 20344,
+        "sha256": "8196aaa78e8550f4c95341e16b96097ae9e855a54c4a73ee2b4a3e307cb2a1ef"
+      },
+      "identity": {
+        "path": "G:\\Temp\\Codex\\cdirecomp\\hle-burndown-20261031\\fixed-backend-pairs\\identity.json",
+        "bytes": 380841,
+        "sha256": "04839a5f324faf6c38ad2907d798ebfd296d4349c9821d3f06b0dc7471bb0b38"
+      },
+      "contracts": [
+        {
+          "pair": "warm",
+          "equal": true,
+          "differences": []
+        },
+        {
+          "pair": "pair1",
+          "equal": true,
+          "differences": []
+        },
+        {
+          "pair": "pair2",
+          "equal": true,
+          "differences": []
+        },
+        {
+          "pair": "pair3",
+          "equal": true,
+          "differences": []
+        }
+      ],
+      "cpu_reduction_percent": [
+        -2.507836990595602,
+        8.891712745131708,
+        7.288953500111073
+      ],
+      "process_cycle_reduction_percent": [
+        -2.4469097945193585,
+        9.497201146762556,
+        7.438118170114683
+      ]
+    },
+    {
+      "name": "fixed-frontend",
+      "role": "post-fix SDL dummy/software; neutral/inconclusive",
+      "implementation": "49c6b21b6fa2312cdb8ecbab6bef5866681b64d8",
+      "evidence": {
+        "path": "G:\\Temp\\Codex\\cdirecomp\\hle-burndown-20261031\\fixed-frontend\\campaign-evidence.json",
+        "bytes": 7058,
+        "sha256": "0c2e1ab6bdfce1fe7faa8849baa7b3c14f6b8e6ff920b98a7edfb9bb14ac5432"
+      },
+      "identity": {
+        "path": "G:\\Temp\\Codex\\cdirecomp\\hle-burndown-20261031\\fixed-frontend\\identity.json",
+        "bytes": 380808,
+        "sha256": "bcee019be6e580c126c1830a9f61544b1a6be461ae76a17ed0a6532256abd0ad"
+      },
+      "contracts": [
+        {
+          "pair": "warm",
+          "equal": true,
+          "differences": []
+        },
+        {
+          "pair": "pair1",
+          "equal": true,
+          "differences": []
+        }
+      ],
+      "cpu_reduction_percent": [
+        6.473126716359356
+      ],
+      "process_cycle_reduction_percent": [
+        6.3462333499009755
+      ]
+    }
+  ],
+  "binaries": {
+    "drawing-fixed-hle": {
+      "executable": {
+        "path": "G:\\Temp\\Codex\\cdirecomp\\hle-burndown-20261031\\drawing-fixed-hle\\HotelMarioRecomp.exe",
+        "bytes": 34059563,
+        "sha256": "530742f1cdb6988019c0478856fd9d8fd2fa9ba0cfe3f49efa33607be4346a14"
+      },
+      "provenance": {
+        "path": "G:\\Temp\\Codex\\cdirecomp\\hle-burndown-20261031\\drawing-fixed-hle\\HotelMarioRecomp.exe.build.json",
+        "bytes": 182750,
+        "sha256": "05d94347700ceed071dedd27e0a63f6a0d1b2f95919df245bcc07dee13580f9e"
+      }
+    },
+    "drawing-fixed-lle": {
+      "executable": {
+        "path": "G:\\Temp\\Codex\\cdirecomp\\hle-burndown-20261031\\drawing-fixed-lle\\HotelMarioRecomp.exe",
+        "bytes": 34051803,
+        "sha256": "74f8c55032eb53c3cbf2b3cc3b2d6ad65b3ee62194a564b3f5360c114f2783d9"
+      },
+      "provenance": {
+        "path": "G:\\Temp\\Codex\\cdirecomp\\hle-burndown-20261031\\drawing-fixed-lle\\HotelMarioRecomp.exe.build.json",
+        "bytes": 182750,
+        "sha256": "401aafc30b00b2229b72530bd40de054092091fbee6c99557a8e605d7b8e7e03"
+      }
     }
   },
-  "experiments": {
+  "contract": {
+    "selection": "Independent build-time CDI_DRAWING_BACKEND=LLE|HLE; generic defaultLLE, consumer defaultHLE.",
+    "identity": "Exact module SHA, live binding token, generated direct-call identity and ordinary BSR stack frame; unsupported calls/memory/observation modes remain faithful.",
+    "state": "Guest RAM, callback register changes, queue ownership, buffer publication, code invalidation, device quanta, interrupts and faults remain authoritative. No shadow kernel or fabricated progress.",
+    "native_saves": "No save serialization or native-save path changes; tests use isolated RAM/config; owner saves/settings/delivery folders preserved.",
+    "fallback": "Portable C and faithful build option; actual callback implementations remain available."
+  },
+  "limitations": [
+    "Only Hotel Mario USA and the fixed Hotel1 Stage1 workload are performance-qualified.",
+    "SDL dummy/software does not qualify a hardware GPU driver.",
+    "No whole-game, other-title, full-campaign, audio-listening or native-save-restoration claim.",
+    "Candidate9 event-span work remains separate; this job preserves all original device quanta."
+  ],
+  "storage_ledger": "C:\\Users\\Matthew\\AppData\\Local\\Temp\\Codex\\cdirecomp\\drawing-job-20261028\\resource-ledger.json",
+  "historical_raw_evidence_root": "C:\\Users\\Matthew\\AppData\\Local\\Temp\\Codex\\cdirecomp\\drawing-job-20261028",
+  "previous_version": {
+    "evidence": {
+      "path": "G:\\Temp\\Codex\\cdirecomp\\hle-burndown-20261031\\drawing-job-evidence-before-observation-fix.json",
+      "bytes": 21623,
+      "sha256": "d39ab28162fe4f3d3974edab03611aa85e812aadcef333702ad1d48ef3722316"
+    },
+    "implementation": "faf11af17c2c5ac923065ea98add4356ab2a4a6f",
+    "reason_superseded": "Independent review found delayed/asynchronously armed instruction stops could be skipped. Fixed through per-operation observation epoch and exact faithful continuation. Historical gains do not qualify the changed binary."
+  },
+  "historical_experiments": {
     "first-game-pair": {
       "evidence": {
         "path": "C:\\Users\\Matthew\\AppData\\Local\\Temp\\Codex\\cdirecomp\\drawing-job-20261028\\first-game-pair\\campaign-evidence.json",
@@ -476,7 +689,7 @@
       ]
     }
   },
-  "binaries": {
+  "historical_binaries": {
     "hle-snapshot": {
       "executable": {
         "path": "C:\\Users\\Matthew\\AppData\\Local\\Temp\\Codex\\cdirecomp\\drawing-job-20261028\\hle-snapshot\\HotelMarioRecomp.exe",
@@ -538,18 +751,12 @@
       }
     }
   },
-  "contract": {
-    "selection": "Independent build-time CDI_DRAWING_BACKEND=LLE|HLE; generic defaultLLE, consumer defaultHLE.",
-    "identity": "Exact module SHA, live binding token, generated direct-call identity and ordinary BSR stack frame; unsupported calls/memory/observation modes remain faithful.",
-    "state": "Guest RAM, callback register changes, queue ownership, buffer publication, code invalidation, device quanta, interrupts and faults remain authoritative. No shadow kernel or fabricated progress.",
-    "native_saves": "No save serialization or native-save path changes; tests use isolated RAM/config; owner saves/settings/delivery folders preserved.",
-    "fallback": "Portable C and faithful build option; actual callback implementations remain available."
+  "independent_review": {
+    "agent": "review_drawing_candidate",
+    "verdict": "KEEP after objective debugger fix; neutral per-game acceptance",
+    "report": "G:/Temp/Codex/cdirecomp/drawing-review-20261031/review.md",
+    "audit": "G:/Temp/Codex/cdirecomp/drawing-review-20261031/audit.json",
+    "rationale": "Bounded identity/caller admission, authoritative guest/callback state, independent faithful fallback, exact reference/observation contracts and a contained native service job. Retention is not a speedup claim."
   },
-  "limitations": [
-    "Only Hotel Mario USA and the fixed Hotel1 Stage1 workload are performance-qualified.",
-    "SDL dummy/software does not qualify a hardware GPU driver.",
-    "No whole-game, other-title, full-campaign, audio-listening or native-save-restoration claim.",
-    "Candidate9 event-span work remains separate; this job preserves all original device quanta."
-  ],
-  "storage_ledger": "C:\\Users\\Matthew\\AppData\\Local\\Temp\\Codex\\cdirecomp\\drawing-job-20261028\\resource-ledger.json"
+  "cleanup_status": "Final audited disposal pending subagent PR handoff; keep current build/generated cache for candidate4 and all immutable input snapshots. New frozen builds reuse old C register-snapshot input files."
 }

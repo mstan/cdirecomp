@@ -31,14 +31,14 @@ forced guest progress. Use authoritative guest RAM and verified contracts.
 ## Candidate dispositions
 
 These are complete jobs to evaluate. Related candidates can become one
-replacement across OS, memory and device boundaries. They are not ten fixed
+replacement across OS, memory and device boundaries. They are not fixed
 subsystem boundaries or a requirement to adopt every proposed optimization.
 
 | # | Candidate | Work the native replacement would remove | Current status |
 | --- | --- | --- | --- |
 | 1 | **Qualify the scanout candidate already written** | Repeated decoding, transparency, contribution and composition work across pixels | **Qualified as part of the combined native frame job.** Three alternating Hotel Mario pairs save 23.0-26.0% CPU/field with complete contract equality. Scanout-only performance remains inconclusive. |
 | 2 | **Complete frame production and publication** | Repeated framebuffer hashing, copying, diagnostic reconstruction and publication work | **Implemented and qualified with candidate 1.** Exact content identity, retained storage and frontend handoff remove duplicate work without changing field cadence. |
-| 3 | **Graphics service to completed drawing job** | Guest drawing preparation, intermediate memory traffic, control-list construction and repeated renderer preparation | **In progress, current serial candidate.** Actual paired host/guest sampling selects the deferred drawing-preparation queue; native orchestration is being implemented and qualified through callbacks, queue publication and device/IRQ frontiers. |
+| 3 | **Graphics service to completed drawing job** | Guest drawing preparation, intermediate memory traffic, control-list construction and repeated renderer preparation | **Qualified native queue job; independent review KEEP, final performance neutral/inconclusive.** Real callbacks, queue publication and device/IRQ frontiers match. Reviewer-found debugger stops are fixed and regression-tested. Branch PR handoff is current; historical pre-fix gains are not a current speedup claim. |
 | 4 | **Memory operation to fully published result** | Instruction-by-instruction copying/filling plus repeated module invalidation, tag maintenance and dirty tracking | **Open, queued.** Previous gameplay-only attribution did not qualify complete bulk operations. |
 | 5 | **File/module load to executable module ready** | Repeated sector handling, copying, validation, relocation, linking, hashing and native binding | **Selected native verification job implemented and qualified in the real load-to-ready pipeline.** Three matched pairs use 23.4–33.3% fewer process cycles during loading; later gameplay is neutral/inconclusive. Kernel I/O, linking and scheduling stay authoritative. |
 | 6 | **Frequently executed OS-9 service jobs** | Recompiled kernel algorithms and internal dispatch that a complete native operation could replace | **Open, queued.** Service attribution and boundary contracts are remaining implementation work. |
@@ -62,8 +62,9 @@ subsystem boundaries or a requirement to adopt every proposed optimization.
   within this goal. Work serially, checking in with the owner after each.
   Candidate **5** has completed its serial implementation and qualification
   below. The owner resumed the entire remaining set on 2026-10-31;
-  **candidate 3 is now under independent review** after implementation and
-  built-game measurement. After each independent keep/fix/reject review,
+  **candidate 3 now has independent KEEP review** after implementation,
+  objective debugger repair and fresh built-game measurement, classified
+  neutral/inconclusive. Branch PR handoff is current. After each independent keep/fix/reject review,
   create branch PRs for retained work and assign the next candidate. Do not
   merge without owner approval. Remaining work is 4, 6, 8, 9, hardware 10 and
   the new GPU rendering candidate 11. Reuse accepted 1/2/5/7 evidence.
@@ -715,3 +716,42 @@ implementation only after the shared actual-window/backend profile, resize,
 expose and pixel-readback contracts pass. Neither dummy/software evidence nor
 this added checklist completes either candidate. Apply the independent final
 subagent keep/fix/reject review and branch-PR handoff before moving on.
+
+### Candidate 3 final independent review, 2026-10-31
+
+Independent review found that a delayed instruction stop activated inside a
+drawing callback, or a future-PC stop armed during a device clock, could be
+skipped by native orchestration. Both failures were reproduced through the
+real TCP debugger before repair. Source `49c6b21` publishes an observation epoch
+after stop changes and checks it before each private operation. It materializes
+the exact CPU prefix and resumes faithful execution at the current operation,
+with code invalidation retaining priority. Both held-state regression cases
+now match registers, full 1 MiB RAM and retained device state; each verifies
+actual native admission and one faithful fallback. The 58 production/reference
+cases and final Linux HLE=0/HLE=1 strict checks also pass.
+
+Fresh matched fixed-source comparisons use the supported LLE and HLE builds,
+both with the previous qualified frame/loader packages. Three headless pairs
+have process-cycle differences **−2.45%, +9.50%, +7.44%**; the contemporaneous
+identical-LLE control varies **+10.01%**. CPU differences are −2.51%, +8.89%,
++7.29%, against +8.72% control variation. The SDL dummy/software retained pair
+is +6.47% CPU/+6.35% cycles. All results are **neutral/inconclusive** within
+control variation: neither positive medians nor the earlier pre-fix gain
+establish a current speedup. No reproducible regression is shown.
+
+All eight final warm/retained comparisons match full guest contracts and every
+frame through 13,000. The independent reviewer recomputed raw comparisons,
+RAM hashes, identities, activity and lease evidence and recommends **KEEP**
+under the owner's neutral-per-game rule. This is a bounded complete native
+queue service with exact-identity admission, real callbacks, authoritative
+state and an independent faithful fallback; retention is not a speedup claim.
+Consumer integration `2123474` pins the fix. Passing source/binary identities,
+review and final raw evidence are indexed in
+[drawing-job-evidence.json](drawing-job-evidence.json). No PR is merged.
+
+The concrete [ready-to-test queue](hle-ready-to-test.json) separates preparation,
+builds, tests and acceptance. Candidate 4 already has an exact loading-phase
+profiling job and realistic resource budget prepared; it has not been run or
+implemented. Remaining candidates retain their individual measurement and
+independent final review gates. Continue from candidate 3's PR handoff to the
+next candidate without repeating accepted gameplay checks.
