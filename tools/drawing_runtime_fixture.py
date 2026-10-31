@@ -7,30 +7,34 @@ isolated RAM copies and never changes a running game or persistent save.
 import argparse,hashlib,json,os,pathlib,shutil,subprocess
 from build_provenance import verify
 
-def main():
-    p=argparse.ArgumentParser(description=__doc__)
-    for name in ('build','rom','ram0','ram1'):p.add_argument(name,type=pathlib.Path)
-    p.add_argument('--output',type=pathlib.Path,required=True)
-    a=p.parse_args();repo=pathlib.Path(__file__).resolve().parents[1]
-    a.output.mkdir(parents=True,exist_ok=False)
+def build_fixture(build,output):
+    repo=pathlib.Path(__file__).resolve().parents[1]
     windows=os.name=='nt';compiler=pathlib.Path('C:/msys64/mingw64/bin/gcc.exe') if windows else pathlib.Path('cc')
     objcopy=compiler.with_name('objcopy.exe') if windows else pathlib.Path('objcopy')
     suffix='.obj' if windows else '.o'
-    object_root=a.build/'cdirecomp-runtime/CMakeFiles/CdiRuntime.dir'
-    if not object_root.is_dir():object_root=a.build/'CMakeFiles/CdiRuntime.dir'
+    object_root=build/'cdirecomp-runtime/CMakeFiles/CdiRuntime.dir'
+    if not object_root.is_dir():object_root=build/'CMakeFiles/CdiRuntime.dir'
     objects=sorted(object_root.rglob('*'+suffix));main_obj=next(x for x in objects if x.name=='main.c'+suffix)
-    objects.remove(main_obj);renamed=a.output/('product-main'+suffix)
+    objects.remove(main_obj);renamed=output/('product-main'+suffix)
     subprocess.run([str(objcopy),'--redefine-sym','main=cdi_product_main',str(main_obj),str(renamed)],check=True)
-    exe=a.output/('DrawingRuntimeTest.exe' if windows else 'DrawingRuntimeTest')
-    runtime=a.build/('HotelMarioRecomp.exe' if windows else 'HotelMarioRecomp')
+    exe=output/('DrawingRuntimeTest.exe' if windows else 'DrawingRuntimeTest')
+    runtime=build/('HotelMarioRecomp.exe' if windows else 'HotelMarioRecomp')
     provenance=verify(runtime)
     args=['-std=c11','-O2','-I'+str(repo/'runner/include'),'-I'+str(repo/'common'),
         str(repo/'runner/tests/cdi_drawing_runtime_test.c'),*[str(x) for x in objects],str(renamed)]
     args+=['-LC:/msys64/mingw64/lib','-lSDL2','-lws2_32'] if windows else ['-lSDL2','-pthread']
-    args+=['-Wl,--wrap=glue_check_vblank','-o',str(exe)];rsp=a.output/'link.rsp'
+    args+=['-Wl,--wrap=glue_check_vblank','-o',str(exe)];rsp=output/'link.rsp'
     rsp.write_text('\n'.join('"'+x.replace('\\','/')+'"' for x in args))
     subprocess.run([str(compiler),'@'+str(rsp)],check=True)
-    if windows:shutil.copy2(a.build/'SDL2.dll',a.output/'SDL2.dll')
+    if windows:shutil.copy2(build/'SDL2.dll',output/'SDL2.dll')
+    return exe,runtime,provenance
+
+def main():
+    p=argparse.ArgumentParser(description=__doc__)
+    for name in ('build','rom','ram0','ram1'):p.add_argument(name,type=pathlib.Path)
+    p.add_argument('--output',type=pathlib.Path,required=True)
+    a=p.parse_args();a.output.mkdir(parents=True,exist_ok=False)
+    exe,runtime,provenance=build_fixture(a.build,a.output)
     cases=[];frontiers={}
     def run_case(budget,queued,variant=0,irq=0,seed=0x91234,wrap=0):
         number=len(cases);states={}

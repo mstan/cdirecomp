@@ -208,6 +208,7 @@ static volatile int s_debug_held;
 typedef struct { uint32_t pc; uint32_t skip; uint32_t delay; } CdiStopPc;
 static CdiStopPc  s_stoppc[CDI_STOPPC_MAX];
 static atomic_int s_stoppc_armed;   /* count of armed slots — hot-path gate */
+atomic_uint g_debug_native_observation_epoch;
 int debug_native_job_allowed(uint32_t first, uint32_t limit) {
 #ifdef CDI_COSIM
     (void)first; (void)limit;
@@ -228,7 +229,10 @@ static void debug_check_stop_pc(void) {
         if (s_stoppc[i].skip) { s_stoppc[i].skip--; continue; }
         s_stoppc[i].pc = 0;
         atomic_fetch_sub_explicit(&s_stoppc_armed, 1, memory_order_relaxed);
-        if (s_stoppc[i].delay) g_stop_seq = s_trace_seq + s_stoppc[i].delay;
+        if (s_stoppc[i].delay) {
+            g_stop_seq = s_trace_seq + s_stoppc[i].delay;
+            atomic_fetch_add_explicit(&g_debug_native_observation_epoch,1,memory_order_release);
+        }
         else cdi_fault_hold();
         return;
     }
@@ -623,6 +627,7 @@ static void resp_stop_pc(const char *line, char *out, int outlen) {
         s_stoppc[i].delay = (uint32_t)delay;
         s_stoppc[i].pc    = (uint32_t)pc;   /* pc last: scan gate below */
         atomic_fetch_add_explicit(&s_stoppc_armed, 1, memory_order_release);
+        atomic_fetch_add_explicit(&g_debug_native_observation_epoch,1,memory_order_release);
         snprintf(out, outlen,
                  "{\"ok\":true,\"slot\":%d,\"pc\":%llu,\"skip\":%llu,\"delay\":%llu}",
                  i, (unsigned long long)pc, (unsigned long long)skip,

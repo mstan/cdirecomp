@@ -6,6 +6,7 @@
  */
 #pragma once
 #include <stdint.h>
+#include <stdatomic.h>
 
 /* Start the threaded TCP command server on `port` and arm the rings. Safe to
  * call once at boot; the server answers queries on a background thread while the
@@ -42,6 +43,13 @@ void debug_trace_block(void);
 /* Interior instruction stops and fixed instruction-sequence runs retain the
  * faithful implementation of a native job's private instruction interval. */
 int debug_native_job_allowed(uint32_t first, uint32_t limit);
+/* Admission can change while a real callback runs or the command thread
+ * publishes an instruction stop. Native jobs check this cheap generation at
+ * each private instruction frontier, and materialize/fall back on a change. */
+extern atomic_uint g_debug_native_observation_epoch;
+static inline unsigned debug_native_job_epoch(void) {
+    return atomic_load_explicit(&g_debug_native_observation_epoch,memory_order_acquire);
+}
 
 /* Dump the tail of the block-trace ring to stderr: the executed path into a
  * fault. Call from abort sites (unmapped bus access, illegal opcode, …) so the

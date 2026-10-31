@@ -17,19 +17,25 @@ extern uint32_t cdi_module_000_base;
 extern uint64_t g_stop_seq,g_stop_frame;
 static uint32_t rand_state;
 static int sync_each_clock;
+static uint32_t debug_clock_gate;
 void __real_glue_check_vblank(void);
 void __wrap_glue_check_vblank(void) {
     __real_glue_check_vblank();
     /* Exercise repeated debugger materialization followed by continuing the
      * same native segment. The reference has already materialized its CPU. */
     if(sync_each_clock)cdi_drawing_sync_cpu();
+    if(debug_clock_gate && g_cpu.PC==debug_clock_gate) {
+        debug_clock_gate=0;
+        puts("drawing-clock-ready");fflush(stdout);
+        if(getchar()==EOF)exit(5);
+    }
 }
 static uint32_t random32(void){rand_state^=rand_state<<13;rand_state^=rand_state>>17;rand_state^=rand_state<<5;return rand_state;}
 static void put(uint32_t a,uint32_t v){m68k_write32(a,v);}
 static int load(const char *path,uint8_t *p,size_t size){FILE *f=fopen(path,"rb");if(!f)return 0;size_t n=fread(p,1,size,f);fclose(f);return n==size;}
 static void hash(FILE *f,const uint8_t *p,size_t n){uint8_t d[32];cdi_sha256(p,n,d);fputc('"',f);for(unsigned i=0;i<32;i++)fprintf(f,"%02x",d[i]);fputc('"',f);}
 int main(int argc,char **argv){
-    if(argc!=12)return 2;
+    if(argc!=12 && argc!=14 && argc!=15)return 2;
     uint8_t *raw=calloc(CDI_ROM_SIZE,1);FILE *rom=fopen(argv[1],"rb");if(!raw||!rom)return 2;
     size_t rom_bytes=fread(raw,1,CDI_ROM_SIZE,rom);fclose(rom);
     cdi_bus_load_rom(raw,(uint32_t)rom_bytes);free(raw);
@@ -70,6 +76,12 @@ int main(int argc,char **argv){
     }
     CdiNativeFunction entry=cdi_native_find_function(g_cdi_native_modules[0].sha256,0x17018,NULL);
     if(!entry)return 4;
+    if(argc>=14) {
+        debug_server_set_session(argv[13]);debug_server_init(atoi(argv[12]));
+        if(argc==15)debug_clock_gate=(uint32_t)strtoul(argv[14],NULL,0);
+        puts("drawing-debug-ready");fflush(stdout);
+        if(getchar()==EOF)return 5;
+    }
     uint8_t before[32];cdi_sha256(g_ram0+0x11000,0x900,before);
     int interrupted=0,bus_error=0;g_recomp_bus_armed=g_recomp_irq_armed=1;
     if(setjmp(g_recomp_bus_env))bus_error=1;

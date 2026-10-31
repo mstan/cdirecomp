@@ -16,7 +16,7 @@ static CdiDrawingJobState stats;
 
 #if CDI_DRAWING_HLE
 static const CdiNativeModule *drawing_module;
-typedef struct { uint32_t base; uint64_t token,epoch; } DrawFrame;
+typedef struct { uint32_t base; uint64_t token,epoch; unsigned observation_epoch; } DrawFrame;
 typedef struct {
     uint32_t d0,d4,d5,a0,a5,a6,sp;
     uint16_t sr;
@@ -164,6 +164,13 @@ static int segment(DrawFrame *frame,unsigned first,unsigned count) {
                 g_cpu=prefix(&f);active=NULL;g_redirect_addr=g_cpu.PC;g_redirect_pending=1;return 0;
             }
         }
+        unsigned observed=debug_native_job_epoch();
+        if(observed!=frame->observation_epoch) {
+            frame->observation_epoch=observed;
+            if(!debug_native_job_allowed(frame->base+0x17018,frame->base+0x17076)) {
+                fallback(&f);return 0;
+            }
+        }
         if(irq_ready()) {g_cpu=prefix(&f);active=NULL;stats.interrupted++;recomp_take_irq();}
         if(!memory_action(&f,op)){fallback(&f);return 0;}
         f.completed=i+1;
@@ -177,6 +184,7 @@ static int segment(DrawFrame *frame,unsigned first,unsigned count) {
 }
 int cdi_drawing_dispatch(RecompFuncPtr function) {
     DrawFrame frame;
+    frame.observation_epoch=debug_native_job_epoch();
     if(!cdi_drawing_entry || function!=cdi_drawing_entry ||
        !cdi_native_job_binding(drawing_module,g_cpu.PC,&frame.base,&frame.token) ||
        !debug_native_job_allowed(frame.base+0x17018,frame.base+0x17076) ||
