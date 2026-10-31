@@ -6259,7 +6259,7 @@
   ],
   "cleanup_ledger": "G:\\Temp\\Codex\\cdirecomp\\load-job-20261028\\resource-ledger.json",
   "cleanup_report": "G:\\Temp\\Codex\\cdirecomp\\load-job-20261028\\cleanup-report.json",
-  "cleanup_minimum_bytes_removed": 367441087,
+  "cleanup_minimum_bytes_removed": 463981343,
   "checks_logs": [
     "G:\\Temp\\Codex\\cdirecomp\\load-job-20261028\\component-detail.log",
     "G:\\Temp\\Codex\\cdirecomp\\load-job-20261028\\compiler-detail.log"
@@ -6271,5 +6271,50 @@
     "elapsed_seconds": 507.6,
     "exit_code": 1,
     "scope": "Candidate5 engineering and local central issue updates complete; remote backup sync remains an administrative gap. Broader HLE burndown is open; stop for owner check-in."
-  }
+  },
+  "reaudit_20261030": {
+    "status": "complete; retained candidate5 evidence verified; no new game runs",
+    "completion_audit": {
+      "path": "G:\\Temp\\Codex\\cdirecomp\\load-job-20261028\\reaudit-20261030\\completion-audit.json",
+      "bytes": 9094,
+      "sha256": "e46b2e0ff55154bda087ea2ea4d49e0e519808892682ad4e8669225081f65c37"
+    },
+    "target_pool": {
+      "path": "G:\\Temp\\Codex\\cdirecomp\\load-job-20261028\\reaudit-20261030\\target-pool.json",
+      "bytes": 2919,
+      "sha256": "e5d20fa17cb54a8ee02512c7e8bb907686eeae72341e30eef1018e7152049ba0"
+    },
+    "cleanup": {
+      "path": "G:\\Temp\\Codex\\cdirecomp\\load-job-20261028\\reaudit-20261030\\cache-cleanup.json",
+      "bytes": 1774,
+      "sha256": "fa4d777c81529ac69ef4afebce42aa908be643f56843f24ee3ddb70ab14436c0"
+    },
+    "verified_raw_runs": 40,
+    "verified_retained_binaries": 5,
+    "prs": {
+      "engine": {
+        "url": "https://github.com/mstan/cdirecomp/pull/1",
+        "head": "a10bd45a08941a3789013c8decca3f9177489de9",
+        "state": "OPEN"
+      },
+      "core": {
+        "url": "https://github.com/mstan/m68k-recomp-core/pull/7",
+        "head": "cd1e5e28dc26ec6a887197aac7eaaf8c8c870019",
+        "state": "OPEN"
+      },
+      "consumer": {
+        "url": "https://github.com/mstan/HotelMarioRecomp/pull/1",
+        "head": "cf5a4ed70909fa59b8eee3c5a08b841696257cac",
+        "state": "OPEN"
+      }
+    },
+    "scope": "Reactivated candidate5 only; candidate3 remains at owner-requested pause. No additional optimization candidate started.",
+    "beads_sync": {
+      "path": "G:\\Temp\\Codex\\cdirecomp\\load-job-20261028\\reaudit-20261030\\beads-sync.json",
+      "bytes": 1322,
+      "sha256": "af62781cb4aa053dbd4e2510076eaa04614db0f7aa2283ced0655b775b3e8bcc"
+    },
+    "beads_sync_status": "central updates saved and covered by a successful subsequent shared push"
+  },
+  "cleanup_reaudit_report": "G:\\Temp\\Codex\\cdirecomp\\load-job-20261028\\reaudit-20261030\\cache-cleanup.json"
 }
