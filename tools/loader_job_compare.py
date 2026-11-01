@@ -79,6 +79,7 @@ def run(exe,args,label):
             state['memory_jobs']=request(args.port,{'cmd':'memory_jobs'})
             state['service_jobs']=request(args.port,{'cmd':'service_jobs'})
             state['streaming_jobs']=request(args.port,{'cmd':'streaming_jobs'})
+            state['board_jobs']=request(args.port,{'cmd':'board_jobs'})
             if args.expect_crc_error:
                 assert state['get_registers']['d1']&0xFFFF==0xE8 and state['get_registers']['sr']&1,state['get_registers']
             frames=[];cursor=1
@@ -115,7 +116,8 @@ def run(exe,args,label):
                 'start_origin':start_origin,'first_sample':samples[0],'final_sample':samples[-1],
                 'host_cpu_before':host_before._asdict(),'host_cpu_after':host_after._asdict(),
                 'loader_jobs':state['loader_jobs'],'drawing_jobs':state['drawing_jobs'],'memory_jobs':state['memory_jobs'],
-                'service_jobs':state['service_jobs'],'streaming_jobs':state['streaming_jobs']}
+                'service_jobs':state['service_jobs'],'streaming_jobs':state['streaming_jobs'],
+                'board_jobs':state['board_jobs']}
             (out/'result.json').write_text(json.dumps(result,indent=2));print(json.dumps(result),flush=True)
             return result,state
         finally:
@@ -127,6 +129,7 @@ def semantic(state,presentation='headless'):
     d=copy.deepcopy(state);d.pop('loader_jobs',None);d.pop('drawing_jobs',None);d.pop('memory_jobs',None)
     d.pop('service_jobs',None)
     d.pop('streaming_jobs',None)
+    d.pop('board_jobs',None)
     for key in ('insns','blocks','interp','irq_first_seq'):d['status'].pop(key,None)
     for key in ('scanout_jobs','fused_jobs','reused_jobs'):d['video_state'].pop(key,None)
     d['native_state'].pop('dispatches',None)
@@ -152,7 +155,7 @@ def main():
     p.add_argument('--pace-speed',type=float,default=32,help='Emulated pacing multiplier, identical for both builds')
     p.add_argument('--expect-end-frame',type=int,help='Reject a repeated stop PC reached at the wrong frame')
     p.add_argument('--presentation',choices=('headless','dummy'),default='headless')
-    p.add_argument('--native-job',choices=('loader','drawing','memory','service','streaming'),default='loader')
+    p.add_argument('--native-job',choices=('loader','drawing','memory','service','streaming','board'),default='loader')
     args=p.parse_args()
     assert args.start_frame>=0,'Start frame must be zero (process creation) or positive'
     assert args.pace_speed>0,'Pacing multiplier must be positive'
@@ -189,7 +192,7 @@ def main():
         for name in order:
             result,state=run(getattr(args,name),args,f'{prefix}-{name}');states[name]=state
             if name=='candidate' and not args.reference_control:
-                job,key=({'drawing':('drawing_jobs','jobs'),'memory':('memory_jobs','jobs'),'service':('service_jobs','jobs'),'streaming':('streaming_jobs','jobs')}.get(args.native_job,('loader_jobs','words')))
+                job,key=({'drawing':('drawing_jobs','jobs'),'memory':('memory_jobs','jobs'),'service':('service_jobs','jobs'),'streaming':('streaming_jobs','jobs'),'board':('board_jobs','jobs')}.get(args.native_job,('loader_jobs','words')))
                 assert state[job].get(key,0)>0,'Native job was not exercised'
             if pair:results.append(result)
         left,right=semantic(states['reference'],args.presentation),semantic(states['candidate'],args.presentation)

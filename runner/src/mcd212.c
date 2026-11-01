@@ -8,6 +8,8 @@
  */
 #include "cdi_runtime.h"
 #include "debug_server.h"
+#include "cdi_board_jobs.h"
+#include "cdi_media.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -49,9 +51,11 @@ typedef struct {
 } Mcd212;
 
 static Mcd212 vdsc;
+static CdiBoardJobState board_jobs;
 
 void mcd212_reset(void) {
     memset(&vdsc, 0, sizeof vdsc);
+    memset(&board_jobs,0,sizeof board_jobs);
     mcd212_video_reset();
 }
 
@@ -318,6 +322,64 @@ void mcd212_tick(uint32_t cycles) {
         line_period = raster_line_period_ns();
     }
     runtime_pace_cycles(cycles);
+}
+
+void cdi_board_job_state(CdiBoardJobState *out){*out=board_jobs;}
+uint32_t cdi_board_idle_quanta(uint32_t maximum,CdiBoardPump pump,int *quit) {
+#if CDI_BOARD_HLE && !defined(CDI_COSIM) && !defined(__FAST_MATH__)
+    const double quantum_ns=25.0*(1.0e9/15104900.0);
+    const uint64_t integer_ns=(uint64_t)quantum_ns;
+    if(!g_halted || !debug_board_job_allowed() || recomp_pending_irq_mask()) {
+        board_jobs.faithful_quanta++;return 0;
+    }
+    unsigned epoch=debug_native_job_epoch();uint64_t media=cdi_media_generation();
+    unsigned limit=maximum<64u?maximum:64u;
+    limit=periph_quiet_quanta(limit);
+    limit=slave_quiet_quanta(limit,integer_ns);
+    limit=cdi_streaming_quiet_quanta(limit,integer_ns);
+    limit=runtime_pacing_quiet_quanta(limit);
+    limit=nvram_quiet_quanta(limit,quantum_ns);
+    double phase=vdsc.line_phase_ns,period=raster_line_period_ns();unsigned raster=0;
+    while(raster<limit) {
+        double next=phase+quantum_ns;
+        if(next>=period)break;
+        phase=next;raster++;
+    }
+    limit=raster;
+    if(limit<2u){board_jobs.faithful_quanta++;return 0;}
+    unsigned completed=0;int critical=0;phase=vdsc.line_phase_ns;
+    while(completed<limit) {
+        /* The caller already pumped before the first quantum. Keep every
+         * later frontend/input/audio pump at its original logical boundary. */
+        if(completed && pump && !pump()){*quit=1;break;}
+        if(!g_halted || !debug_board_job_allowed() || debug_native_job_epoch()!=epoch ||
+           cdi_media_generation()!=media || recomp_pending_irq_mask()) {
+            board_jobs.observation_exits++;critical=1;break;
+        }
+        phase+=quantum_ns;completed++;
+    }
+    if(completed) {
+        /* No event occurs in this prefix, so the per-device quiet updates
+         * commute. Preserve each timer's own arithmetic and repeated doubles.
+         * Total cycles stay at the prefix end BEFORE the original critical
+         * quantum; its device events therefore retain their starting count. */
+        periph_advance_quiet(completed*25u);
+        slave_advance_quiet(completed*integer_ns);
+        cdic_increment_time((double)(completed*integer_ns));
+        nvram_advance_quiet(completed,quantum_ns);
+        g_total_cycles+=completed*25u;vdsc.line_phase_ns=phase;
+        runtime_pace_cycles(completed*25u);
+        board_jobs.jobs++;board_jobs.quiet_quanta+=completed;
+    }
+    if(critical && completed && g_halted && !*quit) {
+        /* A pump/observer changed the admission after an earlier quiet prefix.
+         * It has already run, so execute its original clock quantum here. */
+        mcd212_tick(25);board_jobs.faithful_quanta++;return completed+1u;
+    }
+    return completed;
+#else
+    (void)maximum;(void)pump;(void)quit;return 0;
+#endif
 }
 
 uint32_t mcd212_read(uint32_t address, int size) {

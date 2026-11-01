@@ -7,6 +7,7 @@
  * leave independent FIFOs, and each channel owns one interrupt-status bit.
  */
 #include "cdi_runtime.h"
+#include "cdi_board_jobs.h"
 #include "cdi_media.h"
 #include "debug_server.h"
 
@@ -522,6 +523,25 @@ void slave_increment_time(double nanoseconds) {
                 defer_response(CHANNEL_D, on_target, sizeof on_target);
             }
         }
+    }
+}
+
+unsigned slave_quiet_quanta(unsigned maximum,uint64_t quantum_ns) {
+    if(!ikat.initialized || cdi_media_generation()!=ikat.media_generation)return 0;
+    uint64_t limit=25000000u-ikat.pointer_elapsed_ns;
+    for(int channel=0;channel<CHANNEL_COUNT;channel++) {
+        const IkatChannel *queue=&ikat.channel[channel];
+        if(queue->deferred_pending && queue->deferred_ns<limit)limit=queue->deferred_ns;
+    }
+    if(!limit)return 0;
+    uint64_t quiet=(limit-1u)/quantum_ns;
+    return quiet<maximum?(unsigned)quiet:maximum;
+}
+void slave_advance_quiet(uint64_t ns) {
+    ikat.pointer_elapsed_ns+=ns;
+    for(int channel=0;channel<CHANNEL_COUNT;channel++) {
+        IkatChannel *queue=&ikat.channel[channel];
+        if(queue->deferred_pending)queue->deferred_ns-=ns;
     }
 }
 

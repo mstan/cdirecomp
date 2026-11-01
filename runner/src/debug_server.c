@@ -24,6 +24,7 @@
 #include "cdi_memory_jobs.h"
 #include "cdi_service_jobs.h"
 #include "cdi_streaming_jobs.h"
+#include "cdi_board_jobs.h"
 #include "debug_server.h"
 #include "cosim_state.h"
 #include "cdi_media.h"
@@ -1357,6 +1358,12 @@ static int handle_line(const char *line, char *out, int outlen) {
             (unsigned long long)job.jobs,(unsigned long long)job.deferred_quanta,
             (unsigned long long)job.materializations);
     }
+    else if (!strcmp(cmd, "board_jobs")) {
+        CdiBoardJobState job;cdi_board_job_state(&job);
+        snprintf(out,outlen,"{\"ok\":true,\"jobs\":%llu,\"quiet_quanta\":%llu,\"faithful_quanta\":%llu,\"observation_exits\":%llu}",
+            (unsigned long long)job.jobs,(unsigned long long)job.quiet_quanta,
+            (unsigned long long)job.faithful_quanta,(unsigned long long)job.observation_exits);
+    }
     else if (!strcmp(cmd, "video_clut"))     resp_video_clut(out, outlen);
     else if (!strcmp(cmd, "disc_state"))     resp_disc_state(out, outlen);
     else if (!strcmp(cmd, "mount_disc"))     resp_mount_disc(line, out, outlen);
@@ -1470,6 +1477,10 @@ void debug_server_poll(void) { /* threaded now — nothing to poll */ }
  * boot trace is preserved for first-divergence). The server thread keeps
  * answering while the main thread is parked. */
 int g_hold_on_fault = 0;
+int debug_board_job_allowed(void) {
+    return debug_native_job_allowed(0,UINT32_MAX) &&
+        !atomic_load_explicit(&s_pause_requested,memory_order_acquire);
+}
 
 void cdi_fault_hold(void) {
     cdi_streaming_sync();

@@ -13,6 +13,7 @@
 #include "cdi_drawing_jobs.h"
 #include "cdi_memory_jobs.h"
 #include "cdi_service_jobs.h"
+#include "cdi_board_jobs.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -412,6 +413,13 @@ void runtime_pace_cycles(uint32_t cycles) {
                        (CDI_CPU_HZ * s_realtime_speed);
     s_pace_pending_cycles = 0;
     host_wait_until(s_pace_deadline);
+}
+
+unsigned runtime_pacing_quiet_quanta(unsigned maximum) {
+    if(!s_realtime_pacing)return maximum;
+    if(s_pace_pending_cycles>=CDI_PACE_CHUNK_CYCLES)return 0;
+    uint64_t quiet=(CDI_PACE_CHUNK_CYCLES-s_pace_pending_cycles-1u)/25u;
+    return quiet<maximum?(unsigned)quiet:maximum;
 }
 
 /* Full-SR write with the 68000 A7<->stack-pointer swap. When the S bit flips,

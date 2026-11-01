@@ -10,6 +10,7 @@
  */
 #define _CRT_SECURE_NO_WARNINGS
 #include "cdi_runtime.h"
+#include "cdi_board_jobs.h"
 #include "debug_server.h"
 #include "cosim_state.h"
 #include "cdi_frontend.h"
@@ -408,7 +409,13 @@ int main(int argc, char *argv[]) {
                  * g_irq_pending; the
                 * standard IRQ path clears STOP, builds the autovector frame and
                  * longjmps to the landing pad above. */
+#if CDI_BOARD_HLE
+                uint32_t advanced=cdi_board_idle_quanta(64,frontend_active?cdi_frontend_pump:NULL,&player_quit);
+                if(player_quit)break;
+                if(!advanced)mcd212_tick(25);
+#else
                 mcd212_tick(25);
+#endif
                 if (recomp_pending_irq_level()) recomp_take_irq();
                 continue;
             } else if (g_rte_resume) {

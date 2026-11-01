@@ -11,6 +11,7 @@
  * deterministic on every host and keeps the RTC independent of wall time.
  */
 #include "cdi_runtime.h"
+#include "cdi_board_jobs.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -274,6 +275,23 @@ void nvram_increment_clock(double nanoseconds) {
             advance_one_second(&rtc.now);
         }
     }
+}
+
+unsigned nvram_quiet_quanta(unsigned maximum,double quantum_ns) {
+    if(rtc.transfer[RTC_WEEKDAY]&0x20u)return maximum;
+    double phase=rtc.sub_hundredth_ns;unsigned count=0;
+    while(count<maximum) {
+        phase+=quantum_ns;
+        if(phase>=10000000.0)break;
+        count++;
+    }
+    return count;
+}
+void nvram_advance_quiet(unsigned quanta,double quantum_ns) {
+    if(rtc.transfer[RTC_WEEKDAY]&0x20u)return;
+    /* Repeated additions, not multiplication: preserve the faithful binary
+     * floating phase even immediately before a hundredth boundary. */
+    while(quanta--)rtc.sub_hundredth_ns+=quantum_ns;
 }
 
 uint8_t nvram_get_byte(uint16_t device_address) {

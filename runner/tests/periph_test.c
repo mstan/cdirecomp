@@ -1,4 +1,5 @@
 #include "cdi_runtime.h"
+#include "cdi_board_jobs.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -93,6 +94,33 @@ int main(void) {
     periph_write(0x80002020u, 0x80u, 1);
     CHECK((periph_read(0x80002020u, 1) & 0x80u) == 0);
 
+    /* Compare quiet-prefix arithmetic with the actual original per-tick
+     * state machine, including clear modes, equality and near-wrap tails. */
+    static const unsigned quiet_cases[][5]={
+        {0,0,0,0,0},{0x10,123,123,400,95},{0x20,123,120,400,17},
+        {0x30,123,123,400,33},{1,123,400,123,71},{2,123,400,120,3},
+        {3,123,400,123,95},{0x33,0xfff0,0xfff8,0xfff0,47}
+    };
+    for(unsigned test=0;test<sizeof quiet_cases/sizeof quiet_cases[0];test++) {
+        uint32_t reference[6]={0};
+        for(unsigned native=0;native<2;native++) {
+            const unsigned *input=quiet_cases[test];periph_reset();
+            periph_write(0x80002021u,0x33,1);
+            periph_write(0x80002024u,0xffff,2);periph_write(0x80002026u,0xffff,2);periph_write(0x80002028u,0xffff,2);
+            periph_increment_timer(96); /* independently create all status conditions */
+            periph_write(0x80002021u,input[0],1);periph_write(0x80002024u,input[1],2);
+            periph_write(0x80002026u,input[2],2);periph_write(0x80002028u,input[3],2);
+            periph_increment_timer(input[4]);periph_write(0x80002045u,5,1);irq_count=0;last_irq_level=0;
+            unsigned count=periph_quiet_quanta(64);
+            if(native)periph_advance_quiet(count*25u);
+            else for(unsigned i=0;i<count;i++)periph_increment_timer(25);
+            /* Continued original quanta expose a wrong hidden prescaler. */
+            for(unsigned i=0;i<137;i++)periph_increment_timer(25);
+            uint32_t actual[]={periph_read(0x80002024u,2),periph_read(0x80002026u,2),
+                periph_read(0x80002028u,2),periph_read(0x80002020u,1),(uint32_t)irq_count,last_irq_level};
+            for(unsigned i=0;i<6;i++){if(!native)reference[i]=actual[i];else CHECK(actual[i]==reference[i]);}
+        }
+    }
     if (failures) {
         fprintf(stderr, "SCC68070 peripheral tests: %d failure(s)\n", failures);
         return 1;

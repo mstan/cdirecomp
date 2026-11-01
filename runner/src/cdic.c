@@ -13,6 +13,7 @@
 #include "cdi_media.h"
 #include "cdi_audio.h"
 #include "cdi_streaming_jobs.h"
+#include "cdi_board_jobs.h"
 #include "debug_server.h"
 
 #include <stdio.h>
@@ -858,6 +859,24 @@ void cdic_increment_time(double nanoseconds) {
     step+=pending_ns;pending_ns=0;deadline_valid=0;streaming.jobs++;
 #endif
     advance_streaming(step);
+}
+
+unsigned cdi_streaming_quiet_quanta(unsigned maximum,uint64_t quantum_ns) {
+    if(!ciap.initialized)return 0;
+    uint64_t limit=UINT64_MAX,pending=0;
+    if(ciap.ap_completion_pending)limit=ciap.ap_completion_delay_ns;
+    if(ciap.audio_active && ciap.audio_remaining_ns<limit)limit=ciap.audio_remaining_ns;
+    if(ciap.data_running) {
+        uint64_t sector=1000000000ull/75ull-ciap.sector_elapsed_ns;
+        if(sector<limit)limit=sector;
+    }
+#if CDI_STREAMING_HLE
+    pending=pending_ns;
+#endif
+    if(limit==UINT64_MAX)return maximum;
+    if(limit<=pending)return 0;
+    uint64_t quiet=(limit-pending-1u)/quantum_ns;
+    return quiet<maximum?(unsigned)quiet:maximum;
 }
 
 uint16_t cdic_dma_pull_word(void) {
