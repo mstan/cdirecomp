@@ -107,8 +107,25 @@ static void compare_frame(void) {
 #ifdef CDI_RASTER_GPU_TEST
     if(case_id<12) {
         static const unsigned scales[]={1,4,16,32,64};
+        if(gpu_cases==4)SDL_SetWindowSize(gpu_window,1001,733);
+        if(gpu_cases==32)SDL_SetWindowSize(gpu_window,768,576);
+        SDL_PumpEvents();
         cdi_render_profile_frame();
-        CHECK(cdi_gpu_render(frame,scales[gpu_cases%5],pixels[1])!=NULL);
+        SDL_Texture *output=cdi_gpu_render(frame,scales[gpu_cases%5],pixels[1]);CHECK(output);
+        int output_w=0,output_h=0;CHECK(!SDL_QueryTexture(output,NULL,NULL,&output_w,&output_h));
+        CHECK(output_w%frame->width==0 && output_h%frame->height==0);
+        CHECK(!SDL_SetRenderTarget(gpu_renderer,output));
+        /* Also read the actual display resolve around tile edges after real
+         * hidden-window resizes. Only fixed one-pixel host readbacks exist. */
+        static const unsigned edge_x[]={0,255,256,511,512,767},edge_y[]={0,15,16,31};
+        for(unsigned iy=0;iy<4;iy++)for(unsigned ix=0;ix<6;ix++) {
+            unsigned x=edge_x[ix]<frame->width?edge_x[ix]:frame->width-1u;
+            unsigned y=edge_y[iy]<frame->height?edge_y[iy]:frame->height-1u;
+            SDL_Rect rectangle={(int)((2u*x+1u)*(unsigned)output_w/(2u*frame->width)),(int)((2u*y+1u)*(unsigned)output_h/(2u*frame->height)),1,1};
+            uint32_t pixel=0;CHECK(!SDL_RenderReadPixels(gpu_renderer,&rectangle,SDL_PIXELFORMAT_ARGB8888,&pixel,4));
+            CHECK(pixel==pixels[1][(size_t)y*frame->width+x]);
+        }
+        CHECK(!SDL_SetRenderTarget(gpu_renderer,NULL));
         cdi_render_profile_finish();gpu_cases++;
     }
 #endif
@@ -199,9 +216,13 @@ int main(void) {
             /* Geometry and control changes between fields must invalidate
              * assumptions. Unwritten lines retain their previous contents. */
             unsigned field_base = field == 2 ? base / 2 + 1 : base;
-            mcd212_video_begin_frame((uint16_t)field_base, 6, interlaced);
-            lle_mcd212_video_begin_frame((uint16_t)field_base, 6, interlaced);
-            for (line_id = field & 1; line_id < 7; line_id += interlaced ? 2 : 1) {
+            unsigned base_height=6,draw_limit=7;
+#ifdef CDI_RASTER_GPU_TEST
+            if(case_id<12){base_height=18;draw_limit=base_height*(interlaced?2u:1u)+1u;}
+#endif
+            mcd212_video_begin_frame((uint16_t)field_base, (uint16_t)base_height, interlaced);
+            lle_mcd212_video_begin_frame((uint16_t)field_base, (uint16_t)base_height, interlaced);
+            for (line_id = field & 1; line_id < draw_limit; line_id += interlaced ? 2 : 1) {
                 for (unsigned i = 0; i < 2048; i++) {
                     g_ram0[0x1000 + i] = (uint8_t)random_word();
                     g_ram1[0x2000 + i] = (uint8_t)random_word();
@@ -221,8 +242,8 @@ int main(void) {
             if (field == 0) {
                 /* Reuse across publication, including interlaced retained
                  * rows. Registers and bytes are still authoritative. */
-                mcd212_video_begin_frame((uint16_t)field_base, 6, interlaced);
-                lle_mcd212_video_begin_frame((uint16_t)field_base, 6, interlaced);
+                mcd212_video_begin_frame((uint16_t)field_base, (uint16_t)base_height, interlaced);
+                lle_mcd212_video_begin_frame((uint16_t)field_base, (uint16_t)base_height, interlaced);
                 line_id = 2;
                 compare_line(0x1000, CDI_RAM1_BASE + 0x2000,
                              (uint16_t)field_base, (uint16_t)field_base);
@@ -230,8 +251,8 @@ int main(void) {
                 compare_line(0x1000, CDI_RAM1_BASE + 0x2000,
                              (uint16_t)field_base, (uint16_t)field_base);
                 compare_frame();
-                mcd212_video_begin_frame((uint16_t)field_base, 6, interlaced);
-                lle_mcd212_video_begin_frame((uint16_t)field_base, 6, interlaced);
+                mcd212_video_begin_frame((uint16_t)field_base, (uint16_t)base_height, interlaced);
+                lle_mcd212_video_begin_frame((uint16_t)field_base, (uint16_t)base_height, interlaced);
                 /* Rewriting CE changes restart-field bookkeeping. Only
                  * blinking cursor rows have a corresponding output input. */
                 control(0, cursor_control);

@@ -166,6 +166,16 @@ SDL_Texture *cdi_gpu_render(const CdiRasterFrame *frame,unsigned requested,const
     unsigned scale=requested;while(scale>1 && 256u*scale>(unsigned)gpu.limit)scale/=2;
     int output_w=0,output_h=0;SDL_GetRendererOutputSize(gpu.renderer,&output_w,&output_h);
     if(scale==1){output_w=frame->width;output_h=frame->height;}
+    else {
+        /* Resolve on one global native grid. Rounding each tile directly to
+         * arbitrary window pixels changes the sampling phase at tile edges.
+         * This display-sized target is independent of internal density. */
+        unsigned multiple_x=output_w>0?((unsigned)output_w+frame->width-1u)/frame->width:1u;
+        unsigned multiple_y=output_h>0?((unsigned)output_h+frame->height-1u)/frame->height:1u;
+        if(multiple_x>(unsigned)gpu.limit/frame->width)multiple_x=(unsigned)gpu.limit/frame->width;
+        if(multiple_y>(unsigned)gpu.limit/frame->height)multiple_y=(unsigned)gpu.limit/frame->height;
+        output_w=(int)(multiple_x*frame->width);output_h=(int)(multiple_y*frame->height);
+    }
     if(output_w<1 || output_h<1 || output_w>gpu.limit || output_h>gpu.limit)return NULL;
     if(!target(&gpu.output,(unsigned)output_w,(unsigned)output_h,&gpu.output_w,&gpu.output_h) ||
        !target(&gpu.tile,256u*scale,16u*scale,&gpu.tile_w,&gpu.tile_h))return NULL;
