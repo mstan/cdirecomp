@@ -39,7 +39,7 @@ class CycleCounter:
 
 def run(exe,args,label):
     out=args.output/label;out.mkdir()
-    env=os.environ.copy();env.update(CDI_PACE_SPEED='32',SDL_AUDIODRIVER='dummy',
+    env=os.environ.copy();env.update(CDI_PACE_SPEED=str(args.pace_speed),SDL_AUDIODRIVER='dummy',
         CDI_PLAYER_CONFIG_PATH=str(args.output/'player.cfg'),TEMP=str(args.output),TMP=str(args.output))
     if args.presentation=='dummy':env.update(SDL_VIDEODRIVER='dummy',SDL_RENDER_DRIVER='software')
     command=[str(exe.resolve()),str(args.rom.resolve()),'--disc',str(args.disc.resolve()),
@@ -67,11 +67,13 @@ def run(exe,args,label):
                 if s['held']:break
                 time.sleep(.01)
             assert s['held'] and (s['frame']==args.end_frame if args.end_frame else s['pc']==args.stop_pc),s
+            if args.expect_end_frame is not None:assert s['frame']==args.expect_end_frame,s
             host_after=psutil.cpu_times()
             state={k:request(args.port,{'cmd':k}) for k in ('status','get_registers','ciap_state',
                 'video_frame','video_state','audio_state','native_state','native_events','ikat_events')}
             state['loader_jobs']=request(args.port,{'cmd':'loader_jobs'})
             state['drawing_jobs']=request(args.port,{'cmd':'drawing_jobs'})
+            state['memory_jobs']=request(args.port,{'cmd':'memory_jobs'})
             if args.expect_crc_error:
                 assert state['get_registers']['d1']&0xFFFF==0xE8 and state['get_registers']['sr']&1,state['get_registers']
             frames=[];cursor=1
@@ -86,20 +88,28 @@ def run(exe,args,label):
             state['ram_sha256']=hashes
             (out/'state.json').write_text(json.dumps(state,indent=2))
             (out/'samples.json').write_text(json.dumps(samples,indent=2))
-            upper=next(i for i,v in enumerate(samples) if v['status']['frame']>=args.start_frame)
-            assert upper
-            lo,hi=samples[upper-1:upper+1]
-            f=(args.start_frame-lo['status']['frame'])/(hi['status']['frame']-lo['status']['frame'])
-            cpu_start=lo['cpu_s']+f*(hi['cpu_s']-lo['cpu_s'])
-            cycle_start=(lo['process_cycles']+f*(hi['process_cycles']-lo['process_cycles'])
-                         if lo['process_cycles'] is not None else None)
+            if args.start_frame==0:
+                # Process accounting starts at creation. Zero is the defined
+                # origin, not a fabricated observed frame/counter sample.
+                cpu_start=0.0;cycle_start=0 if samples[-1]['process_cycles'] is not None else None
+                start_bracket=None;start_origin='process_creation'
+            else:
+                upper=next(i for i,v in enumerate(samples) if v['status']['frame']>=args.start_frame)
+                assert upper
+                lo,hi=samples[upper-1:upper+1]
+                f=(args.start_frame-lo['status']['frame'])/(hi['status']['frame']-lo['status']['frame'])
+                cpu_start=lo['cpu_s']+f*(hi['cpu_s']-lo['cpu_s'])
+                cycle_start=(lo['process_cycles']+f*(hi['process_cycles']-lo['process_cycles'])
+                             if lo['process_cycles'] is not None else None)
+                start_bracket=[lo,hi];start_origin='frame_interpolation'
             result={'label':label,'binary':identity(exe),'command':command,'start_frame':args.start_frame,
                 'cpu_affinity':process.cpu_affinity(),
                 'end_frame':s['frame'],'cpu_ms':1000*(samples[-1]['cpu_s']-cpu_start),
                 'process_cycles':samples[-1]['process_cycles']-cycle_start if cycle_start is not None else None,
-                'peak_rss_bytes':max(v['rss_bytes'] for v in samples),'start_bracket':[lo,hi],
+                'peak_rss_bytes':max(v['rss_bytes'] for v in samples),'start_bracket':start_bracket,
+                'start_origin':start_origin,'first_sample':samples[0],'final_sample':samples[-1],
                 'host_cpu_before':host_before._asdict(),'host_cpu_after':host_after._asdict(),
-                'loader_jobs':state['loader_jobs'],'drawing_jobs':state['drawing_jobs']}
+                'loader_jobs':state['loader_jobs'],'drawing_jobs':state['drawing_jobs'],'memory_jobs':state['memory_jobs']}
             (out/'result.json').write_text(json.dumps(result,indent=2));print(json.dumps(result),flush=True)
             return result,state
         finally:
@@ -108,7 +118,7 @@ def run(exe,args,label):
             proc.wait(timeout=10)
 
 def semantic(state,presentation='headless'):
-    d=copy.deepcopy(state);d.pop('loader_jobs',None);d.pop('drawing_jobs',None)
+    d=copy.deepcopy(state);d.pop('loader_jobs',None);d.pop('drawing_jobs',None);d.pop('memory_jobs',None)
     for key in ('insns','blocks','interp','irq_first_seq'):d['status'].pop(key,None)
     for key in ('scanout_jobs','fused_jobs','reused_jobs'):d['video_state'].pop(key,None)
     d['native_state'].pop('dispatches',None)
@@ -130,9 +140,13 @@ def main():
     p.add_argument('--expect-crc-error',action='store_true')
     p.add_argument('--reference-control',action='store_true',help='Explicit A/A run; no native activity expected')
     p.add_argument('--cpu-core',type=int,help='Matched process-local affinity; does not change other applications')
+    p.add_argument('--pace-speed',type=float,default=32,help='Emulated pacing multiplier, identical for both builds')
+    p.add_argument('--expect-end-frame',type=int,help='Reject a repeated stop PC reached at the wrong frame')
     p.add_argument('--presentation',choices=('headless','dummy'),default='headless')
-    p.add_argument('--native-job',choices=('loader','drawing'),default='loader')
+    p.add_argument('--native-job',choices=('loader','drawing','memory'),default='loader')
     args=p.parse_args()
+    assert args.start_frame>=0,'Start frame must be zero (process creation) or positive'
+    assert args.pace_speed>0,'Pacing multiplier must be positive'
     with socket.socket() as probe:assert probe.connect_ex(('127.0.0.1',args.port))!=0
     args.output.mkdir(parents=True,exist_ok=False)
     harness=args.output/'harness';harness.mkdir()
@@ -148,7 +162,7 @@ def main():
         'cpu_core':args.cpu_core,
         'machine':{'platform':platform.platform(),'processor':platform.processor(),
                    'processor_identifier':os.environ.get('PROCESSOR_IDENTIFIER'),'logical_cpus':psutil.cpu_count()},
-        'settings':{'presentation':args.presentation,'audio':'dummy','pace_speed':32,
+        'settings':{'presentation':args.presentation,'audio':'dummy','pace_speed':args.pace_speed,
                     'rtc_sync_host_on_startup':False,'start_frame':args.start_frame},
         'harness':[identity(x) for x in sorted(harness.iterdir())],
         'source':subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),
@@ -162,7 +176,7 @@ def main():
         for name in order:
             result,state=run(getattr(args,name),args,f'{prefix}-{name}');states[name]=state
             if name=='candidate' and not args.reference_control:
-                job,key=('drawing_jobs','jobs') if args.native_job=='drawing' else ('loader_jobs','words')
+                job,key=({'drawing':('drawing_jobs','jobs'),'memory':('memory_jobs','jobs')}.get(args.native_job,('loader_jobs','words')))
                 assert state[job].get(key,0)>0,'Native job was not exercised'
             if pair:results.append(result)
         left,right=semantic(states['reference'],args.presentation),semantic(states['candidate'],args.presentation)
@@ -178,6 +192,7 @@ def main():
         if a['process_cycles'] is not None and b['process_cycles'] is not None:
             cycle_savings.append(100*(1-b['process_cycles']/a['process_cycles']))
     scope=(f'Hotel Mario USA scripted gameplay fields {args.start_frame}..{args.end_frame}' if args.end_frame else
+           f'Hotel Mario USA firmware fill through caller continuation ${args.stop_pc:06X}' if args.native_job=='memory' else
            'Hotel Mario USA real main-module CRC rejection' if args.expect_crc_error else
            'Hotel Mario USA real main-module load to first native entry')
     summary={'schema':1,'status':'collected; assess samples and variation','scope':scope,

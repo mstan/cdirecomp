@@ -3,7 +3,7 @@
   "owner_issue": "beads-oatv",
   "campaign_issue": "beads-2wy8.1",
   "consumer_issue": "beads-7t8h",
-  "status": "in_progress; candidate3 independently retained with neutral timing; branch PR handoff, then candidate4",
+  "status": "in_progress; candidate4 independently KEEP-qualified for normal-paced Hotel Mario boot; PR handoff then candidate 6",
   "engine_head": "85c869ee808b438905f2c1bc29a46d30f27647f8",
   "core_head": "3955bf3311f55e031836f70b5c1839e95b81f9cf",
   "game_head": "16353fc849ef8056af891e2c3b7d3e29ae3a41da",
@@ -785,16 +785,140 @@
     {
       "candidate": 4,
       "name": "Memory operation to fully published result",
-      "status": "open_queued",
+      "status": "qualified_selected_native_job",
       "evidence": [
-        "residual-selection.json",
-        "profile-final.json",
-        "combined-native-pairs/pair1-candidate/evidence.json"
+        "G:\\Temp\\Codex\\cdirecomp\\memory-job-20261031\\actual-reference\\summary.json",
+        "G:\\Temp\\Codex\\cdirecomp\\memory-job-20261031\\boot-normal-pairs\\campaign-evidence.json",
+        "G:\\Temp\\Codex\\cdirecomp\\memory-job-20261031\\boot-normal-control\\campaign-evidence.json",
+        "G:\\Temp\\Codex\\cdirecomp\\memory-job-20261031\\boot-normal-reservation.json"
       ],
-      "reason": "Only5 native bindings and1 invalidation through13000 fields; none in the timed gameplay interval. Write-side native bookkeeping has13/491 initial and10/344 final samples, not a repeated load/hash churn bottleneck.",
-      "prerequisite": "A measured bulk copy/fill/loading workload plus an identified complete operation contract covering overlap, faults/partial results, interrupt-visible memory and native-code invalidation/publication; qualify it at operation boundaries.",
+      "reason": "Complete bounded firmware rectangle fill with authoritative per-byte RAM/write bookkeeping, CPU and original device/IRQ frontiers. 37 actual-reference cases and all requested full-boot/control contracts pass. Independent reviewer retains under neutral-per-game acceptance.",
+      "prerequisite": null,
       "prior_deferral_rejected": true,
-      "work_remaining": "A measured bulk copy/fill/loading workload plus an identified complete operation contract covering overlap, faults/partial results, interrupt-visible memory and native-code invalidation/publication; qualify it at operation boundaries."
+      "work_remaining": null,
+      "owner_issue": "beads-ttbl.4",
+      "job": "Complete 490a firmware two-dimensional byte fill from ordinary call through published caller result; retain authoritative per-byte writes, ownership/invalidation bookkeeping and original device/IRQ quanta.",
+      "engine_implementation": "da2cfbd293b3bb04e73e792c3b95b35d57013f78",
+      "consumer_head": "5846224dc25a799294dc2724568e2663349efed8",
+      "performance_classification": "neutral/inconclusive; no proven repeatable speedup or reproducible regression",
+      "correctness_cases": 37,
+      "irq_frontiers": 17,
+      "end_pc": "0x445204",
+      "binaries": {
+        "hle_sha256": "4bf73e88bc5f3198ca63dab693a062b7f23bed12a090fc51e2102b75d970384e",
+        "lle_sha256": "97713e04b54954e437afeb4d2317f5eb3b72c2e142915aaa38df04fddf834ac1"
+      },
+      "native_activity": {
+        "jobs": 6,
+        "bytes": 18080,
+        "rows": 118,
+        "interrupted": 5,
+        "fallbacks": 0
+      },
+      "portable_checks": "Windows HLE/LLE builds and Linux strict HLE=0/HLE=1 syntax pass; no Linux runtime claim.",
+      "independent_disposition": "KEEP",
+      "performance": {
+        "classification": "neutral/inconclusive; no proven repeatable speedup or reproducible regression",
+        "scope": "Hotel Mario USA normal-paced process creation through firmware-fill caller continuation PC0x445204 at field 731",
+        "start_origin": "process_creation",
+        "synthetic_zero_sample": false,
+        "pace_speed": 1,
+        "cpu_affinity": [
+          15
+        ],
+        "pairs": 2,
+        "control_pairs": 1,
+        "paired_cycle_reductions_percent": [
+          7.041586114920495,
+          0.2986157132307987
+        ],
+        "paired_cpu_reductions_percent": [
+          4.761904761904767,
+          1.3157894736842146
+        ],
+        "AA_cycle_difference_percent": [
+          -3.8294566983571254
+        ],
+        "AA_cpu_difference_percent": [
+          -1.333333333333342
+        ],
+        "samples": [
+          {
+            "label": "pair1-reference",
+            "cpu_ms": 1312.5,
+            "process_cycles": 5805341770,
+            "peak_rss_bytes": 206778368
+          },
+          {
+            "label": "pair1-candidate",
+            "cpu_ms": 1250.0,
+            "process_cycles": 5396553630,
+            "peak_rss_bytes": 206794752
+          },
+          {
+            "label": "pair2-candidate",
+            "cpu_ms": 1171.875,
+            "process_cycles": 5234634870,
+            "peak_rss_bytes": 206794752
+          },
+          {
+            "label": "pair2-reference",
+            "cpu_ms": 1187.5,
+            "process_cycles": 5250313130,
+            "peak_rss_bytes": 206786560
+          }
+        ],
+        "control_samples": [
+          {
+            "label": "pair1-reference",
+            "cpu_ms": 1171.875,
+            "process_cycles": 5558250080
+          },
+          {
+            "label": "pair1-candidate",
+            "cpu_ms": 1187.5,
+            "process_cycles": 5771100860
+          }
+        ],
+        "interpretation": "One larger positive sample did not repeat; the smaller sample is within contemporaneous same-binary variation. Full process-origin results resolve the prior interpolated-start qualification gap. No speedup claim.",
+        "host": {
+          "platform": "Windows-11-10.0.26200-SP0",
+          "processor": "AMD64 Family 26 Model 68 Stepping 0, AuthenticAMD",
+          "processor_identifier": "AMD64 Family 26 Model 68 Stepping 0, AuthenticAMD",
+          "logical_cpus": 16
+        },
+        "settings": {
+          "presentation": "headless",
+          "audio": "dummy",
+          "pace_speed": 1.0,
+          "rtc_sync_host_on_startup": false,
+          "start_frame": 0
+        },
+        "compiler": "C:/msys64/mingw64/bin/cc.exe;GNU;15.2.0"
+      },
+      "accounting_origin": "process_creation",
+      "endpoint": {
+        "pc": "0x445204",
+        "frame": 731
+      },
+      "historical_unresolved_timing": [
+        "G:\\Temp\\Codex\\cdirecomp\\memory-job-20261031\\boot-fill-pair3\\campaign-evidence.json",
+        "G:\\Temp\\Codex\\cdirecomp\\memory-job-20261031\\boot-full-control\\contracts.json"
+      ],
+      "independent_review": {
+        "verdict": "KEEP",
+        "date": "2026-11-01",
+        "reviewer": "parent-arranged independent reviewer",
+        "note": "No source blocker; process-origin normal-paced reversed A/B and identical-build control resolve performance qualification. No additional measurements requested."
+      },
+      "branch_pr_status": "stacked_PRs_open_unmerged",
+      "pull_requests": [
+        "https://github.com/mstan/cdirecomp/pull/3",
+        "https://github.com/mstan/HotelMarioRecomp/pull/3"
+      ],
+      "publication_engine_head": "ccc48dad0edb9664a12e78043fcc6e7658121cdc",
+      "merge_handoff": "Combined batch gameplay/current-build save-load and owner final visual/play approval remain pending.",
+      "bulk_bookkeeping_rewrite": false
     },
     {
       "candidate": 5,
@@ -938,15 +1062,15 @@
     "report": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\cleanup-report.json",
     "ledger": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\resource-ledger.json"
   },
-  "current_serial_candidate": 4,
-  "completed_serial_candidate": 3,
+  "current_serial_candidate": null,
+  "completed_serial_candidate": 4,
   "awaiting_owner_checkin": false,
   "loader_job_evidence": "docs/loader-job-evidence.json",
   "drawing_job_evidence": "docs/drawing-job-evidence.json",
   "latest_qualified_heads": {
-    "engine_implementation": "49c6b21b6fa2312cdb8ecbab6bef5866681b64d8",
+    "engine_implementation": "da2cfbd293b3bb04e73e792c3b95b35d57013f78",
     "core": "cd1e5e28dc26ec6a887197aac7eaaf8c8c870019",
-    "consumer": "2123474ded8ab6d962c48ed2531f3e4afe797207"
+    "consumer": "5846224dc25a799294dc2724568e2663349efed8"
   },
   "loader_completion_audit": "docs/loader-job-evidence.json#reaudit_20261030",
   "benchmark_target_pool": {
@@ -980,5 +1104,13 @@
     "state": "open_unmerged",
     "review": "independent_KEEP_neutral_inconclusive"
   },
-  "candidate4_owner_issue": "beads-ttbl.4"
+  "candidate4_owner_issue": "beads-ttbl.4",
+  "next_serial_candidate": 6,
+  "remaining_candidates": [
+    6,
+    8,
+    9,
+    10,
+    11
+  ]
 }

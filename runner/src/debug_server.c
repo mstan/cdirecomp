@@ -21,6 +21,7 @@
 #include "cdi_runtime.h"
 #include "cdi_loader_jobs.h"
 #include "cdi_drawing_jobs.h"
+#include "cdi_memory_jobs.h"
 #include "debug_server.h"
 #include "cosim_state.h"
 #include "cdi_media.h"
@@ -1335,6 +1336,12 @@ static int handle_line(const char *line, char *out, int outlen) {
         snprintf(out,outlen,"{\"ok\":true,\"jobs\":%llu,\"empty_checks\":%llu,\"callbacks\":%llu,\"interrupted\":%llu,\"fallbacks\":%llu}",
             (unsigned long long)job.jobs,(unsigned long long)job.empty_checks,
             (unsigned long long)job.callbacks,(unsigned long long)job.interrupted,(unsigned long long)job.fallbacks);
+    }
+    else if (!strcmp(cmd, "memory_jobs")) {
+        CdiMemoryJobState job;cdi_memory_job_state(&job);
+        snprintf(out,outlen,"{\"ok\":true,\"jobs\":%llu,\"bytes\":%llu,\"rows\":%llu,\"interrupted\":%llu,\"fallbacks\":%llu}",
+            (unsigned long long)job.jobs,(unsigned long long)job.bytes,(unsigned long long)job.rows,
+            (unsigned long long)job.interrupted,(unsigned long long)job.fallbacks);
     }
     else if (!strcmp(cmd, "video_clut"))     resp_video_clut(out, outlen);
     else if (!strcmp(cmd, "disc_state"))     resp_disc_state(out, outlen);
