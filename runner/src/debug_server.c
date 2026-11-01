@@ -22,6 +22,7 @@
 #include "cdi_loader_jobs.h"
 #include "cdi_drawing_jobs.h"
 #include "cdi_memory_jobs.h"
+#include "cdi_service_jobs.h"
 #include "debug_server.h"
 #include "cosim_state.h"
 #include "cdi_media.h"
@@ -1343,6 +1344,12 @@ static int handle_line(const char *line, char *out, int outlen) {
             (unsigned long long)job.jobs,(unsigned long long)job.bytes,(unsigned long long)job.rows,
             (unsigned long long)job.interrupted,(unsigned long long)job.fallbacks);
     }
+    else if (!strcmp(cmd, "service_jobs")) {
+        CdiServiceJobState job;cdi_service_job_state(&job);
+        snprintf(out,outlen,"{\"ok\":true,\"jobs\":%llu,\"errors\":%llu,\"interrupted\":%llu,\"fallbacks\":%llu}",
+            (unsigned long long)job.jobs,(unsigned long long)job.errors,
+            (unsigned long long)job.interrupted,(unsigned long long)job.fallbacks);
+    }
     else if (!strcmp(cmd, "video_clut"))     resp_video_clut(out, outlen);
     else if (!strcmp(cmd, "disc_state"))     resp_disc_state(out, outlen);
     else if (!strcmp(cmd, "mount_disc"))     resp_mount_disc(line, out, outlen);
@@ -1460,6 +1467,7 @@ int g_hold_on_fault = 0;
 void cdi_fault_hold(void) {
     cdi_loader_sync_cpu();
     cdi_drawing_sync_cpu();
+    cdi_service_sync_cpu();
     s_debug_held = 1;   /* status reports "held":1 — distinct from g_halted (STOP) */
     fprintf(stderr, "[fault-hold] frozen at fault; rings live on :%d for inspection. "
                     "Ctrl-C to exit.\n", s_port);

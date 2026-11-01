@@ -54,6 +54,16 @@ else()
     message(FATAL_ERROR "CDI_MEMORY_BACKEND must be LLE or HLE")
 endif()
 
+set(CDI_SERVICE_BACKEND "LLE" CACHE STRING "Process lookup/publication jobs: LLE or HLE")
+set_property(CACHE CDI_SERVICE_BACKEND PROPERTY STRINGS LLE HLE)
+if(CDI_SERVICE_BACKEND STREQUAL "HLE")
+    set(CDI_SERVICE_HLE 1)
+elseif(CDI_SERVICE_BACKEND STREQUAL "LLE")
+    set(CDI_SERVICE_HLE 0)
+else()
+    message(FATAL_ERROR "CDI_SERVICE_BACKEND must be LLE or HLE")
+endif()
+
 # Generated C is dropped in by the recompiler and compiled in here. It
 # #includes cdi_runtime.h + game_extras.h from runner/include.
 #   - bios/generated/*.c     : the recompiled CD-RTOS system ROM (Phase 1, boots).
@@ -91,6 +101,7 @@ add_executable(CdiRuntime
     src/cdi_loader_jobs.c
     src/cdi_drawing_jobs.c
     src/cdi_memory_jobs.c
+    src/cdi_service_jobs.c
     ../common/cdi_sha256.c
     src/runtime.c
     src/mcd212.c
@@ -155,6 +166,11 @@ set_source_files_properties(src/cdi_memory_jobs.c PROPERTIES
 set_property(SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/../bios/generated/cdrtos_dispatch.c"
     APPEND PROPERTY COMPILE_DEFINITIONS "CDI_MEMORY_HLE=$<BOOL:$<TARGET_PROPERTY:CDI_NATIVE_MEMORY>>")
 set_property(TARGET CdiRuntime PROPERTY CDI_NATIVE_MEMORY ${CDI_MEMORY_HLE})
+set_source_files_properties(src/cdi_service_jobs.c src/cdi_native.c PROPERTIES
+    COMPILE_DEFINITIONS "CDI_SERVICE_HLE=$<BOOL:$<TARGET_PROPERTY:CDI_NATIVE_SERVICE>>")
+set_property(SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/../bios/generated/cdrtos_dispatch.c"
+    APPEND PROPERTY COMPILE_DEFINITIONS "CDI_SERVICE_HLE=$<BOOL:$<TARGET_PROPERTY:CDI_NATIVE_SERVICE>>")
+set_property(TARGET CdiRuntime PROPERTY CDI_NATIVE_SERVICE ${CDI_SERVICE_HLE})
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../bios/generated/bios_identity.h")
     target_compile_definitions(CdiRuntime PRIVATE CDI_BIOS_IDENTITY_BUILD=1)
 endif()
@@ -190,7 +206,7 @@ if(EXISTS "${CDI_GAME_GENERATED_DIR}/module_sources.cmake")
 endif()
 set(PROVENANCE_INPUTS "${CMAKE_CURRENT_BINARY_DIR}/runtime-provenance-inputs.cmake")
 file(GENERATE OUTPUT "${PROVENANCE_INPUTS}" CONTENT
-    "set(PROVENANCE_FILES [==[${PROVENANCE_FILES}]==])\nset(PROVENANCE_COMPILER [==[${CMAKE_C_COMPILER};${CMAKE_C_COMPILER_ID};${CMAKE_C_COMPILER_VERSION}]==])\nset(PROVENANCE_OPTIONS [==[${CMAKE_BUILD_TYPE};${CMAKE_C_FLAGS};${CMAKE_C_FLAGS_RELEASE};scanout=${CDI_VIDEO_BACKEND};loader=${CDI_LOADER_BACKEND};drawing=${CDI_DRAWING_BACKEND};memory=${CDI_MEMORY_BACKEND};$<TARGET_PROPERTY:CdiRuntime,COMPILE_DEFINITIONS>;$<TARGET_PROPERTY:CdiRuntime,COMPILE_OPTIONS>]==])\n")
+    "set(PROVENANCE_FILES [==[${PROVENANCE_FILES}]==])\nset(PROVENANCE_COMPILER [==[${CMAKE_C_COMPILER};${CMAKE_C_COMPILER_ID};${CMAKE_C_COMPILER_VERSION}]==])\nset(PROVENANCE_OPTIONS [==[${CMAKE_BUILD_TYPE};${CMAKE_C_FLAGS};${CMAKE_C_FLAGS_RELEASE};scanout=${CDI_VIDEO_BACKEND};loader=${CDI_LOADER_BACKEND};drawing=${CDI_DRAWING_BACKEND};memory=${CDI_MEMORY_BACKEND};service=${CDI_SERVICE_BACKEND};$<TARGET_PROPERTY:CdiRuntime,COMPILE_DEFINITIONS>;$<TARGET_PROPERTY:CdiRuntime,COMPILE_OPTIONS>]==])\n")
 set_property(TARGET CdiRuntime APPEND PROPERTY LINK_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/../tools/build_provenance.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt")
@@ -229,6 +245,11 @@ if(BUILD_TESTING)
     target_include_directories(CdiNativeTest PRIVATE include ../common)
     target_compile_definitions(CdiNativeTest PRIVATE CDI_NATIVE_MODULES=1)
     add_test(NAME native_module_binding COMMAND CdiNativeTest)
+    add_executable(CdiNativeIndexedTest tests/cdi_native_test.c src/cdi_native.c ../common/cdi_sha256.c)
+    target_include_directories(CdiNativeIndexedTest PRIVATE include ../common)
+    target_compile_definitions(CdiNativeIndexedTest PRIVATE CDI_NATIVE_MODULES=1)
+    set_property(TARGET CdiNativeIndexedTest PROPERTY CDI_NATIVE_SERVICE 1)
+    add_test(NAME native_indexed_publication COMMAND CdiNativeIndexedTest)
     add_executable(CdiSha256Test tests/cdi_sha256_test.c ../common/cdi_sha256.c)
     target_include_directories(CdiSha256Test PRIVATE ../common)
     add_test(NAME sha256 COMMAND CdiSha256Test)
