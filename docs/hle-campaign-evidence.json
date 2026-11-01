@@ -3,7 +3,7 @@
   "owner_issue": "beads-oatv",
   "campaign_issue": "beads-2wy8.1",
   "consumer_issue": "beads-7t8h",
-  "status": "in_progress; selected candidate6 lookup/publication package independently KEEP with neutral/inconclusive Hotel Mario boot/scripted-gameplay performance; PR handoff then candidate8",
+  "status": "in_progress; selected candidate6 lookup/publication package independently KEEP with neutral/inconclusive Hotel Mario boot/scripted-gameplay performance; stacked PRs #4 open and unmerged; candidate8 next",
   "engine_head": "85c869ee808b438905f2c1bc29a46d30f27647f8",
   "core_head": "3955bf3311f55e031836f70b5c1839e95b81f9cf",
   "game_head": "16353fc849ef8056af891e2c3b7d3e29ae3a41da",
@@ -1000,7 +1000,10 @@
         "classification": "unresolved/concerning, not neutral accepted; second CPU pair exceeded the one CPU-control difference"
       },
       "independent_review": {"verdict": "KEEP", "date": "2026-11-01", "reviewer": "parent-arranged independent reviewer", "scope": "selected lookup/publication package and measured Hotel Mario boot/scripted gameplay through field 13000; neutral/inconclusive"},
-      "branch_pr_status": "handoff_pending_no_PR_created",
+      "branch_pr_status": "open_unmerged",
+      "engine_pr": "https://github.com/mstan/cdirecomp/pull/4",
+      "consumer_pr": "https://github.com/mstan/HotelMarioRecomp/pull/4",
+      "engine_pr_opened_head": "6e66ac682c7d0dd00ffd2ecb70a2986cb2f0c04e",
       "limits": "No whole notification-chain, other-title/platform, Linux-runtime, current-build save/load or final owner merge-gate qualification.",
       "retained_storage": "G:/Temp/Codex/cdirecomp/service-job-20261101 frozen binaries, all sidecar dependencies, fixtures and both experiments; reusable C: HLE cache and older shared immutable input paths remain required. Empty agent-created compiler temp removed."
     },

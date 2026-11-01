@@ -96,7 +96,9 @@
       "completed_job": "G:/Temp/Codex/cdirecomp/service-job-20261101/evaluate-bounds-job.json",
       "completed_reservation": "G:/Temp/Codex/cdirecomp/service-job-20261101/evaluate-bounds-reservation.json",
       "raw_root": "G:/Temp/Codex/cdirecomp/service-job-20261101",
-      "required_next": "Stacked PR handoff then candidate 8 by the assigned reviewer; current-build save/load and owner final merge handoff remain open. No more candidate6 tuning or checks requested.",
+      "engine_pr": "https://github.com/mstan/cdirecomp/pull/4",
+      "consumer_pr": "https://github.com/mstan/HotelMarioRecomp/pull/4",
+      "required_next": "Stacked PRs #4 open and unmerged; candidate 8 next by explicit assignment. Combined batch gameplay/current-build save-load and owner final merge handoff remain open. No more candidate6 tuning or checks requested.",
       "remaining_areas": [8, 9, 10, 11]
     },
     {
