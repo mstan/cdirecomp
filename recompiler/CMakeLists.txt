@@ -87,6 +87,16 @@ if(BUILD_TESTING)
     target_include_directories(ModulePicTest PRIVATE ../runner/include)
     add_test(NAME native_pic_execution COMMAND ModulePicTest "${PIC_FIXTURE_DIR}/fixture.bin")
     add_test(NAME native_pic_rejects_falloff COMMAND ModuleCodegenFixture "${PIC_FIXTURE_DIR}" --test-falloff)
+    set(PIC_DENSE_FIXTURE_DIR "${CMAKE_CURRENT_BINARY_DIR}/module-pic-dense-fixture")
+    add_custom_command(OUTPUT "${PIC_DENSE_FIXTURE_DIR}/fixture_full.c" "${PIC_DENSE_FIXTURE_DIR}/fixture_dispatch.c" "${PIC_DENSE_FIXTURE_DIR}/fixture.bin"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${PIC_DENSE_FIXTURE_DIR}"
+        COMMAND ModuleCodegenFixture "${PIC_DENSE_FIXTURE_DIR}" --dense-entries
+        DEPENDS ModuleCodegenFixture VERBATIM)
+    add_executable(ModulePicDenseTest tests/module_pic_test.c
+        "${PIC_DENSE_FIXTURE_DIR}/fixture_full.c" "${PIC_DENSE_FIXTURE_DIR}/fixture_dispatch.c")
+    target_include_directories(ModulePicDenseTest PRIVATE ../runner/include)
+    add_test(NAME native_pic_dense_execution COMMAND ModulePicDenseTest
+        "${PIC_DENSE_FIXTURE_DIR}/fixture.bin" --expect-coarse)
     add_executable(Os9ModuleTest tests/os9_module_test.c src/disc_parser.c)
     target_include_directories(Os9ModuleTest PRIVATE src)
     add_test(NAME os9_module_validation COMMAND Os9ModuleTest)

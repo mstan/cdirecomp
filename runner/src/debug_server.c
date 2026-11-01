@@ -19,6 +19,7 @@
  * the simplest commands. One single-line JSON response per request.
  */
 #include "cdi_runtime.h"
+#include "cdi_loader_jobs.h"
 #include "debug_server.h"
 #include "cosim_state.h"
 #include "cdi_media.h"
@@ -201,6 +202,19 @@ static volatile int s_debug_held;
 typedef struct { uint32_t pc; uint32_t skip; uint32_t delay; } CdiStopPc;
 static CdiStopPc  s_stoppc[CDI_STOPPC_MAX];
 static atomic_int s_stoppc_armed;   /* count of armed slots — hot-path gate */
+int debug_native_job_allowed(uint32_t first, uint32_t limit) {
+#ifdef CDI_COSIM
+    (void)first; (void)limit;
+    return 0;
+#else
+    if (g_stop_seq) return 0;
+    if (atomic_load_explicit(&s_stoppc_armed, memory_order_acquire)) {
+        for (int i = 0; i < CDI_STOPPC_MAX; i++)
+            if (s_stoppc[i].pc >= first && s_stoppc[i].pc < limit) return 0;
+    }
+    return 1;
+#endif
+}
 
 static void debug_check_stop_pc(void) {
     for (int i = 0; i < CDI_STOPPC_MAX; i++) {
@@ -770,6 +784,7 @@ static void resp_video_state(char *out, int outlen) {
         "\"plane_line_fnv1a_a\":\"%016llx\","
         "\"plane_line_fnv1a_b\":\"%016llx\","
         "\"clut_fnv1a\":\"%016llx\","
+        "\"scanout_jobs\":%llu,\"fused_jobs\":%llu,\"reused_jobs\":%llu,"
         "\"cursor_pattern\":\"",
         csr1r, csr2r, r[0x10], r[0x00], r[0x12], r[0x02],
         r[0x18], r[0x08], r[0x14], r[0x04], r[0x1A], r[0x0A],
@@ -792,7 +807,10 @@ static void resp_video_state(char *out, int outlen) {
         video.plane_line_nonblack[0], video.plane_line_nonblack[1],
         (unsigned long long)video.plane_line_hash[0],
         (unsigned long long)video.plane_line_hash[1],
-        (unsigned long long)video.clut_hash);
+        (unsigned long long)video.clut_hash,
+        (unsigned long long)video.scanout_jobs,
+        (unsigned long long)video.fused_jobs,
+        (unsigned long long)video.reused_jobs);
     for (int i = 0; i < 16 && n < outlen - 8; i++)
         n += snprintf(out + n, outlen - n, "%04X", cursor.pattern[i]);
     snprintf(out + n, outlen - n, "\"}");
@@ -1294,6 +1312,13 @@ static int handle_line(const char *line, char *out, int outlen) {
     else if (!strcmp(cmd, "video_scanline")) resp_video_scanline(line, out, outlen);
     else if (!strcmp(cmd, "video_plane"))    resp_video_plane(line, out, outlen);
     else if (!strcmp(cmd, "video_state"))    resp_video_state(out, outlen);
+    else if (!strcmp(cmd, "loader_jobs")) {
+        CdiLoaderJobState job;
+        cdi_loader_job_state(&job);
+        snprintf(out,outlen,"{\"ok\":true,\"spans\":%llu,\"words\":%llu,\"interrupted\":%llu,\"yielded\":%llu}",
+            (unsigned long long)job.spans,(unsigned long long)job.words,
+            (unsigned long long)job.interrupted,(unsigned long long)job.yielded);
+    }
     else if (!strcmp(cmd, "video_clut"))     resp_video_clut(out, outlen);
     else if (!strcmp(cmd, "disc_state"))     resp_disc_state(out, outlen);
     else if (!strcmp(cmd, "mount_disc"))     resp_mount_disc(line, out, outlen);
@@ -1409,6 +1434,7 @@ void debug_server_poll(void) { /* threaded now — nothing to poll */ }
 int g_hold_on_fault = 0;
 
 void cdi_fault_hold(void) {
+    cdi_loader_sync_cpu();
     s_debug_held = 1;   /* status reports "held":1 — distinct from g_halted (STOP) */
     fprintf(stderr, "[fault-hold] frozen at fault; rings live on :%d for inspection. "
                     "Ctrl-C to exit.\n", s_port);

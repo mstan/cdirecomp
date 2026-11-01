@@ -19,11 +19,18 @@ than those; CD-i just adds an OS layer.
 - A CD-i title runs on **CD-RTOS / OS-9**. Code arrives as relocatable OS-9
   modules loaded at run time; the program talks to the system through `TRAP #0`
   OS-9 calls (F$Load, F$Link, I$Read, …).
-- We recompile the CD-RTOS system ROM itself (kernel + file managers + drivers +
-  player shell) and run the real OS as native C. We do **NOT** hand-write OS-9
-  HLE stubs — psxrecomp proved that path fails (faked syscall outputs + drifting
-  C-side kernel state). The runtime emulates only the hardware chips (MCD212
-  video, CIAP CD/audio, IKAT/SLAVE input, 68070 peripherals).
+- The faithful LLE implementation recompiles the CD-RTOS system ROM itself
+  (kernel, file managers, drivers and player shell) and runs the real OS as
+  native C. Preserve it as a build-time selectable correctness reference.
+- Native HLE may replace complete jobs spanning OS services, CPU execution,
+  memory ownership/bookkeeping and device or presentation work. Existing
+  subsystem boundaries do not constrain that replacement. Match observable
+  inputs, outputs, guest state, events, errors and native-save effects against
+  LLE, and qualify actual built-game performance per affected game. Production
+  HLE need not execute LLE alongside it. See `docs/HLE-BURNDOWN.md`.
+- Fabricated syscall results and drifting C-side shadow kernel state remain
+  prohibited. An HLE replacement is an implementation of the complete contract,
+  rather than a plausible-success stub. Keep authoritative state in guest RAM.
 - Module load addresses and relocation are real program state. The flat address
   space the recompiled code runs in is defined by the loader, not assumed.
 

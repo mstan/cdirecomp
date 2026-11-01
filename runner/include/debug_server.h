@@ -39,6 +39,9 @@ void debug_trace_mcd_event(uint8_t area, uint16_t line, uint32_t word);
 /* Capture one execution point (PC + full register file) into the block-trace
  * ring. Called from the per-block hook (glue_check_vblank) — always on. */
 void debug_trace_block(void);
+/* Interior instruction stops and fixed instruction-sequence runs retain the
+ * faithful implementation of a native job's private instruction interval. */
+int debug_native_job_allowed(uint32_t first, uint32_t limit);
 
 /* Dump the tail of the block-trace ring to stderr: the executed path into a
  * fault. Call from abort sites (unmapped bus access, illegal opcode, …) so the

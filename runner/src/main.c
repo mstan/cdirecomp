@@ -107,6 +107,11 @@ int main(int argc, char *argv[]) {
 
     printf("%s — Philips CD-i (SCC68070) static-recomp runtime\n",
            CDI_PRODUCT_NAME);
+#if CDI_VIDEO_HLE
+    printf("[video] native span HLE scanout\n");
+#else
+    printf("[video] reference LLE scanout\n");
+#endif
     if (!rom_path) {
         fprintf(stderr, "usage: CdiRuntime <cdrtos.rom> [--disc image.cue] [--port N] [--hold] [--headless] [--exit-on-stop] [--stop-seq N] [--stop-frame N]\n"
                         "                  [--cosim-inject <seq>:<ram|reg>:<idx>:<xorhex>]\n"

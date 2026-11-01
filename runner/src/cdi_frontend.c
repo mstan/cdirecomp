@@ -22,6 +22,7 @@ typedef struct {
     uint32_t *pixels;
     uint16_t texture_width, texture_height;
     uint64_t shown_generation;
+    uint64_t shown_content;
     uint64_t next_event_ms;
     int fullscreen;
     int mouse_captured;
@@ -119,17 +120,21 @@ static int ensure_texture(uint16_t width, uint16_t height) {
 
 static int present_frame(void) {
     uint16_t width, height;
-    uint64_t generation;
-    uint32_t count = mcd212_video_copy_frame(NULL, 0, &width, &height, &generation);
+    uint64_t generation, content;
+    uint32_t count = mcd212_video_copy_changed_frame(s.pixels,
+        MCD212_VIDEO_MAX_WIDTH * MCD212_VIDEO_MAX_HEIGHT, s.shown_content,
+        &width, &height, &generation, &content);
     if (!generation || generation == s.shown_generation) return 1;
-    if (!ensure_texture(width, height)) return 0;
-    if (count > MCD212_VIDEO_MAX_WIDTH * MCD212_VIDEO_MAX_HEIGHT) return 0;
-    mcd212_video_copy_frame(s.pixels, MCD212_VIDEO_MAX_WIDTH * MCD212_VIDEO_MAX_HEIGHT,
-                            &width, &height, &generation);
-    if (SDL_UpdateTexture(s.texture, NULL, s.pixels, (int)width * 4) != 0) {
-        fprintf(stderr, "[frontend] texture update failed: %s\n", SDL_GetError());
-        return 0;
+    if (count) {
+        if (!ensure_texture(width, height)) return 0;
+        if (SDL_UpdateTexture(s.texture, NULL, s.pixels, (int)width * 4) != 0) {
+            fprintf(stderr, "[frontend] texture update failed: %s\n", SDL_GetError());
+            return 0;
+        }
+        s.shown_content = content;
     }
+    /* Keep field cadence and resize/expose redraws even when the existing
+     * texture is unchanged. Only copying/uploading that texture is elided. */
     SDL_SetRenderDrawColor(s.renderer, 0, 0, 0, 255);
     SDL_RenderClear(s.renderer);
     SDL_RenderCopy(s.renderer, s.texture, NULL, NULL);

@@ -10,6 +10,11 @@
 #pragma once
 #include "cdi_runtime.h"
 
+#if CDI_LOADER_HLE
+#include "cdi_loader_jobs.h"
+#define RECOMP_NATIVE_JOB_DISPATCH(fn) ((fn) == cdi_loader_entry && cdi_loader_dispatch(fn))
+#endif
+
 /* Per-game/OS dispatch override, called by the generated dispatch when a target
  * address isn't in the recompiled table. Return nonzero if hand-written code
  * handled it; 0 lets the runtime log a dispatch miss. Default impl (runner)
