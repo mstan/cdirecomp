@@ -12,6 +12,7 @@
 #include "cdi_runtime.h"
 #include "cdi_media.h"
 #include "cdi_audio.h"
+#include "cdi_streaming_jobs.h"
 #include "debug_server.h"
 
 #include <stdio.h>
@@ -130,6 +131,20 @@ typedef struct {
 
 static CiapDevice ciap;
 
+#ifndef CDI_STREAMING_HLE
+#define CDI_STREAMING_HLE 0
+#endif
+static CdiStreamingJobState streaming;
+static void advance_streaming(uint64_t step);
+#if CDI_STREAMING_HLE
+/* Private elapsed time never crosses an AP completion, audio refill or sector
+ * boundary. Add EACH already-truncated device quantum, rather than converting
+ * a sum of CPU cycles. MMIO, DMA, transport and debugger observations publish
+ * the exact pointer/phase before inspecting or changing the real device. */
+static uint64_t pending_ns, deadline_ns;
+static int deadline_valid;
+#endif
+
 static uint16_t read_word(unsigned offset) {
     return (uint16_t)(((uint16_t)ciap.memory[offset] << 8) |
                       ciap.memory[offset + 1u]);
@@ -181,6 +196,21 @@ static void ensure_initialized(void) {
     if (!ciap.initialized) initialize_ciap();
 }
 
+static void observe_streaming(void) {
+    ensure_initialized();
+#if CDI_STREAMING_HLE
+    deadline_valid=0;
+    if(pending_ns) {
+        uint64_t elapsed=pending_ns;pending_ns=0;
+        streaming.materializations++;
+        advance_streaming(elapsed);
+    }
+#endif
+}
+
+void cdi_streaming_job_state(CdiStreamingJobState *out) {*out=streaming;}
+void cdi_streaming_sync(void) {observe_streaming();}
+
 static void record_access(uint32_t offset, uint32_t value, int size, int write) {
     CdiCiapEvent *event =
         &ciap.events[ciap.event_count & CIAP_EVENT_INDEX_MASK];
@@ -220,6 +250,8 @@ void cdic_debug_state(uint32_t *drive_lba, uint32_t *last_lba,
                       uint8_t *file, uint8_t *channel, uint8_t *submode,
                       uint8_t *coding, int *selected, int *running,
                       int *waiting_ack) {
+    /* These debug fields cannot change between event boundaries. Do not
+     * materialize private time from the concurrent debugger thread. */
     ensure_initialized();
     *drive_lba = ciap.drive_lba;
     *last_lba = ciap.last_lba;
@@ -265,7 +297,7 @@ uint32_t cdic_read(uint32_t address, int size) {
     uint32_t result = 0;
     int i;
 
-    ensure_initialized();
+    observe_streaming();
     if (size <= 0 || offset >= CIAP_REGISTER_BYTES ||
         (uint32_t)size > CIAP_REGISTER_BYTES - offset)
         unknown_read(address, offset, size);
@@ -511,7 +543,7 @@ void cdic_write(uint32_t address, uint32_t value, int size) {
     uint32_t offset = address - CDI_CDIC_BASE;
     int i;
 
-    ensure_initialized();
+    observe_streaming();
     record_access(offset, value, size, 1);
 
     /* The ROM uploads firmware through the full write-only program aperture. */
@@ -534,12 +566,12 @@ void cdic_write(uint32_t address, uint32_t value, int size) {
  * IKAT resume must not restart delivery into handlers the ROM has torn down.
  * A new operation explicitly arms the decoder through CCR. */
 void cdic_transport_pause(void) {
-    ensure_initialized();
+    observe_streaming();
     ciap.data_running = 0;
 }
 
 void cdic_transport_resume(void) {
-    ensure_initialized();
+    observe_streaming();
     /* An audio play (E0 positioning) keeps the data path parked; resuming
      * it would flood DATA interrupts into a driver phase that expects
      * none. */
@@ -561,7 +593,7 @@ void cdic_transport_resume(void) {
 }
 
 void cdic_set_drive_position(uint32_t lba, int audio) {
-    ensure_initialized();
+    observe_streaming();
     ciap.drive_lba = lba;
     ciap.drive_positioned = 1;
     ciap.audio_positioned = (uint8_t)(audio != 0);
@@ -746,11 +778,9 @@ static void deliver_one_sector(void) {
     assert_interrupt_line();
 }
 
-void cdic_increment_time(double nanoseconds) {
+static void advance_streaming(uint64_t step) {
     const uint64_t sector_period_ns = 1000000000ull / 75ull;
-    ensure_initialized();
     if (ciap.ap_completion_pending) {
-        uint64_t step = (uint64_t)nanoseconds;
         if (step >= ciap.ap_completion_delay_ns) {
             ciap.ap_completion_pending = 0;
             ciap.ap_completion_delay_ns = 0;
@@ -763,7 +793,7 @@ void cdic_increment_time(double nanoseconds) {
             ciap.ap_completion_delay_ns -= step;
         }
     }
-    uint64_t audio_step = (uint64_t)nanoseconds;
+    uint64_t audio_step = step;
     while (ciap.audio_active && audio_step >= ciap.audio_remaining_ns) {
         audio_step -= ciap.audio_remaining_ns;
         uint16_t bit = (uint16_t)(1u << ciap.audio_buffer);
@@ -795,7 +825,7 @@ void cdic_increment_time(double nanoseconds) {
                    elapsed * 0x480u / ciap.audio_duration_ns));
     }
     if (!ciap.data_running) return;
-    ciap.sector_elapsed_ns += (uint64_t)nanoseconds;
+    ciap.sector_elapsed_ns += step;
     while (ciap.sector_elapsed_ns >= sector_period_ns) {
         ciap.sector_elapsed_ns -= sector_period_ns;
         deliver_one_sector();
@@ -803,10 +833,37 @@ void cdic_increment_time(double nanoseconds) {
     }
 }
 
+void cdic_increment_time(double nanoseconds) {
+    uint64_t step=(uint64_t)nanoseconds;
+    ensure_initialized();
+#if CDI_STREAMING_HLE
+    if(!deadline_valid) {
+        deadline_ns=UINT64_MAX;
+        if(ciap.ap_completion_pending)deadline_ns=ciap.ap_completion_delay_ns;
+        if(ciap.audio_active && ciap.audio_remaining_ns<deadline_ns)
+            deadline_ns=ciap.audio_remaining_ns;
+        if(ciap.data_running) {
+            uint64_t sector=1000000000ull/75ull-ciap.sector_elapsed_ns;
+            if(sector<deadline_ns)deadline_ns=sector;
+        }
+        deadline_valid=1;
+    }
+    if(deadline_ns==UINT64_MAX)return; /* no active device work */
+    if(step<deadline_ns-pending_ns) {
+        pending_ns+=step;streaming.deferred_quanta++;return;
+    }
+    /* Earlier deferred quanta contain no externally visible event. Execute
+     * the complete original ordering at the FIRST quantum reaching a bound:
+     * AP completion, audio ownership/refill/PCM, then sector selection/IRQ. */
+    step+=pending_ns;pending_ns=0;deadline_valid=0;streaming.jobs++;
+#endif
+    advance_streaming(step);
+}
+
 uint16_t cdic_dma_pull_word(void) {
     uint16_t control;
     unsigned word_offset;
-    ensure_initialized();
+    observe_streaming();
     control = read_word(CIAP_DMACTL);
     word_offset = control & 0x1FFFu;
     if (word_offset * 2u + 1u >= CIAP_APERTURE_BYTES) return 0;
@@ -819,7 +876,7 @@ uint16_t cdic_dma_pull_word(void) {
 void cdic_dma_push_word(uint16_t value) {
     uint16_t control;
     unsigned word_offset;
-    ensure_initialized();
+    observe_streaming();
     control = read_word(CIAP_DMACTL);
     word_offset = control & 0x1FFFu;
     if (word_offset * 2u + 1u < CIAP_APERTURE_BYTES)
@@ -830,7 +887,7 @@ void cdic_dma_push_word(uint16_t value) {
 }
 
 void cdic_dma_complete(void) {
-    ensure_initialized();
+    observe_streaming();
     store_word(CIAP_DMACTL,
                (uint16_t)(read_word(CIAP_DMACTL) & (uint16_t)~0x4000u));
 }
