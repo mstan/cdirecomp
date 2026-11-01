@@ -87,6 +87,18 @@ endif()
 set_source_files_properties(src/mcd212.c PROPERTIES
     COMPILE_DEFINITIONS "CDI_BOARD_HLE=$<BOOL:$<TARGET_PROPERTY:CDI_NATIVE_BOARD>>")
 
+set(CDI_GPU_BACKEND "LLE" CACHE STRING "Owned raster presentation: LLE or HLE")
+set_property(CACHE CDI_GPU_BACKEND PROPERTY STRINGS LLE HLE)
+if(CDI_GPU_BACKEND STREQUAL "HLE")
+    set(CDI_GPU_HLE 1)
+elseif(CDI_GPU_BACKEND STREQUAL "LLE")
+    set(CDI_GPU_HLE 0)
+else()
+    message(FATAL_ERROR "CDI_GPU_BACKEND must be LLE or HLE")
+endif()
+set_source_files_properties(src/cdi_frontend.c src/cdi_gpu.c PROPERTIES
+    COMPILE_DEFINITIONS "CDI_GPU_HLE=$<BOOL:$<TARGET_PROPERTY:CDI_NATIVE_GPU>>")
+
 # Generated C is dropped in by the recompiler and compiled in here. It
 # #includes cdi_runtime.h + game_extras.h from runner/include.
 #   - bios/generated/*.c     : the recompiled CD-RTOS system ROM (Phase 1, boots).
@@ -130,6 +142,9 @@ add_executable(CdiRuntime
     src/mcd212.c
     src/mcd212_video.c
     src/cdi_frontend.c
+    src/cdi_render_profile.c
+    src/cdi_raster_jobs.c
+    src/cdi_gpu.c
     src/player_config.c
     src/cdi_input.c
     src/cdi_host_time.c
@@ -198,6 +213,7 @@ set_property(SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/../bios/generated/cdrtos_dispat
 set_property(TARGET CdiRuntime PROPERTY CDI_NATIVE_SERVICE ${CDI_SERVICE_HLE})
 set_property(TARGET CdiRuntime PROPERTY CDI_NATIVE_STREAMING ${CDI_STREAMING_HLE})
 set_property(TARGET CdiRuntime PROPERTY CDI_NATIVE_BOARD ${CDI_BOARD_HLE})
+set_property(TARGET CdiRuntime PROPERTY CDI_NATIVE_GPU ${CDI_GPU_HLE})
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../bios/generated/bios_identity.h")
     target_compile_definitions(CdiRuntime PRIVATE CDI_BIOS_IDENTITY_BUILD=1)
 endif()
@@ -233,7 +249,7 @@ if(EXISTS "${CDI_GAME_GENERATED_DIR}/module_sources.cmake")
 endif()
 set(PROVENANCE_INPUTS "${CMAKE_CURRENT_BINARY_DIR}/runtime-provenance-inputs.cmake")
 file(GENERATE OUTPUT "${PROVENANCE_INPUTS}" CONTENT
-    "set(PROVENANCE_FILES [==[${PROVENANCE_FILES}]==])\nset(PROVENANCE_COMPILER [==[${CMAKE_C_COMPILER};${CMAKE_C_COMPILER_ID};${CMAKE_C_COMPILER_VERSION}]==])\nset(PROVENANCE_OPTIONS [==[${CMAKE_BUILD_TYPE};${CMAKE_C_FLAGS};${CMAKE_C_FLAGS_RELEASE};scanout=${CDI_VIDEO_BACKEND};loader=${CDI_LOADER_BACKEND};drawing=${CDI_DRAWING_BACKEND};memory=${CDI_MEMORY_BACKEND};service=${CDI_SERVICE_BACKEND};streaming=${CDI_STREAMING_BACKEND};board=${CDI_BOARD_BACKEND};$<TARGET_PROPERTY:CdiRuntime,COMPILE_DEFINITIONS>;$<TARGET_PROPERTY:CdiRuntime,COMPILE_OPTIONS>]==])\n")
+    "set(PROVENANCE_FILES [==[${PROVENANCE_FILES}]==])\nset(PROVENANCE_COMPILER [==[${CMAKE_C_COMPILER};${CMAKE_C_COMPILER_ID};${CMAKE_C_COMPILER_VERSION}]==])\nset(PROVENANCE_OPTIONS [==[${CMAKE_BUILD_TYPE};${CMAKE_C_FLAGS};${CMAKE_C_FLAGS_RELEASE};scanout=${CDI_VIDEO_BACKEND};loader=${CDI_LOADER_BACKEND};drawing=${CDI_DRAWING_BACKEND};memory=${CDI_MEMORY_BACKEND};service=${CDI_SERVICE_BACKEND};streaming=${CDI_STREAMING_BACKEND};board=${CDI_BOARD_BACKEND};gpu=${CDI_GPU_BACKEND};$<TARGET_PROPERTY:CdiRuntime,COMPILE_DEFINITIONS>;$<TARGET_PROPERTY:CdiRuntime,COMPILE_OPTIONS>]==])\n")
 set_property(TARGET CdiRuntime APPEND PROPERTY LINK_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/../tools/build_provenance.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt")
@@ -298,6 +314,7 @@ if(BUILD_TESTING)
     add_executable(Mcd212VideoTest
         tests/mcd212_video_test.c
         src/mcd212_video.c
+        src/cdi_raster_jobs.c
     )
     target_include_directories(Mcd212VideoTest PRIVATE include)
     set_property(TARGET Mcd212VideoTest PROPERTY CDI_NATIVE_SCANOUT ${CDI_VIDEO_HLE})
@@ -306,15 +323,16 @@ if(BUILD_TESTING)
     # Link independent reference and native machines into one differential
     # test. Production never executes the reference alongside an HLE job.
     add_library(Mcd212VideoReference OBJECT src/mcd212_video.c)
+    target_compile_definitions(Mcd212VideoReference PRIVATE CDI_RASTER_REFERENCE=1)
     target_include_directories(Mcd212VideoReference PRIVATE include)
-    foreach(API reset control begin_frame draw_line end_frame copy_frame copy_changed_frame
+    foreach(API reset capture_raster control begin_frame draw_line end_frame copy_frame copy_changed_frame
                 frame_hash debug_cursor debug_state debug_clut debug_plane_row
                 debug_verdict_row)
         target_compile_definitions(Mcd212VideoReference PRIVATE
             mcd212_video_${API}=lle_mcd212_video_${API})
     endforeach()
     add_executable(Mcd212VideoParityTest tests/mcd212_video_parity_test.c
-        src/mcd212_video.c $<TARGET_OBJECTS:Mcd212VideoReference>)
+        src/mcd212_video.c src/cdi_raster_jobs.c $<TARGET_OBJECTS:Mcd212VideoReference>)
     target_include_directories(Mcd212VideoParityTest PRIVATE include)
     set_property(TARGET Mcd212VideoParityTest PROPERTY CDI_NATIVE_SCANOUT 1)
     add_test(NAME mcd212_scanout_contract COMMAND Mcd212VideoParityTest)

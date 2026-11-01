@@ -14,6 +14,7 @@
 #define MCD212_VIDEO_MAX_HEIGHT 560u
 
 void mcd212_video_reset(void);
+void mcd212_video_capture_raster(int enabled);
 
 /* Apply one non-flow-control ICA/DCA word to the persistent display state. */
 void mcd212_video_control(int plane, uint32_t instruction);

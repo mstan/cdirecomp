@@ -9,6 +9,18 @@
  */
 #include "mcd212_video.h"
 #include "cdi_runtime.h"
+#include "cdi_raster_jobs.h"
+#if defined(CDI_RASTER_REFERENCE)
+/* The independently linked scanout reference has no presentation consumer. */
+#define g_cdi_raster_capture_enabled 0
+#define cdi_raster_reset() ((void)0)
+#define cdi_raster_capture(value) 0
+#define cdi_raster_begin(...) ((void)0)
+#define cdi_raster_finish() ((void)0)
+#define cdi_raster_overlay(...) ((void)0)
+#define cdi_raster_span(...) ((void)0)
+#define cdi_raster_publish(...) ((void)0)
+#endif
 
 #include <stdatomic.h>
 #include <stdio.h>
@@ -174,6 +186,7 @@ static uint8_t plane_b_coding(unsigned code) {
 }
 
 void mcd212_video_reset(void) {
+    cdi_raster_reset();
     unsigned factor;
     memset(&video, 0, sizeof video);
 #if CDI_VIDEO_HLE
@@ -200,6 +213,16 @@ void mcd212_video_reset(void) {
     atomic_store_explicit(&video.content_generation, 0, memory_order_relaxed);
     video.width = video.published_width = 768;
     video.height = video.published_height = 280;
+}
+
+void mcd212_video_capture_raster(int enabled) {
+    if(cdi_raster_capture(enabled) && enabled) {
+#if CDI_VIDEO_HLE
+        /* Capture source jobs once even when the native line was reusable
+         * before this display-only consumer became active. */
+        memset(completed_lines,0,sizeof completed_lines);
+#endif
+    }
 }
 
 static void configure_file_type(int plane, uint32_t instruction) {
@@ -668,6 +691,7 @@ static void draw_cursor(uint32_t *line_pixels, uint16_t line) {
         unsigned repeat;
         if (!(pattern & (0x8000u >> row))) continue;
         first_x = cursor->x + row * scale;
+        if(g_cdi_raster_capture_enabled)cdi_raster_overlay(first_x,first_x+scale,color);
         for (repeat = 0; repeat < scale && first_x + repeat < video.width; repeat++)
             line_pixels[first_x + repeat] = color;
     }
@@ -731,6 +755,14 @@ static void compose_line(uint16_t line) {
         } else {
             destination[x] = backdrop;
             verdict[x] |= 0x10u;
+        }
+        if(g_cdi_raster_capture_enabled) {
+            if(verdict[x]&0x20u)cdi_raster_span(x,x+1,raw_a,raw_b,2u|(matte.factor[0]<<2)|(matte.factor[1]<<8));
+            else if(verdict[x]&0x10u)cdi_raster_span(x,x+1,backdrop,0,0);
+            else {
+                int chosen=(verdict[x]&4u)?r->plane_b_front:!r->plane_b_front;
+                cdi_raster_span(x,x+1,chosen?raw_b:raw_a,0,1u|(matte.factor[chosen]<<2));
+            }
         }
     }
     draw_cursor(destination, line);
@@ -847,6 +879,14 @@ static void scanout_span(uint16_t line, unsigned x, unsigned end,
         pixel = yrgb_color(r->backdrop);
         verdict |= 0x10u;
     }
+    if(g_cdi_raster_capture_enabled) {
+        if(verdict&0x20u)cdi_raster_span(x,end,raw_a,raw_b,2u|(matte->factor[0]<<2)|(matte->factor[1]<<8));
+        else if(verdict&0x10u)cdi_raster_span(x,end,pixel,0,0);
+        else {
+            int chosen=(verdict&4u)?r->plane_b_front:!r->plane_b_front;
+            cdi_raster_span(x,end,chosen?raw_b:raw_a,0,1u|(matte->factor[chosen]<<2));
+        }
+    }
     for (; x < end; x++) {
         destination[x] = pixel;
         snap_a[x] = raw_a | 0xFF000000u;
@@ -956,11 +996,13 @@ void mcd212_video_draw_line(uint32_t address_a, uint32_t address_b,
                             uint16_t source_width_b,
                             uint16_t *bytes_a, uint16_t *bytes_b) {
     video.scanout_jobs++;
+    if(g_cdi_raster_capture_enabled && line<video.height)cdi_raster_begin(line,video.width,video.height);
 #if CDI_VIDEO_HLE
     /* Out-of-range lines still have reference decode/consumption semantics. */
     if (line < video.height) {
         reusable_line(address_a, address_b, line, source_width_a, source_width_b,
                       bytes_a, bytes_b);
+        if(g_cdi_raster_capture_enabled)cdi_raster_finish();
         return;
     }
 #endif
@@ -973,6 +1015,7 @@ void mcd212_video_draw_line(uint32_t address_a, uint32_t address_b,
     apply_pixel_hold(PLANE_A);
     apply_pixel_hold(PLANE_B);
     compose_line(line);
+    if(g_cdi_raster_capture_enabled)cdi_raster_finish();
     if (bytes_a) *bytes_a = consumed_a;
     if (bytes_b) *bytes_b = consumed_b;
 }
@@ -990,6 +1033,8 @@ static uint64_t hash_frame_bytes(const uint32_t *pixels, size_t byte_count) {
 
 void mcd212_video_end_frame(void) {
     int completed = video.drawing_buffer;
+    if(g_cdi_raster_capture_enabled)cdi_raster_publish(video.frame[completed],video.width,video.height,
+        atomic_load_explicit(&video.generation,memory_order_relaxed)+1u);
 #if CDI_VIDEO_HLE
     int previous = atomic_load_explicit(&video.published_buffer, memory_order_relaxed);
     size_t byte_count = (size_t)video.width * video.height * sizeof(uint32_t);

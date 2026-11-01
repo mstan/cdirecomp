@@ -1,5 +1,5 @@
 """Matched real module loading, ending at its verified native execution entry."""
-import argparse,copy,hashlib,json,os,pathlib,platform,shutil,socket,statistics,subprocess,time
+import argparse,base64,copy,hashlib,json,os,pathlib,platform,shutil,socket,statistics,subprocess,time
 import psutil
 from bios_options_smoke import request
 from build_provenance import verify
@@ -37,16 +37,67 @@ class CycleCounter:
     def close(self):
         if self.handle is not None:self.api.CloseHandle(self.handle);self.handle=None
 
+def gpu_memory(pid):
+    """One endpoint sample of actual WDDM process allocations, outside timing."""
+    if os.name!='nt':return None
+    script=r"""$s=@((Get-Counter '\GPU Process Memory(*)\Dedicated Usage','\GPU Process Memory(*)\Shared Usage' -ErrorAction SilentlyContinue).CounterSamples | Where-Object {$_.InstanceName -like 'pid_PID_*'});
+if($s.Count -lt 2 -or @($s | Where-Object {$_.Status -gt 1}).Count){throw 'Missing valid process GPU memory counters'}
+@{source='Windows GPU Process Memory';dedicated_bytes=[int64](($s | Where-Object {$_.Path -like '*\Dedicated Usage'} | Measure-Object CookedValue -Sum).Sum);shared_bytes=[int64](($s | Where-Object {$_.Path -like '*\Shared Usage'} | Measure-Object CookedValue -Sum).Sum);counter_samples=$s.Count} | ConvertTo-Json -Compress
+""".replace('PID',str(int(pid)))
+    encoded=base64.b64encode(script.encode('utf-16le')).decode()
+    output=subprocess.check_output(['C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe',
+        '-NoProfile','-OutputFormat','Text','-EncodedCommand',encoded],text=True,stderr=subprocess.PIPE,timeout=20,
+        creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
+    return json.loads(output)
+
+def exercise_window(pid):
+    """Resize/expose this runtime offscreen without activating any window."""
+    import ctypes
+    from ctypes import wintypes as w
+    user=ctypes.WinDLL('user32',use_last_error=True)
+    user.GetForegroundWindow.restype=w.HWND
+    user.GetWindowThreadProcessId.argtypes=[w.HWND,ctypes.POINTER(w.DWORD)]
+    user.GetClassNameW.argtypes=[w.HWND,w.LPWSTR,ctypes.c_int]
+    user.GetWindowRect.argtypes=[w.HWND,ctypes.POINTER(w.RECT)]
+    user.GetClientRect.argtypes=[w.HWND,ctypes.POINTER(w.RECT)]
+    user.SetWindowPos.argtypes=[w.HWND,w.HWND,ctypes.c_int,ctypes.c_int,ctypes.c_int,ctypes.c_int,w.UINT]
+    user.ShowWindow.argtypes=[w.HWND,ctypes.c_int]
+    user.RedrawWindow.argtypes=[w.HWND,ctypes.c_void_p,ctypes.c_void_p,w.UINT]
+    callback_type=ctypes.WINFUNCTYPE(w.BOOL,w.HWND,w.LPARAM)
+    user.EnumWindows.argtypes=[callback_type,w.LPARAM]
+    windows=[]
+    @callback_type
+    def collect(hwnd,unused):
+        owner=w.DWORD();user.GetWindowThreadProcessId(hwnd,ctypes.byref(owner))
+        if owner.value==pid:
+            name=ctypes.create_unicode_buffer(128);user.GetClassNameW(hwnd,name,len(name))
+            if name.value=='SDL_app':windows.append(hwnd)
+        return True
+    user.EnumWindows(collect,0);assert len(windows)==1,windows
+    hwnd=windows[0];foreground=user.GetForegroundWindow();before=w.RECT();after=w.RECT();client=w.RECT()
+    assert user.GetWindowRect(hwnd,ctypes.byref(before))
+    width=2*(before.right-before.left)+1;height=2*(before.bottom-before.top)+1
+    x=user.GetSystemMetrics(76)-width-128;y=user.GetSystemMetrics(77)-height-128
+    assert user.SetWindowPos(hwnd,None,x,y,width,height,0x14) # NOACTIVATE | NOZORDER
+    user.ShowWindow(hwnd,4) # SHOWNOACTIVATE; the complete window is offscreen
+    assert user.RedrawWindow(hwnd,None,None,0x105) # INVALIDATE | ERASE | UPDATENOW
+    assert user.GetForegroundWindow()==foreground,'Owner foreground changed'
+    assert user.GetWindowRect(hwnd,ctypes.byref(after)) and user.GetClientRect(hwnd,ctypes.byref(client))
+    return dict(kind='real_Win32_resize_expose_offscreen',foreground_preserved=True,
+        outer_before=[before.right-before.left,before.bottom-before.top],
+        outer_after=[after.right-after.left,after.bottom-after.top],client_after=[client.right,client.bottom])
+
 def run(exe,args,label):
     out=args.output/label;out.mkdir()
     env=os.environ.copy();env.update(CDI_PACE_SPEED=str(args.pace_speed),SDL_AUDIODRIVER='dummy',
         CDI_PLAYER_CONFIG_PATH=str(args.output/'player.cfg'),TEMP=str(args.output),TMP=str(args.output))
     if args.presentation=='dummy':env.update(SDL_VIDEODRIVER='dummy',SDL_RENDER_DRIVER='software')
+    if args.presentation=='hardware':env.update(SDL_RENDER_DRIVER='opengl',CDI_WINDOW_HIDDEN='1',CDI_GPU_PROFILE='1')
     command=[str(exe.resolve()),str(args.rom.resolve()),'--disc',str(args.disc.resolve()),
         '--fault-hold','--port',str(args.port),'--input-script',SCRIPT]
     if args.presentation=='headless':command.append('--headless')
     if args.end_frame and not args.live_frame_stop:command+=['--stop-frame',str(args.end_frame)]
-    samples=[];started=time.monotonic();host_before=psutil.cpu_times();armed=False
+    samples=[];started=time.monotonic();host_before=psutil.cpu_times();armed=False;window_event=None
     with (out/'stdout.log').open('w') as stdout,(out/'stderr.log').open('w') as stderr:
         proc=subprocess.Popen(command,env=env,stdout=stdout,stderr=stderr,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
         cycles=None
@@ -54,13 +105,18 @@ def run(exe,args,label):
             process=psutil.Process(proc.pid)
             cycles=CycleCounter(proc.pid)
             if args.cpu_core is not None:process.cpu_affinity([args.cpu_core])
-            while time.monotonic()-started<120:
+            collection_limit=max(120,(args.end_frame or 0)/(50*args.pace_speed)+30)
+            while time.monotonic()-started<collection_limit:
                 if proc.poll() is not None:raise RuntimeError(f'{label}: runtime exited')
                 try:s=request(args.port,{'cmd':'status'},timeout=1)
                 except OSError:time.sleep(.02);continue
                 if args.end_frame and args.live_frame_stop and not armed:
                     assert s['frame']<args.end_frame,'Frame stop armed too late'
                     arm=request(args.port,{'cmd':'stop_frame','frame':args.end_frame});assert arm['ok'];armed=True
+                if args.window_events and window_event is None and s['frame']>=900:
+                    before=request(args.port,{'cmd':'render_state'})['jobs']
+                    window_event=exercise_window(proc.pid);window_event['before']=before
+                    (out/'window-events.json').write_text(json.dumps(window_event,indent=2))
                 if not args.end_frame and not armed and s['frame']>=args.arm_frame:
                     arm=request(args.port,{'cmd':'stop_pc','pc':args.stop_pc});assert arm['ok'];armed=True
                 cpu=process.cpu_times();samples.append({'wall_s':time.monotonic()-started,
@@ -72,6 +128,13 @@ def run(exe,args,label):
             assert s['held'] and (s['frame']==args.end_frame if args.end_frame else s['pc']==args.stop_pc),s
             if args.expect_end_frame is not None:assert s['frame']==args.expect_end_frame,s
             host_after=psutil.cpu_times()
+            gpu_memory_sample=None
+            if args.presentation=='hardware':
+                try:gpu_memory_sample=gpu_memory(proc.pid)
+                except (subprocess.SubprocessError,ValueError) as error:
+                    # Retain timing/correctness even if this separate resource
+                    # sample fails; an error does not qualify memory headroom.
+                    gpu_memory_sample={'error':str(error),'source':'Windows GPU Process Memory'}
             state={k:request(args.port,{'cmd':k}) for k in ('status','get_registers','ciap_state',
                 'video_frame','video_state','audio_state','native_state','native_events','ikat_events')}
             state['loader_jobs']=request(args.port,{'cmd':'loader_jobs'})
@@ -80,6 +143,16 @@ def run(exe,args,label):
             state['service_jobs']=request(args.port,{'cmd':'service_jobs'})
             state['streaming_jobs']=request(args.port,{'cmd':'streaming_jobs'})
             state['board_jobs']=request(args.port,{'cmd':'board_jobs'})
+            state['render_state']=request(args.port,{'cmd':'render_state'})
+            if args.presentation=='hardware':
+                render=state['render_state']
+                assert render['enabled'] and render['gpu_timestamps'] and all(render['gpu_counts']),render
+                assert not any(name in render['renderer'].lower() for name in ('llvmpipe','software','swiftshader')),render
+                assert not render['native_mismatches'],render
+                assert not render.get('jobs',{}).get('fallbacks',0),render
+                if int(env.get('CDI_GPU_READBACK_STRIDE','60')):assert render['native_readbacks']>0,render
+                if args.window_events:
+                    gpu=render['jobs'];assert window_event and (gpu['output_width']>window_event['before']['output_width'] or gpu['output_height']>window_event['before']['output_height']),gpu
             if args.expect_crc_error:
                 assert state['get_registers']['d1']&0xFFFF==0xE8 and state['get_registers']['sr']&1,state['get_registers']
             frames=[];cursor=1
@@ -115,9 +188,11 @@ def run(exe,args,label):
                 'peak_rss_bytes':max(v['rss_bytes'] for v in samples),'start_bracket':start_bracket,
                 'start_origin':start_origin,'first_sample':samples[0],'final_sample':samples[-1],
                 'host_cpu_before':host_before._asdict(),'host_cpu_after':host_after._asdict(),
+                'gpu_memory':gpu_memory_sample,
+                'window_event':window_event,
                 'loader_jobs':state['loader_jobs'],'drawing_jobs':state['drawing_jobs'],'memory_jobs':state['memory_jobs'],
                 'service_jobs':state['service_jobs'],'streaming_jobs':state['streaming_jobs'],
-                'board_jobs':state['board_jobs']}
+                'board_jobs':state['board_jobs'],'render_state':state['render_state']}
             (out/'result.json').write_text(json.dumps(result,indent=2));print(json.dumps(result),flush=True)
             return result,state
         finally:
@@ -130,10 +205,11 @@ def semantic(state,presentation='headless'):
     d.pop('service_jobs',None)
     d.pop('streaming_jobs',None)
     d.pop('board_jobs',None)
+    d.pop('render_state',None)
     for key in ('insns','blocks','interp','irq_first_seq'):d['status'].pop(key,None)
     for key in ('scanout_jobs','fused_jobs','reused_jobs'):d['video_state'].pop(key,None)
     d['native_state'].pop('dispatches',None)
-    if presentation=='dummy':
+    if presentation in ('dummy','hardware'):
         # Host-time SDL queue consumption is not guest transport or PCM output.
         for key in ('queued_frames','dropped_frames'):d['audio_state'].pop(key,None)
     for name in ('native_events','ikat_events'):
@@ -154,12 +230,14 @@ def main():
     p.add_argument('--cpu-core',type=int,help='Matched process-local affinity; does not change other applications')
     p.add_argument('--pace-speed',type=float,default=32,help='Emulated pacing multiplier, identical for both builds')
     p.add_argument('--expect-end-frame',type=int,help='Reject a repeated stop PC reached at the wrong frame')
-    p.add_argument('--presentation',choices=('headless','dummy'),default='headless')
-    p.add_argument('--native-job',choices=('loader','drawing','memory','service','streaming','board'),default='loader')
+    p.add_argument('--presentation',choices=('headless','dummy','hardware'),default='headless')
+    p.add_argument('--window-events',action='store_true',help='Exercise this runtime window offscreen with real resize/expose and preserve foreground')
+    p.add_argument('--native-job',choices=('loader','drawing','memory','service','streaming','board','gpu'),default='loader')
     args=p.parse_args()
     assert args.start_frame>=0,'Start frame must be zero (process creation) or positive'
     assert args.pace_speed>0,'Pacing multiplier must be positive'
     assert not args.live_frame_stop or args.end_frame,'Live frame stop requires --end-frame'
+    assert not args.window_events or (os.name=='nt' and args.presentation=='hardware'),'Window event check requires Windows hardware frontend'
     with socket.socket() as probe:assert probe.connect_ex(('127.0.0.1',args.port))!=0
     args.output.mkdir(parents=True,exist_ok=False)
     harness=args.output/'harness';harness.mkdir()
@@ -176,10 +254,12 @@ def main():
         'machine':{'platform':platform.platform(),'processor':platform.processor(),
                    'processor_identifier':os.environ.get('PROCESSOR_IDENTIFIER'),'logical_cpus':psutil.cpu_count()},
         'settings':{'presentation':args.presentation,'audio':'dummy','pace_speed':args.pace_speed,
+                    'window_events':args.window_events,
                     'rtc_sync_host_on_startup':False,'start_frame':args.start_frame,
                     'actual_pacing':not args.end_frame or args.live_frame_stop,
-                    'actual_frontend':args.presentation=='dummy' and (not args.end_frame or args.live_frame_stop),
+                    'actual_frontend':args.presentation in ('dummy','hardware') and (not args.end_frame or args.live_frame_stop),
                     'frame_stop_control':'tcp_live' if args.live_frame_stop else 'startup_investigation' if args.end_frame else None},
+        'render_environment':{key:os.environ.get(key) for key in ('CDI_GPU_READBACK_STRIDE','CDI_INTERNAL_SCALE')},
         'harness':[identity(x) for x in sorted(harness.iterdir())],
         'source':subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),
         'source_diff':subprocess.check_output(['git','diff'],text=True),
@@ -192,8 +272,12 @@ def main():
         for name in order:
             result,state=run(getattr(args,name),args,f'{prefix}-{name}');states[name]=state
             if name=='candidate' and not args.reference_control:
-                job,key=({'drawing':('drawing_jobs','jobs'),'memory':('memory_jobs','jobs'),'service':('service_jobs','jobs'),'streaming':('streaming_jobs','jobs'),'board':('board_jobs','jobs')}.get(args.native_job,('loader_jobs','words')))
-                assert state[job].get(key,0)>0,'Native job was not exercised'
+                if args.native_job=='gpu':
+                    gpu=state['render_state']['jobs']
+                    assert gpu.get('available') and not gpu.get('failed') and gpu.get('frames',0)>0,gpu
+                else:
+                    job,key=({'drawing':('drawing_jobs','jobs'),'memory':('memory_jobs','jobs'),'service':('service_jobs','jobs'),'streaming':('streaming_jobs','jobs'),'board':('board_jobs','jobs')}.get(args.native_job,('loader_jobs','words')))
+                    assert state[job].get(key,0)>0,'Native job was not exercised'
             if pair:results.append(result)
         left,right=semantic(states['reference'],args.presentation),semantic(states['candidate'],args.presentation)
         differences=[key for key in left if left[key]!=right[key]]
@@ -216,6 +300,6 @@ def main():
         'results':results,'contracts':contracts,'paired_cpu_savings_percent':savings,
         'paired_process_cycle_savings_percent':cycle_savings,
         'median_process_cycle_savings_percent':statistics.median(cycle_savings) if cycle_savings else None,
-        'median_cpu_savings_percent':statistics.median(savings)}
+             'median_cpu_savings_percent':statistics.median(savings) if savings else None}
     (args.output/'campaign-evidence.json').write_text(json.dumps(summary,indent=2));print(json.dumps(summary,indent=2))
 if __name__=='__main__':main()

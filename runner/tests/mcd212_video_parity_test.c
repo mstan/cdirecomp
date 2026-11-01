@@ -3,10 +3,22 @@
  * Randomized legal controls supplement the hardware-derived pixel fixtures. */
 #include "mcd212_video.h"
 #include "cdi_runtime.h"
+#include "cdi_raster_jobs.h"
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef CDI_RASTER_GPU_TEST
+#define SDL_MAIN_HANDLED
+#include <SDL.h>
+#include <SDL_opengl.h>
+#include "cdi_gpu.h"
+#include "cdi_render_profile.h"
+static SDL_Window *gpu_window;
+static SDL_Renderer *gpu_renderer;
+static SDL_Texture *gpu_activation;
+static unsigned gpu_cases;
+#endif
 
 void lle_mcd212_video_reset(void);
 void lle_mcd212_video_control(int, uint32_t);
@@ -33,6 +45,9 @@ static uint8_t verdict[2][MCD212_VIDEO_MAX_WIDTH];
 static uint32_t random_state = 0x21268070u;
 static unsigned case_id, line_id, jobs, fused, reused;
 static uint64_t previous_fused, previous_reused;
+static uint32_t raster_pixels[MCD212_VIDEO_MAX_WIDTH*MCD212_VIDEO_MAX_HEIGHT];
+static const CdiRasterFrame *retained;
+static uint32_t retained_pixels[MCD212_VIDEO_MAX_WIDTH*MCD212_VIDEO_MAX_HEIGHT];
 
 static uint32_t random_word(void) {
     random_state ^= random_state << 13;
@@ -86,6 +101,48 @@ static void compare_frame(void) {
     CHECK(count == lle_mcd212_video_copy_frame(pixels[1], sizeof pixels[1] / 4, &w[1], &h[1], &gen[1]));
     CHECK(w[0] == w[1] && h[0] == h[1] && gen[0] == gen[1]);
     CHECK(!memcmp(pixels[0], pixels[1], count * sizeof(uint32_t)));
+    const CdiRasterFrame *frame=cdi_raster_acquire();
+    CHECK(frame && frame->generation==gen[0] && frame->width==w[0] && frame->height==h[0]);
+    CHECK(cdi_raster_native(frame,raster_pixels,MCD212_VIDEO_MAX_WIDTH*MCD212_VIDEO_MAX_HEIGHT));
+    CHECK(!memcmp(raster_pixels,pixels[1],count*sizeof(uint32_t)));
+#ifdef CDI_RASTER_GPU_TEST
+    if(case_id<12) {
+        static const unsigned scales[]={1,4,16,32,64};
+        if(gpu_cases==4)SDL_SetWindowSize(gpu_window,1001,733);
+        if(gpu_cases==32)SDL_SetWindowSize(gpu_window,768,576);
+        SDL_PumpEvents();
+        cdi_render_profile_frame();
+        SDL_Texture *output=cdi_gpu_render(frame,scales[gpu_cases%5],pixels[1]);CHECK(output);
+        int output_w=0,output_h=0;CHECK(!SDL_QueryTexture(output,NULL,NULL,&output_w,&output_h));
+        CHECK(output_w%frame->width==0 && output_h%frame->height==0);
+        CHECK(!SDL_SetRenderTarget(gpu_renderer,output));
+        /* Also read the actual display resolve around tile edges after real
+         * hidden-window resizes. Only fixed one-pixel host readbacks exist. */
+        static const unsigned edge_x[]={0,255,256,511,512,767},edge_y[]={0,15,16,31};
+        for(unsigned iy=0;iy<4;iy++)for(unsigned ix=0;ix<6;ix++) {
+            unsigned x=edge_x[ix]<frame->width?edge_x[ix]:frame->width-1u;
+            unsigned y=edge_y[iy]<frame->height?edge_y[iy]:frame->height-1u;
+            SDL_Rect rectangle={(int)((2u*x+1u)*(unsigned)output_w/(2u*frame->width)),(int)((2u*y+1u)*(unsigned)output_h/(2u*frame->height)),1,1};
+            uint32_t pixel=0;CHECK(!SDL_RenderReadPixels(gpu_renderer,&rectangle,SDL_PIXELFORMAT_ARGB8888,&pixel,4));
+            if(pixel!=pixels[1][(size_t)y*frame->width+x]) {
+                fprintf(stderr,"display sample scale=%u native=%ux%u output=%dx%d at=%u,%u rect=%d,%d got=%08x expected=%08x\n",scales[gpu_cases%5],frame->width,frame->height,output_w,output_h,x,y,rectangle.x,rectangle.y,pixel,pixels[1][(size_t)y*frame->width+x]);
+                if(output_w==frame->width && output_h==frame->height) {
+                    CHECK(!SDL_RenderReadPixels(gpu_renderer,NULL,SDL_PIXELFORMAT_ARGB8888,raster_pixels,frame->width*4));
+                    fprintf(stderr,"full native read same=%d at=%08x mirrored=%08x\n",!memcmp(raster_pixels,pixels[1],(size_t)frame->width*frame->height*4),raster_pixels[(size_t)y*frame->width+x],raster_pixels[(size_t)(frame->height-1u-y)*frame->width+x]);
+                }
+            }
+            CHECK(pixel==pixels[1][(size_t)y*frame->width+x]);
+        }
+        CHECK(!SDL_SetRenderTarget(gpu_renderer,NULL));
+        cdi_render_profile_finish();gpu_cases++;
+    }
+#endif
+    if(retained) {
+        CHECK(cdi_raster_native(retained,raster_pixels,MCD212_VIDEO_MAX_WIDTH*MCD212_VIDEO_MAX_HEIGHT));
+        CHECK(!memcmp(raster_pixels,retained_pixels,(size_t)retained->width*retained->height*4));
+        cdi_raster_release(retained);
+    }
+    retained=frame;memcpy(retained_pixels,pixels[0],count*sizeof(uint32_t));
     CHECK(mcd212_video_frame_hash(NULL, NULL, NULL) == lle_mcd212_video_frame_hash(NULL, NULL, NULL));
     uint64_t next_content[2];
     uint32_t sent = mcd212_video_copy_changed_frame(delivered[0], sizeof delivered[0] / 4,
@@ -103,6 +160,13 @@ static void compare_frame(void) {
 }
 
 int main(void) {
+#ifdef CDI_RASTER_GPU_TEST
+    SDL_SetMainReady();CHECK(!SDL_Init(SDL_INIT_VIDEO));
+    gpu_window=SDL_CreateWindow("CD-i raster contract",0,0,768,576,SDL_WINDOW_HIDDEN);
+    CHECK(gpu_window);gpu_renderer=SDL_CreateRenderer(gpu_window,-1,SDL_RENDERER_ACCELERATED|SDL_RENDERER_TARGETTEXTURE);
+    CHECK(gpu_renderer);gpu_activation=SDL_CreateTexture(gpu_renderer,SDL_PIXELFORMAT_ARGB8888,SDL_TEXTUREACCESS_STREAMING,768,560);
+    CHECK(gpu_activation);CHECK(cdi_render_profile_init(gpu_renderer,gpu_activation));CHECK(cdi_gpu_init(gpu_renderer,gpu_activation));
+#endif
     const unsigned coding_a[] = {0, 1, 3, 4, 5, 11};
     const unsigned coding_b[] = {0, 1, 3, 5, 11};
     const unsigned widths[] = {1, 3, 160, 180, 360, 384};
@@ -111,6 +175,7 @@ int main(void) {
         unsigned interlaced = case_id & 1;
         mcd212_video_reset();
         lle_mcd212_video_reset();
+        mcd212_video_capture_raster(1);
         previous_fused = 0;
         previous_reused = 0;
         memset(content, 0, sizeof content);
@@ -159,9 +224,13 @@ int main(void) {
             /* Geometry and control changes between fields must invalidate
              * assumptions. Unwritten lines retain their previous contents. */
             unsigned field_base = field == 2 ? base / 2 + 1 : base;
-            mcd212_video_begin_frame((uint16_t)field_base, 6, interlaced);
-            lle_mcd212_video_begin_frame((uint16_t)field_base, 6, interlaced);
-            for (line_id = field & 1; line_id < 7; line_id += interlaced ? 2 : 1) {
+            unsigned base_height=6,draw_limit=7;
+#ifdef CDI_RASTER_GPU_TEST
+            if(case_id<12){base_height=18;draw_limit=base_height*(interlaced?2u:1u)+1u;}
+#endif
+            mcd212_video_begin_frame((uint16_t)field_base, (uint16_t)base_height, interlaced);
+            lle_mcd212_video_begin_frame((uint16_t)field_base, (uint16_t)base_height, interlaced);
+            for (line_id = field & 1; line_id < draw_limit; line_id += interlaced ? 2 : 1) {
                 for (unsigned i = 0; i < 2048; i++) {
                     g_ram0[0x1000 + i] = (uint8_t)random_word();
                     g_ram1[0x2000 + i] = (uint8_t)random_word();
@@ -181,8 +250,8 @@ int main(void) {
             if (field == 0) {
                 /* Reuse across publication, including interlaced retained
                  * rows. Registers and bytes are still authoritative. */
-                mcd212_video_begin_frame((uint16_t)field_base, 6, interlaced);
-                lle_mcd212_video_begin_frame((uint16_t)field_base, 6, interlaced);
+                mcd212_video_begin_frame((uint16_t)field_base, (uint16_t)base_height, interlaced);
+                lle_mcd212_video_begin_frame((uint16_t)field_base, (uint16_t)base_height, interlaced);
                 line_id = 2;
                 compare_line(0x1000, CDI_RAM1_BASE + 0x2000,
                              (uint16_t)field_base, (uint16_t)field_base);
@@ -190,8 +259,8 @@ int main(void) {
                 compare_line(0x1000, CDI_RAM1_BASE + 0x2000,
                              (uint16_t)field_base, (uint16_t)field_base);
                 compare_frame();
-                mcd212_video_begin_frame((uint16_t)field_base, 6, interlaced);
-                lle_mcd212_video_begin_frame((uint16_t)field_base, 6, interlaced);
+                mcd212_video_begin_frame((uint16_t)field_base, (uint16_t)base_height, interlaced);
+                lle_mcd212_video_begin_frame((uint16_t)field_base, (uint16_t)base_height, interlaced);
                 /* Rewriting CE changes restart-field bookkeeping. Only
                  * blinking cursor rows have a corresponding output input. */
                 control(0, cursor_control);
@@ -204,6 +273,28 @@ int main(void) {
     }
     CHECK(fused != 0);
     CHECK(reused != 0);
+    mcd212_video_reset();
+    CHECK(cdi_raster_native(retained,raster_pixels,MCD212_VIDEO_MAX_WIDTH*MCD212_VIDEO_MAX_HEIGHT));
+    CHECK(!memcmp(raster_pixels,retained_pixels,(size_t)retained->width*retained->height*4));
+#ifdef CDI_RASTER_GPU_TEST
+    char state[4096];cdi_render_profile_state(state,sizeof state);puts(state);
+    CHECK(strstr(state,"\"native_mismatches\":0"));
+    const char *reads=strstr(state,"\"native_readbacks\":");unsigned long long observed=0;
+    CHECK(reads && sscanf(reads,"\"native_readbacks\":%llu",&observed)==1 && observed==gpu_cases);
+    printf("hardware raster contract: PASS %u readbacks at1/4/16/32/64x\n",gpu_cases);
+    /* A real context-local GL failure must use the same native job and report
+     * actual density1, including when a higher-density output was cached. */
+    typedef void (APIENTRY *EnableFn)(GLenum);
+    EnableFn enable=(EnableFn)SDL_GL_GetProcAddress("glEnable");CHECK(enable);enable(0xffffffffu);
+    CHECK(!cdi_gpu_render(retained,64,NULL));
+    CHECK(cdi_raster_native(retained,raster_pixels,MCD212_VIDEO_MAX_WIDTH*MCD212_VIDEO_MAX_HEIGHT));
+    CHECK(!memcmp(raster_pixels,retained_pixels,(size_t)retained->width*retained->height*4));
+    cdi_gpu_state(state,sizeof state);puts(state);
+    CHECK(strstr(state,"\"fallback_active\":1") && strstr(state,"\"effective_scale\":1,") && strstr(state,"\"requested_scale\":64,"));
+    puts("hardware fault to portable native job: PASS");
+    cdi_render_profile_shutdown();cdi_gpu_reset(0);SDL_DestroyTexture(gpu_activation);SDL_DestroyRenderer(gpu_renderer);SDL_DestroyWindow(gpu_window);SDL_Quit();
+#endif
+    cdi_raster_release(retained);
     printf("scanout contract: PASS %u jobs, %u direct-source observations, %u reused jobs\n", jobs, fused, reused);
     return 0;
 }
