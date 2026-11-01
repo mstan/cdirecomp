@@ -2,7 +2,7 @@
   "schema": 1,
   "owner_issue": "beads-oatv",
   "campaign_issue": "beads-2wy8.1",
-  "current_candidate": 8,
+  "current_candidate": 9,
   "rule": "Prepared, built, tested and accepted are distinct. Preserve independent review and serial per-game measurement/disposition gates. Capacity refusal changes useful preparation, not acceptance.",
   "items": [
     {
@@ -13,7 +13,7 @@
       "implementation": "49c6b21b6fa2312cdb8ecbab6bef5866681b64d8",
       "consumer": "2123474ded8ab6d962c48ed2531f3e4afe797207",
       "ready_job": null,
-      "job_kind": "matched A/A, three A/B pairs and SDL software comparison",
+      "job_kind": "matched unpaced backend A/A and A/B; earlier nominal SDL comparison is backend-only",
       "budgets": {
         "cpu_cores": 1.25,
         "gpu_percent": 0,
@@ -103,9 +103,20 @@
     },
     {
       "candidate": 8,
-      "state": "tracked",
-      "implementation": "not_started",
-      "required_next": "Complete seek/channel/refill ownership and CD/XA native streaming job with DMA/IRQ/PCM continuity qualification."
+      "state": "accepted",
+      "implementation": "0a57417a026a37bff48aa0dca5ddf9d5be9e8f26",
+      "consumer": "0297c07aac8bf9a4b2b4f959ab8c02855bbc1fad",
+      "collector": "7458363a43e0fb71524bc6b7497a72eb2d7d2bb3",
+      "owner_issue": "beads-ttbl.6",
+      "acceptance": "independent_KEEP_CIAP_progression_neutral_inconclusive_CPU_with_live_cycle_caveat",
+      "evaluated_scope": "Unpaced backend boot/gameplay0..13000 and actual live pace1 SDL dummy0..1600; three real-disc seek/filter/refill/DMA/IRQ/drained-PCM timelines. No listening or hardware-driver claim.",
+      "raw_root": "G:/Temp/Codex/cdirecomp/streaming-job-20261101",
+      "required_next": "Stacked PRs open and unmerged; candidate 9 is next. Retain initial live negative pair and cycle caveats; no more candidate8 tuning/checks requested. Combined batch current-build save/load and owner merge handoff remain open.",
+      "pull_requests": [
+        "https://github.com/mstan/cdirecomp/pull/5",
+        "https://github.com/mstan/HotelMarioRecomp/pull/5"
+      ],
+      "remaining_areas": [9, 10, 11]
     },
     {
       "candidate": 9,
@@ -116,8 +127,8 @@
     {
       "candidate": 10,
       "state": "tracked",
-      "implementation": "copy_upload_portion_already_accepted",
-      "required_next": "Actual hardware backend profile, resize/expose and pixel readback; may consolidate with11 only after shared contracts pass."
+      "implementation": "copy_upload_implemented_backend_qualified_frontend_claim_withdrawn",
+      "required_next": "Incremental actual frontend and hardware backend qualification with resize/expose and pixel readback. Old nominal SDL startup-stop results are unpaced backend-only. May consolidate with11 only after shared contracts pass."
     },
     {
       "candidate": 11,

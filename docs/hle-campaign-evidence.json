@@ -3,7 +3,8 @@
   "owner_issue": "beads-oatv",
   "campaign_issue": "beads-2wy8.1",
   "consumer_issue": "beads-7t8h",
-  "status": "in_progress; selected candidate6 lookup/publication package independently KEEP with neutral/inconclusive Hotel Mario boot/scripted-gameplay performance; stacked PRs #4 open and unmerged; candidate8 next",
+  "status": "in_progress; selected candidate8 CIAP progression independently KEEP with neutral/inconclusive CPU time and retained live-cycle concerns; PR handoff then9; remaining9/10/11",
+  "frontend_scope_correction": "2026-11-01: old nominal SDL runs via scanout_hle_compare.py or loader_job_compare.py startup --stop-frame disabled both pacing/frontend. Their raw samples establish unpaced backend equality/performance only. Previous frontend/copy/upload/presentation qualification claims are withdrawn; raw history/backend qualification preserved. Old engine/consumer PR1/2 descriptions corrected; candidate10 remains open.",
   "engine_head": "85c869ee808b438905f2c1bc29a46d30f27647f8",
   "core_head": "3955bf3311f55e031836f70b5c1839e95b81f9cf",
   "game_head": "16353fc849ef8056af891e2c3b7d3e29ae3a41da",
@@ -18,7 +19,7 @@
     "limitations": [
       "One bounded early-gameplay workload; no extrapolation to other games/stages",
       "Windows process-CPU measurements under retained host load; not quiet-host latency",
-      "SDL dummy/software frontend; no actual hardware-driver performance claim",
+      "Historical nominal SDL runs used startup frame stops and are unpaced backend-only; no actual frontend/hardware-driver qualification from them",
       "Linux portable C LLE/HLE fixtures and compiler checks; no Linux built-game performance claim",
       "Existing full-campaign, audio-listening, visual-flicker, reliability and native-save-restoration gaps remain separate"
     ]
@@ -1022,16 +1023,62 @@
     {
       "candidate": 8,
       "name": "Complete CD/XA streaming jobs",
-      "status": "open_queued",
+      "status": "qualified_selected_CIAP_progression_independent_KEEP",
+      "owner_issue": "beads-ttbl.6",
+      "engine_implementation": "0a57417a026a37bff48aa0dca5ddf9d5be9e8f26",
+      "consumer_head": "0297c07aac8bf9a4b2b4f959ab8c02855bbc1fad",
+      "collector_correction": "7458363a43e0fb71524bc6b7497a72eb2d7d2bb3",
+      "engine_branch": "perf/native-streaming-jobs-20261101",
+      "consumer_branch": "perf/native-streaming-job-20261101",
+      "job": "Accumulate each already-truncated ns quantum only before the earliest CIAP AP/sector/audio-refill boundary; retain original event-quantum overshoot/order, materialize before MMIO/DMA/transport changes and held snapshots. Guest driver, real media, selection, ownership, decode, IRQ and PCM publication remain authoritative. StreamingBackend=LLE preserves original per-quantum progression.",
+      "raw_root": "G:/Temp/Codex/cdirecomp/streaming-job-20261101",
       "evidence": [
-        "combined-native-pairs/pair1-candidate/evidence.json",
-        "profile-residual.json",
-        "profile-final.json"
+        "G:/Temp/Codex/cdirecomp/streaming-job-20261101/actual-reference/summary.json",
+        "G:/Temp/Codex/cdirecomp/streaming-job-20261101/gameplay-control/campaign-evidence.json",
+        "G:/Temp/Codex/cdirecomp/streaming-job-20261101/gameplay-pairs/campaign-evidence.json",
+        "G:/Temp/Codex/cdirecomp/streaming-job-20261101/normal-stream-live/campaign-evidence.json",
+        "G:/Temp/Codex/cdirecomp/streaming-job-20261101/normal-control-live/campaign-evidence.json",
+        "G:/Temp/Codex/cdirecomp/streaming-job-20261101/normal-pairs-live/campaign-evidence.json"
       ],
-      "reason": "Existing native sector/decode jobs deliver2259 audio sectors and6181056 sample frames with exact PCM identity. Initial decode sampling is2/491; remaining CDIC cost includes guest-visible buffer pointer/IRQ advancement. Dummy/headless tests do not qualify listening or sustained normal-speed underrun behavior.",
-      "prerequisite": "A seek/channel-switch/refill workload with buffer ownership, DMA/IRQ/locator timelines and normal-speed PCM continuity. Integrate a proven event-span contract from9 before consolidating guest driver and device advancement.",
+      "binaries": {"lle_sha256": "e5b4c2476410334bf2a2ecd586c0531ce12d851112ae3735771697c944078303", "hle_sha256": "313316ad7da242ca4041a74037b92538e6b61ff28bfa792374cbe30d0d29fb72"},
+      "correctness": "Three real-disc production-reference timelines (720000 clock quanta) cover fractional/coarse overshoot, seek/file/channel/filter/pause/reset/refill/eject-remount, IRQ assertion/clear quantum, sampled CIAP/AP pointer, real DMA RAM and drained PCM. All equal, zero drops and drained PCM hash equals full decoded hash. Both existing CIAP selections and strict Linux HLE0/1 syntax pass; no Linux-runtime claim.",
+      "unpaced_backend": {
+        "scope": "Process creation through scripted gameplay frame13000; startup frame stop, actual_pacing=false, actual_frontend=false",
+        "cpu_reductions_percent": [13.20037986704653, -0.7009345794392496],
+        "cycle_reductions_percent": [13.540342573383102, 0.2699499387050497],
+        "AA_cpu_difference_percent": -2.079002079002068,
+        "AA_cycle_difference_percent": -1.9162532323646841,
+        "native_activity": {"jobs": 14794, "deferred_quanta": 134286224, "materializations": 149071},
+        "audio": {"sectors": 2259, "frames": 6181056, "pcm_fnv1a": "eef10d6fb4b83854"},
+        "classification": "neutral/inconclusive; favorable13% outlier did not repeat; not a proven speedup"
+      },
+      "live_frontend": {
+        "scope": "Process creation through frame1600, pace1, SDL dummy video/software and dummy audio, existing TCP stop_frame after startup; actual_pacing=true, actual_frontend=true",
+        "cpu_reductions_percent": [-2.238805970149249, 1.5873015873015928],
+        "cycle_reductions_percent": [-8.367280313153746, 3.808919735990046],
+        "AA_cpu_difference_percent": 14.965986394557829,
+        "AA_cycle_difference_percent": 5.920047126448614,
+        "initial_live_cpu_reduction_percent": -10.661764705882359,
+        "initial_live_cycle_reduction_percent": -13.994154632590238,
+        "native_activity": {"jobs": 647, "deferred_quanta": 5175028, "materializations": 6794},
+        "audio": {"sectors": 124, "frames": 249984, "pcm_fnv1a": "6b99347f145a0030", "queued_frames": 0, "dropped_frames": 0},
+        "classification": "CPU neutral/inconclusive with no reproducible CPU regression; cycle cost remains mixed/order-sensitive. Negative8.37% cycle pair exceeds the single5.92% control difference; reversed pair is positive. Preserve initial negative live pair; do not claim all cycle results are within control variation."
+      },
+      "settings": {"host": "DESKTOP-HN15M1H", "platform": "Windows", "compiler": "MinGW GCC15.2 Release-O3", "cpu_affinity": [15], "rtc_sync_host_on_startup": false, "other_backends": "scanout/loader/drawing/memory/service=HLE on both sides; only streaming differs"},
+      "contracts": "Every unpaced and actual-live warm/control/A/B full RAM/register/device/every-frame/decoded-PCM contract equal through its exact endpoint; live retained PCM queue drains with zero drops.",
+      "historical_nominal_live": "normal-stream is preserved as unpaced backend-only: startup --stop-frame disabled pacing/frontend despite pace1/dummy environment. It provides no frontend/listening claim; its host queue drops do not diagnose the actual frontend. evaluate-prelaunch-failed artifacts started no runtime.",
+      "independent_review": {"verdict": "KEEP", "date": "2026-11-01", "reviewer": "parent-arranged independent reviewer", "scope": "selected CIAP progression; neutral/inconclusive CPU time with explicit live cycle caveats"},
+      "branch_pr_status": "stacked_PRs_open_unmerged",
+      "pull_requests": [
+        "https://github.com/mstan/cdirecomp/pull/5",
+        "https://github.com/mstan/HotelMarioRecomp/pull/5"
+      ],
+      "publication_engine_head": "bb40494ac1871a995a779e8a6d02e303aa95fe93",
+      "reason": "Complete CIAP progression removes repeated no-event AP-pointer/clock publication across actual sector/audio/refill ownership boundaries while preserving authoritative state and the faithful backend. Independent KEEP under neutral-per-game policy, not a speedup claim.",
+      "prerequisite": null,
       "prior_deferral_rejected": true,
-      "work_remaining": "A seek/channel-switch/refill workload with buffer ownership, DMA/IRQ/locator timelines and normal-speed PCM continuity. Integrate a proven event-span contract from9 before consolidating guest driver and device advancement."
+      "work_remaining": "Stacked PR handoff; whole-board9, incremental frontend/hardware10, GPU11 and separate listening/current-build save-load/owner merge handoff remain open.",
+      "retained_storage": "All task-root frozen binaries, fixture executables, raw failures/results and sidecars retained; current C build/generated and all shared immutable input snapshots remain required. Removed only35292 bytes of disposable renamed product-main link objects and empty temp directory after dependency audit; no source/immutable input deletion."
     },
     {
       "candidate": 9,
@@ -1054,14 +1101,14 @@
     {
       "candidate": 10,
       "name": "Frame to host presentation",
-      "status": "consolidated",
+      "status": "open_queued_frontend_and_hardware_qualification",
       "job": "Exact content publication skips unchanged frontend copy/upload while retaining field presentation/redraw",
       "evidence": [
         "frame-package-sdl",
         "final-combined-sdl"
       ],
-      "deferred_extension": "Hardware-driver presentation cost",
-      "prerequisite": "A matched actual hardware-window/backend profile with resize/expose and pixel readback, retaining normal presentation settings and owner focus. SDL dummy/software coverage establishes the functional handoff only.",
+      "deferred_extension": "Incremental actual frontend and hardware-driver presentation cost",
+      "prerequisite": "A matched actual frontend/hardware profile with resize/expose and pixel readback, retaining normal presentation settings and owner focus. Historical nominal SDL startup-stop runs are unpaced backend-only; frontend qualification claim withdrawn. Actual candidate8 live evidence covers CIAP progression, not the incremental frame-copy/upload optimization.",
       "hardware_extension_status": "open_queued"
     },
     {
@@ -1167,9 +1214,9 @@
   },
   "candidate4_owner_issue": "beads-ttbl.4",
   "candidate6_owner_issue": "beads-ttbl.5",
-  "next_serial_candidate": 8,
+  "candidate8_owner_issue": "beads-ttbl.6",
+  "next_serial_candidate": 9,
   "remaining_candidates": [
-    8,
     9,
     10,
     11

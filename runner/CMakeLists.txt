@@ -64,6 +64,18 @@ else()
     message(FATAL_ERROR "CDI_SERVICE_BACKEND must be LLE or HLE")
 endif()
 
+set(CDI_STREAMING_BACKEND "LLE" CACHE STRING "CIAP streaming progression: LLE or HLE")
+set_property(CACHE CDI_STREAMING_BACKEND PROPERTY STRINGS LLE HLE)
+if(CDI_STREAMING_BACKEND STREQUAL "HLE")
+    set(CDI_STREAMING_HLE 1)
+elseif(CDI_STREAMING_BACKEND STREQUAL "LLE")
+    set(CDI_STREAMING_HLE 0)
+else()
+    message(FATAL_ERROR "CDI_STREAMING_BACKEND must be LLE or HLE")
+endif()
+set_source_files_properties(src/cdic.c PROPERTIES
+    COMPILE_DEFINITIONS "CDI_STREAMING_HLE=$<BOOL:$<TARGET_PROPERTY:CDI_NATIVE_STREAMING>>")
+
 # Generated C is dropped in by the recompiler and compiled in here. It
 # #includes cdi_runtime.h + game_extras.h from runner/include.
 #   - bios/generated/*.c     : the recompiled CD-RTOS system ROM (Phase 1, boots).
@@ -171,6 +183,7 @@ set_source_files_properties(src/cdi_service_jobs.c src/cdi_native.c PROPERTIES
 set_property(SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/../bios/generated/cdrtos_dispatch.c"
     APPEND PROPERTY COMPILE_DEFINITIONS "CDI_SERVICE_HLE=$<BOOL:$<TARGET_PROPERTY:CDI_NATIVE_SERVICE>>")
 set_property(TARGET CdiRuntime PROPERTY CDI_NATIVE_SERVICE ${CDI_SERVICE_HLE})
+set_property(TARGET CdiRuntime PROPERTY CDI_NATIVE_STREAMING ${CDI_STREAMING_HLE})
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../bios/generated/bios_identity.h")
     target_compile_definitions(CdiRuntime PRIVATE CDI_BIOS_IDENTITY_BUILD=1)
 endif()
@@ -206,7 +219,7 @@ if(EXISTS "${CDI_GAME_GENERATED_DIR}/module_sources.cmake")
 endif()
 set(PROVENANCE_INPUTS "${CMAKE_CURRENT_BINARY_DIR}/runtime-provenance-inputs.cmake")
 file(GENERATE OUTPUT "${PROVENANCE_INPUTS}" CONTENT
-    "set(PROVENANCE_FILES [==[${PROVENANCE_FILES}]==])\nset(PROVENANCE_COMPILER [==[${CMAKE_C_COMPILER};${CMAKE_C_COMPILER_ID};${CMAKE_C_COMPILER_VERSION}]==])\nset(PROVENANCE_OPTIONS [==[${CMAKE_BUILD_TYPE};${CMAKE_C_FLAGS};${CMAKE_C_FLAGS_RELEASE};scanout=${CDI_VIDEO_BACKEND};loader=${CDI_LOADER_BACKEND};drawing=${CDI_DRAWING_BACKEND};memory=${CDI_MEMORY_BACKEND};service=${CDI_SERVICE_BACKEND};$<TARGET_PROPERTY:CdiRuntime,COMPILE_DEFINITIONS>;$<TARGET_PROPERTY:CdiRuntime,COMPILE_OPTIONS>]==])\n")
+    "set(PROVENANCE_FILES [==[${PROVENANCE_FILES}]==])\nset(PROVENANCE_COMPILER [==[${CMAKE_C_COMPILER};${CMAKE_C_COMPILER_ID};${CMAKE_C_COMPILER_VERSION}]==])\nset(PROVENANCE_OPTIONS [==[${CMAKE_BUILD_TYPE};${CMAKE_C_FLAGS};${CMAKE_C_FLAGS_RELEASE};scanout=${CDI_VIDEO_BACKEND};loader=${CDI_LOADER_BACKEND};drawing=${CDI_DRAWING_BACKEND};memory=${CDI_MEMORY_BACKEND};service=${CDI_SERVICE_BACKEND};streaming=${CDI_STREAMING_BACKEND};$<TARGET_PROPERTY:CdiRuntime,COMPILE_DEFINITIONS>;$<TARGET_PROPERTY:CdiRuntime,COMPILE_OPTIONS>]==])\n")
 set_property(TARGET CdiRuntime APPEND PROPERTY LINK_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/../tools/build_provenance.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt")
@@ -319,6 +332,10 @@ if(BUILD_TESTING)
     )
     target_include_directories(CdicTest PRIVATE include)
     add_test(NAME cdic COMMAND CdicTest)
+    add_executable(CdicStreamingTest tests/cdic_test.c src/cdic.c)
+    target_include_directories(CdicStreamingTest PRIVATE include)
+    set_property(TARGET CdicStreamingTest PROPERTY CDI_NATIVE_STREAMING 1)
+    add_test(NAME cdic_streaming COMMAND CdicStreamingTest)
 
     add_executable(PlayerConfigTest
         tests/player_config_test.c

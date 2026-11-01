@@ -23,6 +23,7 @@
 #include "cdi_drawing_jobs.h"
 #include "cdi_memory_jobs.h"
 #include "cdi_service_jobs.h"
+#include "cdi_streaming_jobs.h"
 #include "debug_server.h"
 #include "cosim_state.h"
 #include "cdi_media.h"
@@ -1350,6 +1351,12 @@ static int handle_line(const char *line, char *out, int outlen) {
             (unsigned long long)job.jobs,(unsigned long long)job.errors,
             (unsigned long long)job.interrupted,(unsigned long long)job.fallbacks);
     }
+    else if (!strcmp(cmd, "streaming_jobs")) {
+        CdiStreamingJobState job;cdi_streaming_job_state(&job);
+        snprintf(out,outlen,"{\"ok\":true,\"jobs\":%llu,\"deferred_quanta\":%llu,\"materializations\":%llu}",
+            (unsigned long long)job.jobs,(unsigned long long)job.deferred_quanta,
+            (unsigned long long)job.materializations);
+    }
     else if (!strcmp(cmd, "video_clut"))     resp_video_clut(out, outlen);
     else if (!strcmp(cmd, "disc_state"))     resp_disc_state(out, outlen);
     else if (!strcmp(cmd, "mount_disc"))     resp_mount_disc(line, out, outlen);
@@ -1465,6 +1472,7 @@ void debug_server_poll(void) { /* threaded now — nothing to poll */ }
 int g_hold_on_fault = 0;
 
 void cdi_fault_hold(void) {
+    cdi_streaming_sync();
     cdi_loader_sync_cpu();
     cdi_drawing_sync_cpu();
     cdi_service_sync_cpu();

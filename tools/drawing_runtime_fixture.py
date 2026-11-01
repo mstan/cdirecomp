@@ -7,7 +7,7 @@ isolated RAM copies and never changes a running game or persistent save.
 import argparse,hashlib,json,os,pathlib,shutil,subprocess
 from build_provenance import verify
 
-def build_fixture(build,output,test_source=None):
+def build_fixture(build,output,test_source=None,wraps=()):
     repo=pathlib.Path(__file__).resolve().parents[1]
     windows=os.name=='nt';compiler=pathlib.Path('C:/msys64/mingw64/bin/gcc.exe') if windows else pathlib.Path('cc')
     objcopy=compiler.with_name('objcopy.exe') if windows else pathlib.Path('objcopy')
@@ -24,7 +24,7 @@ def build_fixture(build,output,test_source=None):
     args=['-std=c11','-O2','-I'+str(repo/'runner/include'),'-I'+str(repo/'common'),
         str(test_source or repo/'runner/tests/cdi_drawing_runtime_test.c'),*[str(x) for x in objects],str(renamed)]
     args+=['-LC:/msys64/mingw64/lib','-lSDL2','-lws2_32'] if windows else ['-lSDL2','-pthread']
-    args+=['-Wl,--wrap=glue_check_vblank','-o',str(exe)];rsp=output/'link.rsp'
+    args+=['-Wl,--wrap=glue_check_vblank',*['-Wl,--wrap='+name for name in wraps],'-o',str(exe)];rsp=output/'link.rsp'
     rsp.write_text('\n'.join('"'+x.replace('\\','/')+'"' for x in args))
     subprocess.run([str(compiler),'@'+str(rsp)],check=True)
     if windows:shutil.copy2(build/'SDL2.dll',output/'SDL2.dll')

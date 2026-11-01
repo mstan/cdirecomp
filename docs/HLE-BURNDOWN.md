@@ -43,29 +43,37 @@ subsystem boundaries or a requirement to adopt every proposed optimization.
 | 5 | **File/module load to executable module ready** | Repeated sector handling, copying, validation, relocation, linking, hashing and native binding | **Selected native verification job implemented and qualified in the real load-to-ready pipeline.** Three matched pairs use 23.4–33.3% fewer process cycles during loading; later gameplay is neutral/inconclusive. Kernel I/O, linking and scheduling stay authoritative. |
 | 6 | **Frequently executed OS-9 service jobs** | Recompiled kernel algorithms and internal dispatch that a complete native operation could replace | **Selected complete process-ID lookup/publication package qualified; independent KEEP, neutral/inconclusive.** Exact success/error/IRQ contracts and all frames through 13000 match. Conservative cached-binding bounds retain original notification callbacks and authoritative guest state. Stacked [engine PR #4](https://github.com/mstan/cdirecomp/pull/4) and [consumer PR #4](https://github.com/mstan/HotelMarioRecomp/pull/4) are open and unmerged. |
 | 7 | **Native execution spans** | Repeated dispatch, interpreter handoffs, instruction bookkeeping and checks between operations with no observable intervening event | **Implemented and qualified.** Reused the existing observed native catalog, then coalesced legal PIC continuations into shared native bodies. SDK `3955bf3`; incremental 3-pair median CPU reduction 23.77% versus the seeded catalog, with exact canonical guest contracts. |
-| 8 | **Complete CD/XA streaming jobs** | Repeated work across sector selection, decoding, buffer ownership, DMA/refill, guest drivers and audio handoff | **Open, queued.** Complete streaming integration and actual seek/channel/refill qualification remain work to perform. |
+| 8 | **Complete CD/XA streaming jobs** | Repeated work across sector selection, decoding, buffer ownership, DMA/refill, guest drivers and audio handoff | **Qualified CIAP progression; independent KEEP.** Real seek/filter/refill/DMA/IRQ and PCM contracts match. CPU time is neutral/inconclusive; live cycle concerns are retained below. Whole-board advancement remains candidate 9. |
 | 9 | **Whole-board event advancement** | Calling timer, input transport, CD/audio, RTC, raster and pacing machinery after every instruction | **Open, queued.** The naïve bulk-sum counterexample is a design constraint, not a rejection of a correct native span. |
-| 10 | **Frame to host presentation** | Redundant frame copies, texture uploads, conversions and presentation preparation | Copy/upload consolidated into 2 and qualified through SDL dummy/software. **Hardware-driver qualification remains open, queued.** |
+| 10 | **Frame to host presentation** | Redundant frame copies, texture uploads, conversions and presentation preparation | Copy/upload implementation is consolidated into 2. **Incremental frontend and hardware-driver qualification remain open.** Earlier nominal SDL runs used startup frame stops and actually exercised the unpaced backend. |
 | 11 | **GPU resident jobs and high-resolution rendering** | CPU rendering at enhanced pixel density, expanded frame uploads, duplicate native/enhanced preparation and unbounded scale-dependent intermediates | **New, open and queued; guidance tracked only.** Implement the owner's GPU rendering guide under `beads-ttbl.3`: required 16x at full native speed with headroom on the owner's PC, desired 32x/64x, later lower-end targets. Hardware qualification can satisfy 10 jointly only after both contracts pass. |
 
 ## Current checkpoint
 
-- Current engine branch: `perf/native-service-jobs-20261101`; supported consumer
-  branch: `HotelMarioRecomp/perf/native-service-job-20261101`.
-- Latest qualified selected service/publication job: engine `ea86bdb`, consumer
-  `d3c8c1e`, independent KEEP with neutral/inconclusive boot/scripted-gameplay
-  performance through field 13000. Its stacked engine/consumer PRs #4 are open
-  and unmerged, on candidate 4's open engine/consumer PRs #3.
+- Current engine branch: `perf/native-streaming-jobs-20261101`; consumer branch:
+  `HotelMarioRecomp/perf/native-streaming-job-20261101`.
+- Latest qualified CIAP progression: runtime `0a57417`, consumer `0297c07`,
+  collector correction `7458363`; independent KEEP with the exact scope and
+  cycle caveats below. Stacked PR handoff is next. Service PRs #4 remain open.
 - Qualified engine checkpoints: `a83c317` (frame job), `e92baf8` (coarse native
   catalog), `85c869e` (completed-line jobs). Shared core: `3955bf3`.
 - Supported consumer integration: `16353fc` on
   `HotelMarioRecomp/perf/native-jobs-20261028`, owning issue `beads-7t8h`.
 - **Broad burndown remains open.** The owner resumed the remaining set on
-  2026-10-31. Selected jobs for 1/2/3/4/5/6/7 are now qualified; their measured
+  2026-10-31. Selected jobs for 1/2/3/4/5/6/7/8 are now qualified; their measured
   scopes and historical failed/inconclusive experiments remain below. After
   independent keep/fix/reject review, create stacked PRs for retained work and
-  assign the next candidate. Do not merge without owner approval. **Four areas
-  remain: 8, 9, hardware 10 and 11.** Reuse accepted evidence.
+  assign the next candidate. Do not merge without owner approval. **Three areas
+  remain: whole-board 9, frontend/hardware 10 and GPU/high-resolution 11.**
+
+**Frontend scope correction, 2026-11-01:** older nominal SDL runs through
+`scanout_hle_compare.py` or `loader_job_compare.py --end-frame` supplied startup
+`--stop-frame`, which disables pacing and the frontend. Their retained results
+establish unpaced backend equality/performance, not copy/upload/presentation or
+host-audio qualification. Earlier frontend claims below are withdrawn; raw
+history and qualified backend jobs remain intact. Engine/consumer PRs #1/#2
+have corrected descriptions. Actual live candidate-8 coverage uses TCP
+`stop_frame` after startup; it does not close incremental presentation area 10.
 - Scanout selection is `-DCDI_VIDEO_BACKEND=LLE` or
   `-DCDI_VIDEO_BACKEND=HLE`. The repository default remains LLE.
 - HLE computes joint source/matte color spans, consolidating contribution,
@@ -877,5 +885,55 @@ agent-created compiler temp directory was removed.
 Qualification covers the selected job, one title/ROM and the measured Windows
 configuration. Whole notification-chain, other-title/platform, Linux-runtime,
 current-build save/load and final owner merge gates are not established here.
-Stacked PR handoff is next; no candidate 6 PR is created or merged yet.
-**Four areas remain: 8, 9, hardware 10 and 11.**
+Stacked engine/consumer PRs #4 are open and unmerged. Candidate 8 was next at
+that checkpoint; its final disposition follows.
+
+### Candidate 8 final evaluated disposition - KEEP, 2026-11-01
+
+Owning issue `beads-ttbl.6`; runtime `0a57417`, consumer `0297c07`, collector
+correction `7458363`. The CIAP job accumulates already-truncated nanoseconds
+only before the earliest AP/sector/audio-refill boundary. It executes original
+event ordering and overshoot on the same quantum, publishing fractional state
+before MMIO, DMA, transport changes and held snapshots. Real media, guest
+drivers, seek/channel/filter selection, ownership, decoder and IRQ/PCM handoff
+remain authoritative. `StreamingBackend=LLE` retains per-quantum progression.
+
+Three real-disc production-reference timelines compare 720,000 quanta, including
+coarse steps, seeks/filter changes, delayed refill, pause/reset, eject/remount,
+exact IRQ assertion/clear boundaries, CIAP/AP-pointer state, DMA RAM and drained
+PCM. All match with zero drops. Both CIAP selections and strict Linux syntax
+pass; this is not Linux-runtime evidence.
+
+All unpaced backend warm/control/reversed A/B contracts match through field
+13000, including 2,259 decoded sectors/6,181,056 PCM frames. HLE replaces
+134,286,224 no-event updates with 14,794 boundary jobs and 149,071 observation
+materializations. CPU reductions are +13.20%/-0.70%, cycles +13.54%/+0.27%;
+identical-LLE differences are -2.08% CPU/-1.92% cycles. The favorable outlier
+does not repeat and is not a speedup claim.
+
+Actual live pace-1 SDL dummy/software comparisons use TCP `stop_frame` after
+startup and match every warm/control/A/B contract through field 1600. Both
+builds decode 124 sectors/249,984 PCM frames, hash `6b99347f145a0030`, with
+zero queued/dropped frames at the endpoint. CPU reductions are -2.24%/+1.59%
+against +14.97% identical-LLE variation: **neutral/inconclusive CPU time**.
+Retain the live cycle concern: -8.37%/+3.81%, versus one +5.92% control
+difference. The first negative cycle pair exceeds that control magnitude;
+the reversed pair is positive. The initial actual-live -10.66% CPU/-13.99%
+cycle pair remains evidence too. No proven speedup or reproducible CPU
+regression is established; do not describe every cycle sample as within control.
+
+Independent review retained this CIAP progression package with these caveats.
+Exact binaries/settings/raw samples are indexed in `hle-campaign-evidence.json`
+under `G:/Temp/Codex/cdirecomp/streaming-job-20261101`. The earlier nominal
+`normal-stream` run is unpaced backend-only; its host queue drops do not
+diagnose the actual frontend. All snapshots, fixture executables, raw failures
+and sidecar inputs remain retained, together with the reusable C: build/cache.
+Only 35,292 bytes of disposable renamed link objects and an empty temp directory
+were removed. Stacked [engine PR #5](https://github.com/mstan/cdirecomp/pull/5)
+targets `perf/native-service-jobs-20261101` (creation head `bb40494`);
+[Hotel Mario PR #5](https://github.com/mstan/HotelMarioRecomp/pull/5) targets
+`perf/native-service-job-20261101` (head `0297c07`). Both are open and unmerged;
+no merge is authorized. **Three areas
+remain: whole-board 9, incremental frontend/hardware 10, GPU/high-resolution 11.**
+Listening, combined current-build save/load and final owner merge handoff remain
+outside this qualification. No additional measurements are requested.

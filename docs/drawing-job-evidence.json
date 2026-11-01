@@ -35,7 +35,9 @@
     "notes": "ASLR-correct paired host/guest suspended-thread sampling, selection only; 256-byte bucket includes queue/device overhead. Actual bitmap callback at module+0x19E4."
   },
   "performance": {
-    "classification": "neutral/inconclusive in final headless and SDL software workloads; no proven speedup or reproducible regression",
+    "classification": "neutral/inconclusive in final unpaced backend workloads; no proven speedup or reproducible regression",
+    "frontend_scope_correction": "2026-11-01: nominal SDL cases supplied startup --stop-frame, disabling pacing/frontend. Historical frontend-named fields/paths below are preserved as unpaced backend samples, not actual frontend qualification.",
+    "actual_frontend_qualified": false,
     "fields": [
       9400,
       13000
@@ -67,7 +69,7 @@
     "frontend_cycle_reduction_percent": [
       6.3462333499009755
     ],
-    "interpretation": "The fixed-source mixed A/B differences lie within the contemporaneous identical-LLE control variation (10.0137% cycles,8.7192% CPU). Positive point estimates/medians are not proven wins. A single -2.45% slower headless pair is not a reproducible regression. SDL software remains neutral/inconclusive.",
+    "interpretation": "The fixed-source mixed unpaced backend A/B differences lie within contemporaneous identical-LLE variation (10.0137% cycles,8.7192% CPU). Positive point estimates/medians are not proven wins. A single -2.45% slower pair is not a reproducible regression. Nominal SDL samples also exercised only the unpaced backend.",
     "method": "Warm both builds; alternate pair order; same source/compiler/options except independent DrawingBackend; logical CPU15; fixed real controller input/RTC/config; muted. Keep capture outside timing and retain all raw host/process samples.",
     "capacity_reservation": {
       "path": "G:\\Temp\\Codex\\cdirecomp\\hle-burndown-20261031\\timing-reservation-retry.json",
@@ -279,7 +281,7 @@
     },
     {
       "name": "fixed-frontend",
-      "role": "post-fix SDL dummy/software; neutral/inconclusive",
+      "role": "post-fix nominal SDL case; actually unpaced backend-only, neutral/inconclusive",
       "implementation": "49c6b21b6fa2312cdb8ecbab6bef5866681b64d8",
       "evidence": {
         "path": "G:\\Temp\\Codex\\cdirecomp\\hle-burndown-20261031\\fixed-frontend\\campaign-evidence.json",
@@ -346,7 +348,7 @@
   },
   "limitations": [
     "Only Hotel Mario USA and the fixed Hotel1 Stage1 workload are performance-qualified.",
-    "SDL dummy/software does not qualify a hardware GPU driver.",
+    "Historical nominal SDL cases did not activate the frontend; frontend and hardware-driver qualification remain open.",
     "No whole-game, other-title, full-campaign, audio-listening or native-save-restoration claim.",
     "Candidate9 event-span work remains separate; this job preserves all original device quanta."
   ],
