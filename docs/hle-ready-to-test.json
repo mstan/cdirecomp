@@ -125,6 +125,8 @@
       "consumer": "da8ff6f89cf573d8d345b311bb4a9a5388d29cc4",
       "owner_issue": "beads-ttbl.7",
       "acceptance": "independent_KEEP_neutral_inconclusive_selected_quiet_STOP_board_job",
+      "engine_pr": "https://github.com/mstan/cdirecomp/pull/6",
+      "consumer_pr": "https://github.com/mstan/HotelMarioRecomp/pull/6",
       "evaluated_scope": "Complete quiet STOP-board intervals; active-CPU clocks remain faithful. Unpaced backend0..13000 and actual paced SDL dummy0..1600; four production-reference real-disc timelines.",
       "raw_root": "G:\\Temp\\Codex\\cdirecomp\\board-job-20261101",
       "final_binaries": {
@@ -145,7 +147,7 @@
         "G:\\Temp\\Codex\\cdirecomp\\board-job-20261101\\evaluate-reservation.json",
         "G:\\Temp\\Codex\\cdirecomp\\board-job-20261101\\evaluate-repeat-reservation.json"
       ],
-      "required_next": "Stacked PR publication; no more candidate9 tests/tuning. Incremental frontend/hardware10 and GPU11 remain; combined current-build save/load and owner merge handoff separate.",
+      "required_next": "Stacked PRs #6 open and unmerged; no more candidate9 tests/tuning. Incremental frontend/hardware10 and GPU11 await explicit next assignment; combined current-build save/load and owner merge handoff separate.",
       "remaining_areas": [
         10,
         11

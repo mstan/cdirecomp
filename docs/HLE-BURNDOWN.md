@@ -54,7 +54,9 @@ subsystem boundaries or a requirement to adopt every proposed optimization.
   `HotelMarioRecomp/perf/native-board-job-20261101`.
 - Latest qualified quiet STOP-board job: runtime `7181cfd`, consumer `da8ff6f`;
   independent KEEP with the exact scope and negative-sample caveat below.
-  Stacked PR handoff is next. Streaming PRs #5 remain open.
+  Stacked [engine PR #6](https://github.com/mstan/cdirecomp/pull/6) and
+  [consumer PR #6](https://github.com/mstan/HotelMarioRecomp/pull/6) are open and
+  unmerged, on the open streaming PRs #5.
 - Qualified engine checkpoints: `a83c317` (frame job), `e92baf8` (coarse native
   catalog), `85c869e` (completed-line jobs). Shared core: `3955bf3`.
 - Supported consumer integration: `16353fc` on
