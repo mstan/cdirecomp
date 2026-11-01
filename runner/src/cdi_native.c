@@ -27,6 +27,27 @@ typedef struct {
 } Binding;
 static Binding bindings[BINDING_CAPACITY];
 static uint32_t binding_count;
+#ifndef CDI_SERVICE_HLE
+#define CDI_SERVICE_HLE 0
+#endif
+#if CDI_SERVICE_HLE
+/* Conservative bounds of EVERY cached binding, including rejected/invalid
+ * identities. A miss skips only binding scans; sync-tag maintenance still
+ * observes all writes. Bounds only expand until reset, so a resized/overlaid
+ * binding cannot leave an uncovered old or expanded range. Two comparisons
+ * avoid page normalization/scanning on the common stack/context write path. */
+typedef struct {uint32_t first,last;} BindingRange;
+static BindingRange binding_ranges[2];
+static void cover_binding(uint32_t address,uint32_t size) {
+    BindingRange *range=&binding_ranges[address>=CDI_RAM1_BASE];
+    if(address<range->first)range->first=address;
+    if(address+size>range->last)range->last=address+size;
+}
+static int may_overlap_binding(uint32_t address,uint64_t end) {
+    const BindingRange *range=&binding_ranges[address>=CDI_RAM1_BASE];
+    return address<range->last && end>range->first;
+}
+#endif
 static CdiNativeState stats;
 static uint64_t epoch,event_count;
 uint64_t g_cdi_native_invalidation_epoch;
@@ -64,6 +85,9 @@ void cdi_native_reset(void) {
     g_cdi_native_invalidation_epoch++;
     memset(tag_indices,0,sizeof tag_indices);tag_count=0;
     memset(bindings,0,sizeof bindings);binding_count=0;
+#if CDI_SERVICE_HLE
+    binding_ranges[0]=binding_ranges[1]=(BindingRange){UINT32_MAX,0};
+#endif
     memset(&stats,0,sizeof stats);stats.compiled=(uint32_t)g_cdi_native_module_count;
     /* Tokens remain unique across warm resets with retained guest RAM. */
     event_count=0;
@@ -76,6 +100,9 @@ void cdi_native_reset(void) {
 void cdi_native_notify_write(uint32_t address, uint32_t size) {
     if (!g_cdi_native_module_count || !size || !ram(address,size)) return;
     uint64_t end=(uint64_t)address+size;
+#if CDI_SERVICE_HLE
+    if(may_overlap_binding(address,end))
+#endif
     for (uint32_t i=0;i<binding_count;i++) {
         Binding *b=&bindings[i];
         if (address<(uint64_t)b->base+b->size && end>b->base) {
@@ -129,6 +156,9 @@ static Binding *resolve(uint32_t address) {
             b=&bindings[binding_count++];b->base=base;
         }
         b->size=size;b->checked=1;b->valid=0;b->module=NULL;
+#if CDI_SERVICE_HLE
+        cover_binding(base,size);
+#endif
         uint8_t digest[32];cdi_sha256(p,size,digest);
         for (size_t m=0;m<g_cdi_native_module_count;m++) {
             const CdiNativeModule *module=&g_cdi_native_modules[m];
@@ -196,7 +226,8 @@ int cdi_native_instruction_valid(uint32_t address,CdiNativeDispatch expected,uin
 void cdi_native_state(CdiNativeState *out) { *out=stats; }
 int cdi_native_events(CdiNativeEvent *out,int capacity,uint64_t from,uint64_t *total,uint64_t *oldest) {
     uint64_t end=event_count,first=end>EVENT_CAPACITY?end-EVENT_CAPACITY:0;
-    if (total) *total=end;if (oldest) *oldest=first;
+    if (total) *total=end;
+    if (oldest) *oldest=first;
     if (capacity<=0) return 0;
     if (from==UINT64_MAX) from=end>(uint64_t)capacity?end-capacity:0;
     if (from<first) from=first;
@@ -224,7 +255,8 @@ void cdi_native_record_target(uint32_t address) {
         .epoch=b->epoch,.frame=g_frame_count,.trace_seq=debug_trace_sequence(),.hits=1};
 }
 int cdi_native_targets(CdiNativeTarget *out,int capacity,uint32_t from,uint32_t *total,uint64_t *dropped) {
-    if (total) *total=target_count;if (dropped) *dropped=target_dropped;
+    if (total) *total=target_count;
+    if (dropped) *dropped=target_dropped;
     int count=0;
     while (from<target_count && count<capacity) out[count++]=targets[from++];
     return count;

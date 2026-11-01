@@ -133,5 +133,27 @@ int main(void) {
     CHECK(cdi_native_targets(target,4,0,&total,&dropped)==0 && total==0 && dropped==0);
     cdi_native_record_target(0x230000+40002);
     CHECK(cdi_native_targets(target,4,0,&total,&dropped)==1 && target[0].hits==1);
+    /* Cached small bindings can expand into other pages and reject identity.
+     * Repairing a far byte must clear that rejection, even while inactive. */
+    const uint32_t expanded=0x6000,cross_page=0x21fff0,unknown=0x270100;
+    copy(expanded,image,sizeof image);CHECK(cdi_native_has_address(expanded+52));
+    copy(expanded,large,sizeof large);
+    byte(expanded+65000,1);CHECK(!cdi_native_has_address(expanded+52));
+    byte(expanded+65000,0);CHECK(cdi_native_has_address(expanded+52));
+    token_a=cdi_native_execution_token(expanded,dispatch_a);
+    byte(expanded+64000,0);
+    CHECK(!cdi_native_instruction_valid(expanded+52,dispatch_a,token_a));
+    CHECK(cdi_native_has_address(expanded+52));
+    copy(cross_page,image,sizeof image);CHECK(cdi_native_has_address(cross_page+52));
+    token_a=cdi_native_execution_token(cross_page,dispatch_a);
+    byte(cross_page+63,image[63]);
+    CHECK(!cdi_native_instruction_valid(cross_page+52,dispatch_a,token_a));
+    /* Index misses must still discover unknown tags and full-bank restore
+     * notifications must invalidate all affected bindings before re-entry. */
+    copy(unknown,image,sizeof image);CHECK(cdi_native_has_address(unknown+52));
+    token_a=cdi_native_execution_token(unknown,dispatch_a);
+    cdi_native_notify_write(CDI_RAM1_BASE,CDI_RAM1_SIZE);
+    CHECK(!cdi_native_instruction_valid(unknown+52,dispatch_a,token_a));
+    CHECK(cdi_native_has_address(unknown+52));
     return failures?1:0;
 }

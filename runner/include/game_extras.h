@@ -28,8 +28,14 @@
 #else
 #define CDI_MEMORY_JOB(fn) 0
 #endif
-#if CDI_LOADER_HLE || CDI_DRAWING_HLE || CDI_MEMORY_HLE
-#define RECOMP_NATIVE_JOB_DISPATCH(fn) (CDI_LOADER_JOB(fn) || CDI_DRAWING_JOB(fn) || CDI_MEMORY_JOB(fn))
+#if CDI_SERVICE_HLE
+#include "cdi_service_jobs.h"
+#define CDI_SERVICE_JOB(fn) ((fn) == cdi_service_entry && cdi_service_dispatch(fn))
+#else
+#define CDI_SERVICE_JOB(fn) 0
+#endif
+#if CDI_LOADER_HLE || CDI_DRAWING_HLE || CDI_MEMORY_HLE || CDI_SERVICE_HLE
+#define RECOMP_NATIVE_JOB_DISPATCH(fn) (CDI_LOADER_JOB(fn) || CDI_DRAWING_JOB(fn) || CDI_MEMORY_JOB(fn) || CDI_SERVICE_JOB(fn))
 #endif
 
 /* Per-game/OS dispatch override, called by the generated dispatch when a target

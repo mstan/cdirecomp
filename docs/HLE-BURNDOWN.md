@@ -41,7 +41,7 @@ subsystem boundaries or a requirement to adopt every proposed optimization.
 | 3 | **Graphics service to completed drawing job** | Guest drawing preparation, intermediate memory traffic, control-list construction and repeated renderer preparation | **Qualified native queue job; independent review KEEP, final performance neutral/inconclusive.** Real callbacks, queue publication and device/IRQ frontiers match. Reviewer-found debugger stops are fixed and regression-tested. Stacked [engine PR #2](https://github.com/mstan/cdirecomp/pull/2) and [consumer PR #2](https://github.com/mstan/HotelMarioRecomp/pull/2) are open and unmerged; historical pre-fix gains are not a current speedup claim. |
 | 4 | **Memory operation to fully published result** | Instruction-by-instruction copying/filling plus repeated module invalidation, tag maintenance and dirty tracking | **Qualified selected firmware fill; independent KEEP.**37 generated-reference cases and normal-paced full-boot/control contracts match. Performance is neutral/inconclusive; per-byte write/invalidation bookkeeping is retained. |
 | 5 | **File/module load to executable module ready** | Repeated sector handling, copying, validation, relocation, linking, hashing and native binding | **Selected native verification job implemented and qualified in the real load-to-ready pipeline.** Three matched pairs use 23.4–33.3% fewer process cycles during loading; later gameplay is neutral/inconclusive. Kernel I/O, linking and scheduling stay authoritative. |
-| 6 | **Frequently executed OS-9 service jobs** | Recompiled kernel algorithms and internal dispatch that a complete native operation could replace | **Open, queued.** Service attribution and boundary contracts are remaining implementation work. |
+| 6 | **Frequently executed OS-9 service jobs** | Recompiled kernel algorithms and internal dispatch that a complete native operation could replace | **Selected complete process-ID lookup/publication package qualified; independent KEEP, neutral/inconclusive.** Exact success/error/IRQ contracts and all frames through 13000 match. Conservative cached-binding bounds retain original notification callbacks and authoritative guest state. Stacked [engine PR #4](https://github.com/mstan/cdirecomp/pull/4) and [consumer PR #4](https://github.com/mstan/HotelMarioRecomp/pull/4) are open and unmerged. |
 | 7 | **Native execution spans** | Repeated dispatch, interpreter handoffs, instruction bookkeeping and checks between operations with no observable intervening event | **Implemented and qualified.** Reused the existing observed native catalog, then coalesced legal PIC continuations into shared native bodies. SDK `3955bf3`; incremental 3-pair median CPU reduction 23.77% versus the seeded catalog, with exact canonical guest contracts. |
 | 8 | **Complete CD/XA streaming jobs** | Repeated work across sector selection, decoding, buffer ownership, DMA/refill, guest drivers and audio handoff | **Open, queued.** Complete streaming integration and actual seek/channel/refill qualification remain work to perform. |
 | 9 | **Whole-board event advancement** | Calling timer, input transport, CD/audio, RTC, raster and pacing machinery after every instruction | **Open, queued.** The naïve bulk-sum counterexample is a design constraint, not a rejection of a correct native span. |
@@ -50,27 +50,22 @@ subsystem boundaries or a requirement to adopt every proposed optimization.
 
 ## Current checkpoint
 
-- Current engine branch: `perf/native-memory-jobs-20261031`; supported consumer
-  branch: `HotelMarioRecomp/perf/native-memory-job-20261031`.
-- Latest qualified selected memory job: engine `da2cfbd`, consumer `5846224`,
-  independent KEEP for the tested normal-paced boot; branch PR handoff pending.
+- Current engine branch: `perf/native-service-jobs-20261101`; supported consumer
+  branch: `HotelMarioRecomp/perf/native-service-job-20261101`.
+- Latest qualified selected service/publication job: engine `ea86bdb`, consumer
+  `d3c8c1e`, independent KEEP with neutral/inconclusive boot/scripted-gameplay
+  performance through field 13000. Its stacked engine/consumer PRs #4 are open
+  and unmerged, on candidate 4's open engine/consumer PRs #3.
 - Qualified engine checkpoints: `a83c317` (frame job), `e92baf8` (coarse native
   catalog), `85c869e` (completed-line jobs). Shared core: `3955bf3`.
 - Supported consumer integration: `16353fc` on
   `HotelMarioRecomp/perf/native-jobs-20261028`, owning issue `beads-7t8h`.
-- **Reopened at the owner's direction.** The prior closure was premature:
-  candidates 3/4/5/6/8/9 and hardware presentation still require actual work.
-  Missing workload attribution, contracts and differential fixtures are work
-  within this goal. Work serially, checking in with the owner after each.
-  Candidate **5** has completed its serial implementation and qualification
-  below. The owner resumed the entire remaining set on 2026-10-31;
-  **candidate 3 now has independent KEEP review** after implementation,
-  objective debugger repair and fresh built-game measurement, classified
-  neutral/inconclusive. Stacked branch PRs are open and unmerged; candidate 4 is
-  next under `beads-ttbl.4`. After each independent keep/fix/reject review,
-  create branch PRs for retained work and assign the next candidate. Do not
-  merge without owner approval. Remaining work is 6, 8, 9, hardware 10 and
-  the new GPU rendering candidate 11. Reuse accepted 1/2/5/7 evidence.
+- **Broad burndown remains open.** The owner resumed the remaining set on
+  2026-10-31. Selected jobs for 1/2/3/4/5/6/7 are now qualified; their measured
+  scopes and historical failed/inconclusive experiments remain below. After
+  independent keep/fix/reject review, create stacked PRs for retained work and
+  assign the next candidate. Do not merge without owner approval. **Four areas
+  remain: 8, 9, hardware 10 and 11.** Reuse accepted evidence.
 - Scanout selection is `-DCDI_VIDEO_BACKEND=LLE` or
   `-DCDI_VIDEO_BACKEND=HLE`. The repository default remains LLE.
 - HLE computes joint source/matte color spans, consolidating contribution,
@@ -829,3 +824,58 @@ Stacked [engine PR #3](https://github.com/mstan/cdirecomp/pull/3) targets
 Combined batch gameplay/current-build save-load and the owner's final visual/play
 merge handoff remain pending. **Five areas remain: 6, 8, 9, hardware 10 and 11.**
 The broad burndown/campaign remain open; no additional measurement is requested.
+
+### Candidate 6 final evaluated disposition - KEEP, 2026-11-01
+
+Owning issue `beads-ttbl.5`; tested engine `ea86bdb`, consumer `d3c8c1e`.
+The selected package replaces the complete firmware process-ID lookup
+`0x40829A..0x4082BE` used by notification services and bounds write-publication
+binding scans using two conservative RAM-bank ranges. All cached binding spans,
+including invalid/rejected identities and expanded old ranges, remain covered;
+sync-tag maintenance still observes every RAM write. This workload has about
+**seven cached spans**, distinct from its 174-image compiled catalog. Original
+process tables, notification callbacks, guest writes and native-save paths
+remain authoritative. The lookup preserves wrapped/signed word indexing,
+stage-dependent registers, E0/carry errors, actual RAM-read times and every
+device/IRQ frontier. Unsupported inputs/entries and debugger changes stay faithful.
+
+Both Windows production selections, focused original/indexed publication tests
+and strict Linux HLE=0/HLE=1 syntax checks pass. **40 actual generated-reference
+cases**, including 14 timed IRQ frontiers, pass. Final full process-origin
+boot/scripted-gameplay warm, A/A and reversed A/B comparisons match full guest
+contracts and every completed frame through 13000. HLE records 8,532 admitted
+lookups, 22 IRQ interruptions and zero fallbacks; LLE records zero jobs.
+
+| Final bounds comparison | CPU reduction | Process-cycle reduction |
+| --- | ---: | ---: |
+| Identical-LLE A/A | -7.53% | -5.89% |
+| A/B pair 1, LLE then HLE | +2.51% | +1.55% |
+| A/B pair 2, HLE then LLE | +5.52% | +3.39% |
+
+Independent final review: **KEEP, neutral/inconclusive** for this selected
+lookup/publication package and tested Hotel Mario USA workload. The positive
+samples remain within contemporaneous identical-build variation; no proven
+speedup or observed regression is claimed. Settings: Windows/MinGW Release,
+affinity 15, headless/dummy audio, pace 32, RTC startup sync disabled; previous
+frame/loader/drawing/memory packages are HLE on both sides. The Service LLE
+selection excludes both the lookup replacement and derived binding bounds.
+
+The first page-bitmap trial at `42df55a` remains **historical/unresolved and
+concerning**, not neutral accepted: CPU reductions -0.78%/-5.22%, against an
+identical-LLE difference of -3.65%; its second CPU sample exceeded that single
+control difference. Only the bounded bank-range simplification followed; no
+additional tuning or attribution matrix was performed.
+
+Exact source/binary IDs, settings, samples and raw paths are in candidate 6 of
+[hle-campaign-evidence.json](hle-campaign-evidence.json). Raw root:
+`G:/Temp/Codex/cdirecomp/service-job-20261101`; final results are
+`actual-reference-bounds`, `gameplay-control-bounds` and `gameplay-pairs-bounds`.
+Both final reservations exited 0. All frozen binaries, sidecar dependencies,
+first-trial evidence and the reusable C: HLE cache remain retained. The empty
+agent-created compiler temp directory was removed.
+
+Qualification covers the selected job, one title/ROM and the measured Windows
+configuration. Whole notification-chain, other-title/platform, Linux-runtime,
+current-build save/load and final owner merge gates are not established here.
+Stacked PR handoff is next; no candidate 6 PR is created or merged yet.
+**Four areas remain: 8, 9, hardware 10 and 11.**

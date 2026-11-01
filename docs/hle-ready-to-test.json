@@ -2,7 +2,7 @@
   "schema": 1,
   "owner_issue": "beads-oatv",
   "campaign_issue": "beads-2wy8.1",
-  "current_candidate": 6,
+  "current_candidate": 8,
   "rule": "Prepared, built, tested and accepted are distinct. Preserve independent review and serial per-game measurement/disposition gates. Capacity refusal changes useful preparation, not acceptance.",
   "items": [
     {
@@ -83,9 +83,23 @@
     },
     {
       "candidate": 6,
-      "state": "tracked",
-      "implementation": "not_started",
-      "required_next": "Attribute actual hot OS-9 services and prepare full success/error/reentrancy/native-save contract before native replacement."
+      "state": "accepted",
+      "implementation": "ea86bdb03f3b86fb0507606a9bada3fd16146580",
+      "consumer": "d3c8c1e5a98e0e3b9fe55393dbda7af6bb36cb28",
+      "owner_issue": "beads-ttbl.5",
+      "acceptance": "independent_KEEP_neutral_inconclusive_selected_lookup_publication_package",
+      "evaluated_scope": "Hotel Mario USA process-origin boot/scripted gameplay through field 13000; complete 40829A process lookup plus conservative per-bank cached-binding publication bounds; original notification callbacks retained.",
+      "correctness_cases": 40,
+      "irq_frontiers": 14,
+      "performance": "neutral/inconclusive within contemporaneous identical-LLE variation; first page-bitmap trial remains historical/unresolved with CPU caveat",
+      "ready_job": null,
+      "completed_job": "G:/Temp/Codex/cdirecomp/service-job-20261101/evaluate-bounds-job.json",
+      "completed_reservation": "G:/Temp/Codex/cdirecomp/service-job-20261101/evaluate-bounds-reservation.json",
+      "raw_root": "G:/Temp/Codex/cdirecomp/service-job-20261101",
+      "engine_pr": "https://github.com/mstan/cdirecomp/pull/4",
+      "consumer_pr": "https://github.com/mstan/HotelMarioRecomp/pull/4",
+      "required_next": "Stacked PRs #4 open and unmerged; candidate 8 next by explicit assignment. Combined batch gameplay/current-build save-load and owner final merge handoff remain open. No more candidate6 tuning or checks requested.",
+      "remaining_areas": [8, 9, 10, 11]
     },
     {
       "candidate": 8,
