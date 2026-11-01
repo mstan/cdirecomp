@@ -3,7 +3,7 @@
   "owner_issue": "beads-oatv",
   "campaign_issue": "beads-2wy8.1",
   "consumer_issue": "beads-7t8h",
-  "status": "in_progress; selected candidate8 CIAP progression independently KEEP with neutral/inconclusive CPU time and retained live-cycle concerns; PR handoff then9; remaining9/10/11",
+  "status": "in_progress; selected quiet STOP-board candidate9 independently KEEP neutral/inconclusive, original nonreproduced negative outlier retained; PR publication next; remaining10/11",
   "frontend_scope_correction": "2026-11-01: old nominal SDL runs via scanout_hle_compare.py or loader_job_compare.py startup --stop-frame disabled both pacing/frontend. Their raw samples establish unpaced backend equality/performance only. Previous frontend/copy/upload/presentation qualification claims are withdrawn; raw history/backend qualification preserved. Old engine/consumer PR1/2 descriptions corrected; candidate10 remains open.",
   "engine_head": "85c869ee808b438905f2c1bc29a46d30f27647f8",
   "core_head": "3955bf3311f55e031836f70b5c1839e95b81f9cf",
@@ -1083,20 +1083,209 @@
     {
       "candidate": 9,
       "name": "Whole-board event advancement",
-      "status": "open_queued",
-      "evidence": [
-        "profile-residual.json",
-        "profile-final.json",
-        "runner/src/mcd212.c",
-        "runner/src/slave.c",
-        "runner/src/cdic.c",
-        "runner/src/periph.c",
-        "runner/src/cdi_nvram.c"
+      "status": "qualified_selected_quiet_STOP_board_job_independent_KEEP",
+      "owner_issue": "beads-ttbl.7",
+      "engine_implementation": "7181cfd3cf52d2f87116fa42a328ec4191d4ce2d",
+      "consumer_head": "da8ff6f89cf573d8d345b311bb4a9a5388d29cc4",
+      "engine_branch": "perf/native-board-jobs-20261101",
+      "consumer_branch": "perf/native-board-job-20261101",
+      "job": "Complete quiet STOP-board intervals across timer, IKAT, CIAP/CD/audio, RTC, raster and pacing. Retain each25-cycle quantum integer truncation/repeated floating-point additions, frontend pump/input schedule, original critical event quantum/order/overshoot and starting-cycle IRQ logs. Materialize quiet prefix before observer/media transitions. Active-CPU advancement remains faithful; this does not replace every active-instruction clock call.",
+      "raw_root": "G:\\Temp\\Codex\\cdirecomp\\board-job-20261101",
+      "binaries": {
+        "lle": {
+          "executable": "G:\\Temp\\Codex\\cdirecomp\\board-job-20261101\\native-lle-final\\HotelMarioRecomp.exe",
+          "receipt": "G:\\Temp\\Codex\\cdirecomp\\board-job-20261101\\native-lle-final\\HotelMarioRecomp.exe.build.json",
+          "sha256": "d517e87757d9abca382a65f8e99d24538f886c71b2b0367ebccff3d0099c7017"
+        },
+        "hle": {
+          "executable": "G:\\Temp\\Codex\\cdirecomp\\board-job-20261101\\native-hle-final\\HotelMarioRecomp.exe",
+          "receipt": "G:\\Temp\\Codex\\cdirecomp\\board-job-20261101\\native-hle-final\\HotelMarioRecomp.exe.build.json",
+          "sha256": "d5c223a9bf19d3b7b79d13468f4d6a31ed877853b3dca5fde3a38e6f328f6a7d"
+        }
+      },
+      "correctness": {
+        "evidence": "G:\\Temp\\Codex\\cdirecomp\\board-job-20261101\\actual-reference-final\\summary.json",
+        "result": "Four real-disc production-reference timelines equal, including timer/IKAT/CIAP/RTC/raster, exact IRQ and pacing boundaries, real DMA/RAM, drained PCM, observer/media transitions, reset and quit. Timer arithmetic check and strict Linux HLE0/1 syntax pass; no Linux built-game claim."
+      },
+      "reservations": [
+        "G:\\Temp\\Codex\\cdirecomp\\board-job-20261101\\build-final-reservation.json",
+        "G:\\Temp\\Codex\\cdirecomp\\board-job-20261101\\evaluate-reservation.json",
+        "G:\\Temp\\Codex\\cdirecomp\\board-job-20261101\\evaluate-repeat-reservation.json"
       ],
-      "reason": "Board updates account for46/491 and40/344 samples. A bulk-cycle sum changes the reference integer-nanosecond clock:24 four-cycle quanta advance6336ns in slave/CDIC, but one96-cycle quantum advances6355ns. Slave callbacks can activate CDIC before its update in the same quantum; timer IRQ and RTC/raster phases are observable too.",
-      "prerequisite": "Earliest-event/frontier APIs across timer, IKAT, CDIC and raster; retain sum-of-per-quantum truncated time and RTC/raster phase, flush prior time before MMIO/RAM-visible side effects, preserve activation/order and interrupt entry. Differential deadline/seek/audio/IRQ fixtures plus a built-game span A/B are required before adoption.",
-      "prior_deferral_rejected": true,
-      "work_remaining": "Earliest-event/frontier APIs across timer, IKAT, CDIC and raster; retain sum-of-per-quantum truncated time and RTC/raster phase, flush prior time before MMIO/RAM-visible side effects, preserve activation/order and interrupt entry. Differential deadline/seek/audio/IRQ fixtures plus a built-game span A/B are required before adoption."
+      "unpaced_original": {
+        "control": {
+          "evidence": "G:\\Temp\\Codex\\cdirecomp\\board-job-20261101\\gameplay-control\\campaign-evidence.json",
+          "identity": "G:\\Temp\\Codex\\cdirecomp\\board-job-20261101\\gameplay-control\\identity.json",
+          "settings": {
+            "presentation": "headless",
+            "audio": "dummy",
+            "pace_speed": 32.0,
+            "rtc_sync_host_on_startup": false,
+            "start_frame": 0,
+            "actual_pacing": false,
+            "actual_frontend": false,
+            "frame_stop_control": "startup_investigation"
+          },
+          "cpu_reductions_percent": [
+            -0.15847860538826808
+          ],
+          "cycle_reductions_percent": [
+            -0.9551270816268831
+          ],
+          "all_contracts_equal": true
+        },
+        "pairs": {
+          "evidence": "G:\\Temp\\Codex\\cdirecomp\\board-job-20261101\\gameplay-pairs\\campaign-evidence.json",
+          "identity": "G:\\Temp\\Codex\\cdirecomp\\board-job-20261101\\gameplay-pairs\\identity.json",
+          "settings": {
+            "presentation": "headless",
+            "audio": "dummy",
+            "pace_speed": 32.0,
+            "rtc_sync_host_on_startup": false,
+            "start_frame": 0,
+            "actual_pacing": false,
+            "actual_frontend": false,
+            "frame_stop_control": "startup_investigation"
+          },
+          "cpu_reductions_percent": [
+            -9.81595092024541,
+            0.5899705014749235
+          ],
+          "cycle_reductions_percent": [
+            -9.092332190790575,
+            -0.07373841907374334
+          ],
+          "all_contracts_equal": true
+        },
+        "classification": "Original -9.81595% CPU/-9.09233% cycle pair exceeds initial control; retain as negative outlier, not within-control evidence. Reversed pair nearly flat."
+      },
+      "unpaced_repeat": {
+        "control": {
+          "evidence": "G:\\Temp\\Codex\\cdirecomp\\board-job-20261101\\gameplay-control-repeat\\campaign-evidence.json",
+          "identity": "G:\\Temp\\Codex\\cdirecomp\\board-job-20261101\\gameplay-control-repeat\\identity.json",
+          "settings": {
+            "presentation": "headless",
+            "audio": "dummy",
+            "pace_speed": 32.0,
+            "rtc_sync_host_on_startup": false,
+            "start_frame": 0,
+            "actual_pacing": false,
+            "actual_frontend": false,
+            "frame_stop_control": "startup_investigation"
+          },
+          "cpu_reductions_percent": [
+            1.1869436201780381
+          ],
+          "cycle_reductions_percent": [
+            1.1563602393726335
+          ],
+          "all_contracts_equal": true
+        },
+        "pairs": {
+          "evidence": "G:\\Temp\\Codex\\cdirecomp\\board-job-20261101\\gameplay-pairs-repeat\\campaign-evidence.json",
+          "identity": "G:\\Temp\\Codex\\cdirecomp\\board-job-20261101\\gameplay-pairs-repeat\\identity.json",
+          "settings": {
+            "presentation": "headless",
+            "audio": "dummy",
+            "pace_speed": 32.0,
+            "rtc_sync_host_on_startup": false,
+            "start_frame": 0,
+            "actual_pacing": false,
+            "actual_frontend": false,
+            "frame_stop_control": "startup_investigation"
+          },
+          "cpu_reductions_percent": [
+            -0.4608294930875667,
+            0.5856515373352855
+          ],
+          "cycle_reductions_percent": [
+            1.5802626252223395,
+            0.20116639883399623
+          ],
+          "all_contracts_equal": true
+        },
+        "classification": "Unchanged binaries/settings; initial slowdown did not reproduce. Neutral/inconclusive, no speedup claim."
+      },
+      "live_frontend": {
+        "control": {
+          "evidence": "G:\\Temp\\Codex\\cdirecomp\\board-job-20261101\\normal-control-live\\campaign-evidence.json",
+          "identity": "G:\\Temp\\Codex\\cdirecomp\\board-job-20261101\\normal-control-live\\identity.json",
+          "settings": {
+            "presentation": "dummy",
+            "audio": "dummy",
+            "pace_speed": 1.0,
+            "rtc_sync_host_on_startup": false,
+            "start_frame": 0,
+            "actual_pacing": true,
+            "actual_frontend": true,
+            "frame_stop_control": "tcp_live"
+          },
+          "cpu_reductions_percent": [
+            2.409638554216864
+          ],
+          "cycle_reductions_percent": [
+            -0.6251892331898823
+          ],
+          "all_contracts_equal": true
+        },
+        "pairs": {
+          "evidence": "G:\\Temp\\Codex\\cdirecomp\\board-job-20261101\\normal-pairs-live\\campaign-evidence.json",
+          "identity": "G:\\Temp\\Codex\\cdirecomp\\board-job-20261101\\normal-pairs-live\\identity.json",
+          "settings": {
+            "presentation": "dummy",
+            "audio": "dummy",
+            "pace_speed": 1.0,
+            "rtc_sync_host_on_startup": false,
+            "start_frame": 0,
+            "actual_pacing": true,
+            "actual_frontend": true,
+            "frame_stop_control": "tcp_live"
+          },
+          "cpu_reductions_percent": [
+            -1.9011406844106515,
+            1.6000000000000014
+          ],
+          "cycle_reductions_percent": [
+            1.5033219393230879,
+            0.6512242641463106
+          ],
+          "all_contracts_equal": true
+        },
+        "classification": "Neutral/inconclusive CPU time; actual pace1/frontend enabled with TCP live stop and SDL dummy. Not hardware-driver or listening qualification.",
+        "audio": {
+          "sectors": 124,
+          "frames": 249984,
+          "pcm_fnv1a": "6b99347f145a0030",
+          "queued_frames": 0,
+          "dropped_frames": 0
+        }
+      },
+      "native_activity": {
+        "unpaced13000": {
+          "jobs": 371795,
+          "quiet_quanta": 13667987,
+          "faithful_quanta": 372860
+        },
+        "live1600": {
+          "jobs": 278476,
+          "quiet_quanta": 10176944,
+          "faithful_quanta": 279517
+        },
+        "LLE_jobs": 0
+      },
+      "contracts": "Every unpaced and actual-live warm/control/reversed A/B full contract equal at exact endpoint; no aggregation of unlike frontend settings.",
+      "independent_review": {
+        "verdict": "KEEP",
+        "date": "2026-11-01",
+        "reviewer": "parent-arranged independent reviewer",
+        "scope": "Selected complete quiet STOP-board job; neutral/inconclusive, original nonreproduced negative outlier retained."
+      },
+      "branch_pr_status": "ready_for_stacked_PR_publication_unmerged",
+      "historical_preparation": "5968ddb component artifacts lacked main-loop compile hook; fixed at7181cfd before any built-game timing. Initial native-lle/native-hle directories are not final-wiring qualification; use native-lle-final/native-hle-final receipts above.",
+      "retained_storage": "All frozen evidence/sidecars, immutable dependencies and reusable HLE build/generated cache retained. Only known empty task temp directory removed.",
+      "work_remaining": "Incremental frontend/hardware10 and GPU11; combined current-build save/load, listening and owner final merge handoff remain separate. No further candidate9 tuning or runs requested.",
+      "prerequisite": null,
+      "prior_deferral_rejected": true
     },
     {
       "candidate": 10,
@@ -1171,14 +1360,14 @@
     "ledger": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\resource-ledger.json"
   },
   "current_serial_candidate": null,
-  "completed_serial_candidate": 6,
+  "completed_serial_candidate": 9,
   "awaiting_owner_checkin": false,
   "loader_job_evidence": "docs/loader-job-evidence.json",
   "drawing_job_evidence": "docs/drawing-job-evidence.json",
   "latest_qualified_heads": {
-    "engine_implementation": "da2cfbd293b3bb04e73e792c3b95b35d57013f78",
+    "engine_implementation": "7181cfd3cf52d2f87116fa42a328ec4191d4ce2d",
     "core": "cd1e5e28dc26ec6a887197aac7eaaf8c8c870019",
-    "consumer": "5846224dc25a799294dc2724568e2663349efed8"
+    "consumer": "da8ff6f89cf573d8d345b311bb4a9a5388d29cc4"
   },
   "loader_completion_audit": "docs/loader-job-evidence.json#reaudit_20261030",
   "benchmark_target_pool": {
@@ -1215,10 +1404,7 @@
   "candidate4_owner_issue": "beads-ttbl.4",
   "candidate6_owner_issue": "beads-ttbl.5",
   "candidate8_owner_issue": "beads-ttbl.6",
-  "next_serial_candidate": 9,
-  "remaining_candidates": [
-    9,
-    10,
-    11
-  ]
+  "next_serial_candidate": 10,
+  "remaining_candidates": [10, 11],
+  "candidate9_owner_issue": "beads-ttbl.7"
 }

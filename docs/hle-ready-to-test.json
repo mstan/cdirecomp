@@ -2,7 +2,7 @@
   "schema": 1,
   "owner_issue": "beads-oatv",
   "campaign_issue": "beads-2wy8.1",
-  "current_candidate": 9,
+  "current_candidate": 10,
   "rule": "Prepared, built, tested and accepted are distinct. Preserve independent review and serial per-game measurement/disposition gates. Capacity refusal changes useful preparation, not acceptance.",
   "items": [
     {
@@ -120,9 +120,36 @@
     },
     {
       "candidate": 9,
-      "state": "tracked",
-      "implementation": "not_started",
-      "required_next": "Coherent earliest-event board advancement preserving per-quantum truncated time, device order, MMIO visibility and IRQ frontiers."
+      "state": "accepted",
+      "implementation": "7181cfd3cf52d2f87116fa42a328ec4191d4ce2d",
+      "consumer": "da8ff6f89cf573d8d345b311bb4a9a5388d29cc4",
+      "owner_issue": "beads-ttbl.7",
+      "acceptance": "independent_KEEP_neutral_inconclusive_selected_quiet_STOP_board_job",
+      "evaluated_scope": "Complete quiet STOP-board intervals; active-CPU clocks remain faithful. Unpaced backend0..13000 and actual paced SDL dummy0..1600; four production-reference real-disc timelines.",
+      "raw_root": "G:\\Temp\\Codex\\cdirecomp\\board-job-20261101",
+      "final_binaries": {
+        "lle": {
+          "executable": "G:\\Temp\\Codex\\cdirecomp\\board-job-20261101\\native-lle-final\\HotelMarioRecomp.exe",
+          "receipt": "G:\\Temp\\Codex\\cdirecomp\\board-job-20261101\\native-lle-final\\HotelMarioRecomp.exe.build.json",
+          "sha256": "d517e87757d9abca382a65f8e99d24538f886c71b2b0367ebccff3d0099c7017"
+        },
+        "hle": {
+          "executable": "G:\\Temp\\Codex\\cdirecomp\\board-job-20261101\\native-hle-final\\HotelMarioRecomp.exe",
+          "receipt": "G:\\Temp\\Codex\\cdirecomp\\board-job-20261101\\native-hle-final\\HotelMarioRecomp.exe.build.json",
+          "sha256": "d5c223a9bf19d3b7b79d13468f4d6a31ed877853b3dca5fde3a38e6f328f6a7d"
+        }
+      },
+      "performance": "Neutral/inconclusive. Original -9.82% CPU/-9.09% cycles outlier retained; same-build bounded repeat mixed within CPU control, slowdown not reproduced. No speedup claim.",
+      "completed_reservations": [
+        "G:\\Temp\\Codex\\cdirecomp\\board-job-20261101\\build-final-reservation.json",
+        "G:\\Temp\\Codex\\cdirecomp\\board-job-20261101\\evaluate-reservation.json",
+        "G:\\Temp\\Codex\\cdirecomp\\board-job-20261101\\evaluate-repeat-reservation.json"
+      ],
+      "required_next": "Stacked PR publication; no more candidate9 tests/tuning. Incremental frontend/hardware10 and GPU11 remain; combined current-build save/load and owner merge handoff separate.",
+      "remaining_areas": [
+        10,
+        11
+      ]
     },
     {
       "candidate": 10,
