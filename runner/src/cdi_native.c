@@ -31,23 +31,21 @@ static uint32_t binding_count;
 #define CDI_SERVICE_HLE 0
 #endif
 #if CDI_SERVICE_HLE
-/* Conservative coverage of EVERY cached binding, including rejected/invalid
+/* Conservative bounds of EVERY cached binding, including rejected/invalid
  * identities. A miss skips only binding scans; sync-tag maintenance still
- * observes all writes. Marks accumulate until reset, so a resized/overlaid
- * binding cannot leave an uncovered old or expanded range. */
-enum { BINDING_PAGE_SHIFT=12, BINDING_PAGES=(CDI_RAM0_SIZE+CDI_RAM1_SIZE)>>BINDING_PAGE_SHIFT };
-static uint8_t binding_pages[BINDING_PAGES];
-static uint32_t binding_page(uint32_t address) {
-    return (address<CDI_RAM0_SIZE?address:CDI_RAM0_SIZE+address-CDI_RAM1_BASE)>>BINDING_PAGE_SHIFT;
-}
+ * observes all writes. Bounds only expand until reset, so a resized/overlaid
+ * binding cannot leave an uncovered old or expanded range. Two comparisons
+ * avoid page normalization/scanning on the common stack/context write path. */
+typedef struct {uint32_t first,last;} BindingRange;
+static BindingRange binding_ranges[2];
 static void cover_binding(uint32_t address,uint32_t size) {
-    uint32_t first=binding_page(address),last=binding_page(address+size-1);
-    memset(binding_pages+first,1,last-first+1);
+    BindingRange *range=&binding_ranges[address>=CDI_RAM1_BASE];
+    if(address<range->first)range->first=address;
+    if(address+size>range->last)range->last=address+size;
 }
-static int may_overlap_binding(uint32_t address,uint32_t size) {
-    uint32_t first=binding_page(address),last=binding_page(address+size-1);
-    for(uint32_t page=first;page<=last;page++)if(binding_pages[page])return 1;
-    return 0;
+static int may_overlap_binding(uint32_t address,uint64_t end) {
+    const BindingRange *range=&binding_ranges[address>=CDI_RAM1_BASE];
+    return address<range->last && end>range->first;
 }
 #endif
 static CdiNativeState stats;
@@ -88,7 +86,7 @@ void cdi_native_reset(void) {
     memset(tag_indices,0,sizeof tag_indices);tag_count=0;
     memset(bindings,0,sizeof bindings);binding_count=0;
 #if CDI_SERVICE_HLE
-    memset(binding_pages,0,sizeof binding_pages);
+    binding_ranges[0]=binding_ranges[1]=(BindingRange){UINT32_MAX,0};
 #endif
     memset(&stats,0,sizeof stats);stats.compiled=(uint32_t)g_cdi_native_module_count;
     /* Tokens remain unique across warm resets with retained guest RAM. */
@@ -103,7 +101,7 @@ void cdi_native_notify_write(uint32_t address, uint32_t size) {
     if (!g_cdi_native_module_count || !size || !ram(address,size)) return;
     uint64_t end=(uint64_t)address+size;
 #if CDI_SERVICE_HLE
-    if(may_overlap_binding(address,size))
+    if(may_overlap_binding(address,end))
 #endif
     for (uint32_t i=0;i<binding_count;i++) {
         Binding *b=&bindings[i];
