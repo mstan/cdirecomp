@@ -2,7 +2,7 @@
   "schema": 1,
   "owner_issue": "beads-oatv",
   "campaign_issue": "beads-2wy8.1",
-  "current_candidate": 4,
+  "current_candidate": 6,
   "rule": "Prepared, built, tested and accepted are distinct. Preserve independent review and serial per-game measurement/disposition gates. Capacity refusal changes useful preparation, not acceptance.",
   "items": [
     {
@@ -32,12 +32,12 @@
     },
     {
       "candidate": 4,
-      "state": "prepared",
-      "implementation": "not_started",
-      "acceptance": "not_evaluated",
-      "prepared_scope": "Exact real loading-phase profiling job prepared; owning issue claimed; profiling not run and native memory/publication implementation not started.",
+      "state": "accepted",
+      "implementation": "da2cfbd293b3bb04e73e792c3b95b35d57013f78",
+      "acceptance": "independent_KEEP_neutral_inconclusive_tested_boot_scope",
+      "prepared_scope": "Superseded by built and tested selected firmware rectangle fill; 37 actual-reference cases and real boot/return A/B complete.",
       "prerequisite": null,
-      "ready_job": "G:\\Temp\\Codex\\cdirecomp\\hle-burndown-20261031\\prepared-memory4\\profile-job.json",
+      "ready_job": null,
       "driver": {
         "path": "G:\\Temp\\Codex\\cdirecomp\\hle-burndown-20261031\\prepared-memory4\\profile-memory.py",
         "sha256": "e90cbfd93260ba4f3f1a59d958fc21aa0e5f0e6a2f722478e6edf6e1fbadb990"
@@ -46,7 +46,7 @@
         "path": "G:\\Temp\\Codex\\cdirecomp\\load-job-20261028\\profile-loading.py",
         "sha256": "4728849c9bb98db4f2021f1c82c3ec6e4ad9047f630126991daf231f80729aba"
       },
-      "job_kind": "selection profiling, not performance evidence or accepted gameplay repetition",
+      "job_kind": "Actual generated-reference and same-source native/faithful boot fill evaluation",
       "budgets": {
         "cpu_cores": 1.5,
         "gpu_percent": 0,
@@ -54,8 +54,28 @@
         "workspace_gib": 1
       },
       "compatible_target": "Windows with the frozen executable, assets, Python3.12+psutil and MinGW nm; local paths currently prepared",
-      "required_next": "Select measured complete copy/fill/publication boundary; include overlaps, faults, IRQ-visible progress, code invalidation and authoritative guest state.",
-      "owner_issue": "beads-ttbl.4"
+      "required_next": "Stacked PR handoff by reviewer, then candidate 6; no further tests requested.",
+      "owner_issue": "beads-ttbl.4",
+      "consumer": "5846224dc25a799294dc2724568e2663349efed8",
+      "evaluated_scope": "Hotel Mario USA normal-paced boot, process creation through caller continuation 0x445204 at field 731; per-byte ownership/invalidation bookkeeping retained.",
+      "completed_job": "G:\\Temp\\Codex\\cdirecomp\\memory-job-20261031\\boot-normal-job.json",
+      "completed_reservation": "G:\\Temp\\Codex\\cdirecomp\\memory-job-20261031\\boot-normal-reservation.json",
+      "performance": "neutral/inconclusive; no proven repeatable speedup or reproducible regression",
+      "resource_advisory": {
+        "cpu_cores": 1.25,
+        "gpu_percent": 0,
+        "ram_gib": 1,
+        "workspace_gib": 1
+      },
+      "budgets_advisory_only": true,
+      "independent_review": "KEEP (parent-arranged reviewer, 2026-11-01)",
+      "remaining_areas": [
+        6,
+        8,
+        9,
+        10,
+        11
+      ]
     },
     {
       "candidate": 6,
