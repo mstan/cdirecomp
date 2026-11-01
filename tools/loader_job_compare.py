@@ -45,7 +45,7 @@ def run(exe,args,label):
     command=[str(exe.resolve()),str(args.rom.resolve()),'--disc',str(args.disc.resolve()),
         '--fault-hold','--port',str(args.port),'--input-script',SCRIPT]
     if args.presentation=='headless':command.append('--headless')
-    if args.end_frame:command+=['--stop-frame',str(args.end_frame)]
+    if args.end_frame and not args.live_frame_stop:command+=['--stop-frame',str(args.end_frame)]
     samples=[];started=time.monotonic();host_before=psutil.cpu_times();armed=False
     with (out/'stdout.log').open('w') as stdout,(out/'stderr.log').open('w') as stderr:
         proc=subprocess.Popen(command,env=env,stdout=stdout,stderr=stderr,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
@@ -58,6 +58,9 @@ def run(exe,args,label):
                 if proc.poll() is not None:raise RuntimeError(f'{label}: runtime exited')
                 try:s=request(args.port,{'cmd':'status'},timeout=1)
                 except OSError:time.sleep(.02);continue
+                if args.end_frame and args.live_frame_stop and not armed:
+                    assert s['frame']<args.end_frame,'Frame stop armed too late'
+                    arm=request(args.port,{'cmd':'stop_frame','frame':args.end_frame});assert arm['ok'];armed=True
                 if not args.end_frame and not armed and s['frame']>=args.arm_frame:
                     arm=request(args.port,{'cmd':'stop_pc','pc':args.stop_pc});assert arm['ok'];armed=True
                 cpu=process.cpu_times();samples.append({'wall_s':time.monotonic()-started,
@@ -142,6 +145,7 @@ def main():
     p.add_argument('--stop-pc',type=lambda x:int(x,0),default=0x25F312)
     p.add_argument('--arm-frame',type=int,default=0)
     p.add_argument('--end-frame',type=int)
+    p.add_argument('--live-frame-stop',action='store_true',help='Arm existing TCP frame stop after startup, preserving pacing and frontend')
     p.add_argument('--expect-crc-error',action='store_true')
     p.add_argument('--reference-control',action='store_true',help='Explicit A/A run; no native activity expected')
     p.add_argument('--cpu-core',type=int,help='Matched process-local affinity; does not change other applications')
@@ -152,6 +156,7 @@ def main():
     args=p.parse_args()
     assert args.start_frame>=0,'Start frame must be zero (process creation) or positive'
     assert args.pace_speed>0,'Pacing multiplier must be positive'
+    assert not args.live_frame_stop or args.end_frame,'Live frame stop requires --end-frame'
     with socket.socket() as probe:assert probe.connect_ex(('127.0.0.1',args.port))!=0
     args.output.mkdir(parents=True,exist_ok=False)
     harness=args.output/'harness';harness.mkdir()
@@ -168,7 +173,10 @@ def main():
         'machine':{'platform':platform.platform(),'processor':platform.processor(),
                    'processor_identifier':os.environ.get('PROCESSOR_IDENTIFIER'),'logical_cpus':psutil.cpu_count()},
         'settings':{'presentation':args.presentation,'audio':'dummy','pace_speed':args.pace_speed,
-                    'rtc_sync_host_on_startup':False,'start_frame':args.start_frame},
+                    'rtc_sync_host_on_startup':False,'start_frame':args.start_frame,
+                    'actual_pacing':not args.end_frame or args.live_frame_stop,
+                    'actual_frontend':args.presentation=='dummy' and (not args.end_frame or args.live_frame_stop),
+                    'frame_stop_control':'tcp_live' if args.live_frame_stop else 'startup_investigation' if args.end_frame else None},
         'harness':[identity(x) for x in sorted(harness.iterdir())],
         'source':subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),
         'source_diff':subprocess.check_output(['git','diff'],text=True),
