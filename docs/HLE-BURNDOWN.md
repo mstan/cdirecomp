@@ -929,7 +929,11 @@ under `G:/Temp/Codex/cdirecomp/streaming-job-20261101`. The earlier nominal
 diagnose the actual frontend. All snapshots, fixture executables, raw failures
 and sidecar inputs remain retained, together with the reusable C: build/cache.
 Only 35,292 bytes of disposable renamed link objects and an empty temp directory
-were removed. Stacked PR handoff is next; no merge is authorized. **Three areas
+were removed. Stacked [engine PR #5](https://github.com/mstan/cdirecomp/pull/5)
+targets `perf/native-service-jobs-20261101` (creation head `bb40494`);
+[Hotel Mario PR #5](https://github.com/mstan/HotelMarioRecomp/pull/5) targets
+`perf/native-service-job-20261101` (head `0297c07`). Both are open and unmerged;
+no merge is authorized. **Three areas
 remain: whole-board 9, incremental frontend/hardware 10, GPU/high-resolution 11.**
 Listening, combined current-build save/load and final owner merge handoff remain
 outside this qualification. No additional measurements are requested.

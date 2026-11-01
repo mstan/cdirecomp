@@ -1068,7 +1068,12 @@
       "contracts": "Every unpaced and actual-live warm/control/A/B full RAM/register/device/every-frame/decoded-PCM contract equal through its exact endpoint; live retained PCM queue drains with zero drops.",
       "historical_nominal_live": "normal-stream is preserved as unpaced backend-only: startup --stop-frame disabled pacing/frontend despite pace1/dummy environment. It provides no frontend/listening claim; its host queue drops do not diagnose the actual frontend. evaluate-prelaunch-failed artifacts started no runtime.",
       "independent_review": {"verdict": "KEEP", "date": "2026-11-01", "reviewer": "parent-arranged independent reviewer", "scope": "selected CIAP progression; neutral/inconclusive CPU time with explicit live cycle caveats"},
-      "branch_pr_status": "handoff_pending",
+      "branch_pr_status": "stacked_PRs_open_unmerged",
+      "pull_requests": [
+        "https://github.com/mstan/cdirecomp/pull/5",
+        "https://github.com/mstan/HotelMarioRecomp/pull/5"
+      ],
+      "publication_engine_head": "bb40494ac1871a995a779e8a6d02e303aa95fe93",
       "reason": "Complete CIAP progression removes repeated no-event AP-pointer/clock publication across actual sector/audio/refill ownership boundaries while preserving authoritative state and the faithful backend. Independent KEEP under neutral-per-game policy, not a speedup claim.",
       "prerequisite": null,
       "prior_deferral_rejected": true,

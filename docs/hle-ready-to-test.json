@@ -111,7 +111,11 @@
       "acceptance": "independent_KEEP_CIAP_progression_neutral_inconclusive_CPU_with_live_cycle_caveat",
       "evaluated_scope": "Unpaced backend boot/gameplay0..13000 and actual live pace1 SDL dummy0..1600; three real-disc seek/filter/refill/DMA/IRQ/drained-PCM timelines. No listening or hardware-driver claim.",
       "raw_root": "G:/Temp/Codex/cdirecomp/streaming-job-20261101",
-      "required_next": "Stacked PR handoff then9 by assigned reviewer. Retain initial live negative pair and cycle caveats; no more tuning/checks requested. Combined batch current-build save/load and owner merge handoff remain open.",
+      "required_next": "Stacked PRs open and unmerged; candidate 9 is next. Retain initial live negative pair and cycle caveats; no more candidate8 tuning/checks requested. Combined batch current-build save/load and owner merge handoff remain open.",
+      "pull_requests": [
+        "https://github.com/mstan/cdirecomp/pull/5",
+        "https://github.com/mstan/HotelMarioRecomp/pull/5"
+      ],
       "remaining_areas": [9, 10, 11]
     },
     {
