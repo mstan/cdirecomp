@@ -3,18 +3,29 @@
 #include <stdint.h>
 
 typedef int (*CdiNativeDispatch)(uint32_t base, uint32_t offset);
+typedef void (*CdiNativeFunction)(void);
+typedef struct { uint32_t offset; CdiNativeFunction function; } CdiNativeEntry;
 typedef struct {
     const char *name;
     uint32_t size;
     uint8_t sha256[32];
     int (*has_offset)(uint32_t);
     CdiNativeDispatch dispatch;
+    /* Optional direct-call identities for build-selected native jobs. Older
+     * generated catalogs leave these zero and retain faithful execution. */
+    const CdiNativeEntry *entries;
+    size_t entry_count;
 } CdiNativeModule;
 
 extern const CdiNativeModule g_cdi_native_modules[];
 extern const size_t g_cdi_native_module_count;
 
 void cdi_native_reset(void);
+extern uint64_t g_cdi_native_invalidation_epoch;
+CdiNativeFunction cdi_native_find_function(const uint8_t digest[32], uint32_t offset,
+                                          const CdiNativeModule **module);
+int cdi_native_job_binding(const CdiNativeModule *module, uint32_t caller,
+                          uint32_t *base, uint64_t *token);
 /* Called AFTER every CPU/DMA RAM write. No guest loader state is replaced. */
 void cdi_native_notify_write(uint32_t address, uint32_t size);
 int cdi_native_has_address(uint32_t address);

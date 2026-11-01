@@ -2,7 +2,9 @@
 
 Saved at the owner's request on 2026-10-27. The owner subsequently activated
 the end-to-end slash goal; individual implementation and qualification have
-resumed, working solo.
+resumed. On 2026-10-31 the owner authorized independent subagent review after
+each remaining candidate, branch PRs for retained changes, and assignment of
+the next candidate. Measurement and acceptance gates remain serial.
 
 Owning issue: `beads-oatv`, under framework epic `beads-ttbl`, related to the
 central `optimization campaign` (`beads-2wy8.1`) with label
@@ -29,14 +31,14 @@ forced guest progress. Use authoritative guest RAM and verified contracts.
 ## Candidate dispositions
 
 These are complete jobs to evaluate. Related candidates can become one
-replacement across OS, memory and device boundaries. They are not ten fixed
+replacement across OS, memory and device boundaries. They are not fixed
 subsystem boundaries or a requirement to adopt every proposed optimization.
 
 | # | Candidate | Work the native replacement would remove | Current status |
 | --- | --- | --- | --- |
 | 1 | **Qualify the scanout candidate already written** | Repeated decoding, transparency, contribution and composition work across pixels | **Qualified as part of the combined native frame job.** Three alternating Hotel Mario pairs save 23.0-26.0% CPU/field with complete contract equality. Scanout-only performance remains inconclusive. |
 | 2 | **Complete frame production and publication** | Repeated framebuffer hashing, copying, diagnostic reconstruction and publication work | **Implemented and qualified with candidate 1.** Exact content identity, retained storage and frontend handoff remove duplicate work without changing field cadence. |
-| 3 | **Graphics service to completed drawing job** | Guest drawing preparation, intermediate memory traffic, control-list construction and repeated renderer preparation | **Open, queued.** Renderer preparation consolidated into 1/2 and native continuations into 7; broader guest-job investigation remains work to perform. |
+| 3 | **Graphics service to completed drawing job** | Guest drawing preparation, intermediate memory traffic, control-list construction and repeated renderer preparation | **Qualified native queue job; independent review KEEP, final performance neutral/inconclusive.** Real callbacks, queue publication and device/IRQ frontiers match. Reviewer-found debugger stops are fixed and regression-tested. Stacked [engine PR #2](https://github.com/mstan/cdirecomp/pull/2) and [consumer PR #2](https://github.com/mstan/HotelMarioRecomp/pull/2) are open and unmerged; historical pre-fix gains are not a current speedup claim. |
 | 4 | **Memory operation to fully published result** | Instruction-by-instruction copying/filling plus repeated module invalidation, tag maintenance and dirty tracking | **Open, queued.** Previous gameplay-only attribution did not qualify complete bulk operations. |
 | 5 | **File/module load to executable module ready** | Repeated sector handling, copying, validation, relocation, linking, hashing and native binding | **Selected native verification job implemented and qualified in the real load-to-ready pipeline.** Three matched pairs use 23.4–33.3% fewer process cycles during loading; later gameplay is neutral/inconclusive. Kernel I/O, linking and scheduling stay authoritative. |
 | 6 | **Frequently executed OS-9 service jobs** | Recompiled kernel algorithms and internal dispatch that a complete native operation could replace | **Open, queued.** Service attribution and boundary contracts are remaining implementation work. |
@@ -44,10 +46,12 @@ subsystem boundaries or a requirement to adopt every proposed optimization.
 | 8 | **Complete CD/XA streaming jobs** | Repeated work across sector selection, decoding, buffer ownership, DMA/refill, guest drivers and audio handoff | **Open, queued.** Complete streaming integration and actual seek/channel/refill qualification remain work to perform. |
 | 9 | **Whole-board event advancement** | Calling timer, input transport, CD/audio, RTC, raster and pacing machinery after every instruction | **Open, queued.** The naïve bulk-sum counterexample is a design constraint, not a rejection of a correct native span. |
 | 10 | **Frame to host presentation** | Redundant frame copies, texture uploads, conversions and presentation preparation | Copy/upload consolidated into 2 and qualified through SDL dummy/software. **Hardware-driver qualification remains open, queued.** |
+| 11 | **GPU resident jobs and high-resolution rendering** | CPU rendering at enhanced pixel density, expanded frame uploads, duplicate native/enhanced preparation and unbounded scale-dependent intermediates | **New, open and queued; guidance tracked only.** Implement the owner's GPU rendering guide under `beads-ttbl.3`: required 16x at full native speed with headroom on the owner's PC, desired 32x/64x, later lower-end targets. Hardware qualification can satisfy 10 jointly only after both contracts pass. |
 
 ## Current checkpoint
 
-- Branch: `perf/native-scanout-hle-20261027`, based on framework `f3c8d57`.
+- Current engine branch: `perf/native-drawing-jobs-20261028`; supported consumer
+  branch: `HotelMarioRecomp/perf/native-drawing-job-20261028`.
 - Qualified engine checkpoints: `a83c317` (frame job), `e92baf8` (coarse native
   catalog), `85c869e` (completed-line jobs). Shared core: `3955bf3`.
 - Supported consumer integration: `16353fc` on
@@ -56,8 +60,15 @@ subsystem boundaries or a requirement to adopt every proposed optimization.
   candidates 3/4/5/6/8/9 and hardware presentation still require actual work.
   Missing workload attribution, contracts and differential fixtures are work
   within this goal. Work serially, checking in with the owner after each.
-  Candidate **5** has now completed its serial implementation and qualification
-  below. **Stopped for owner check-in before selecting another candidate.**
+  Candidate **5** has completed its serial implementation and qualification
+  below. The owner resumed the entire remaining set on 2026-10-31;
+  **candidate 3 now has independent KEEP review** after implementation,
+  objective debugger repair and fresh built-game measurement, classified
+  neutral/inconclusive. Stacked branch PRs are open and unmerged; candidate 4 is
+  next under `beads-ttbl.4`. After each independent keep/fix/reject review,
+  create branch PRs for retained work and assign the next candidate. Do not
+  merge without owner approval. Remaining work is 4, 6, 8, 9, hardware 10 and
+  the new GPU rendering candidate 11. Reuse accepted 1/2/5/7 evidence.
 - Scanout selection is `-DCDI_VIDEO_BACKEND=LLE` or
   `-DCDI_VIDEO_BACKEND=HLE`. The repository default remains LLE.
 - HLE computes joint source/matte color spans, consolidating contribution,
@@ -553,3 +564,218 @@ retained in `loader-job-evidence.json`. Remote backup sync is an administrative
 gap, separate from this candidate's completed engineering qualification.
 
 Evidence: `G:/Temp/Codex/cdirecomp/load-job-20261028`.
+
+### Candidate 3 checkpoint — owner-requested pause, 2026-10-28
+
+Native deferred drawing orchestration is implemented on
+`perf/native-drawing-jobs-20261028`, source `faf11af`. It executes the actual
+drawing callbacks and publishes authoritative queue/buffer state, preserving
+device quanta, IRQs, invalidation and faults. Independent build-time drawing
+selection is integrated in the consumer on
+`perf/native-drawing-job-20261028`, `a9052e7`. Generic default remains LLE.
+
+All 58 actual generated-reference differential cases pass, including bitmap
+painting and repeated CPU materialization followed by continuation. All 13
+runtime tests, seven compiler tests and function-alias integration pass.
+Final Linux HLE=0/HLE=1 strict compilation passes.
+
+Three warmed alternating same-source HLE/LLE gameplay pairs match complete
+CPU/RAM/device/audio state and every frame through 13,000. Process-cycle
+reductions are 5.88%, 7.25%, 5.82% (median **5.88%**), against identical-build
+controls of +2.86% and −0.43%. Observed CPU reductions are 5.85%, 8.01%, 7.40%,
+but CPU controls vary by up to 7.99%, so CPU time alone does not prove the gain.
+The final SDL dummy/software warm and retained contracts also match; its
+retained −2.78% CPU/−1.73% cycle difference is **neutral/inconclusive** within
+control variation. No whole-game, other-title or hardware-driver claim.
+
+Earlier comparisons with the older binary also made rebuilt LLE look faster;
+those gains are not attributed to this native job. The first direct native
+experiment was mixed. The second publishes only changed registers instead of
+copying the full CPU repeatedly; all earlier raw results remain retained.
+
+Machine-readable evidence: [drawing-job-evidence.json](drawing-job-evidence.json).
+Raw root: `C:/Users/Matthew/AppData/Local/Temp/Codex/cdirecomp/drawing-job-20261028`.
+Code and supported integration are committed locally. The existing three PRs
+remain open and unmerged; no candidate-3 PR has been opened. Final review,
+narrative/Beads handoff and disposable-scratch cleanup are pending continuation.
+Builds, generated sources and immutable snapshots are retained for that handoff.
+Owner saves/settings and delivery folders were untouched; QA was muted and
+background-only. No other candidate was started. **Work is paused at the
+owner's request; resume only after explicit continuation.**
+
+### Candidate 5 completion re-audit and target pool, 2026-10-30
+
+The reactivated bounded goal names candidate 5 only. Reused its accepted
+evidence: all five retained binaries and their complete link-time source
+inputs verify, the three PR heads are unchanged, and equality was recomputed
+from 40 retained raw runs covering loading, corrupt-module errors, later
+bindings/unload, gameplay and the SDL software frontend. The 74 production
+firmware differential cases and supporting test logs remain intact. No new
+game runs, builds or optimization experiments were needed. The measured
+loading result remains **23.98% fewer process cycles**; later gameplay remains
+neutral/inconclusive. The native verification job is integrated in the real
+load-to-ready pipeline, whose I/O, allocation, relocation, linking, unload,
+scheduling and errors remain authoritative kernel operations.
+
+Retired another 96,540,256 bytes of obsolete build objects and duplicate
+staging outputs. Preserved `hle-build/inputs` at its original path because
+passing receipts reference its frozen consumer CMake source. Passing binaries,
+raw samples, native saves/settings and the separately paused candidate-3
+workspace remain intact. Audit, cleanup and PR evidence are indexed in
+[loader-job-evidence.json](loader-job-evidence.json).
+
+Use the installed shared capacity pool for future compatible workloads:
+this PC, SERVER and Steam Deck SSH. The client is
+`C:/Users/Matthew/.local/bin/benchmark_hosts.py`, invoked with
+`C:/Users/Matthew/.pyenv/pyenv-win/versions/3.12.5/python.exe`.
+`probe` measures capacity; `run --os windows|linux --owner beads-oatv
+--job-file <JSON>` reserves realistic CPU/GPU/RAM/workspace budgets and rotates
+compatible targets. Use exact JSON `argv`/`env` on Windows. Both Deck SSH
+aliases share one physical-host ledger, with existing identities and strict
+host-key checks. Other games, compilers and services do not automatically
+exclude a target. Keep every matched pair on one host/configuration and
+retain telemetry and identities. Missing required telemetry does not pass;
+Deck timing requires a verified Linux build/runtime/backend first.
+
+Within authorized scope, unavailable capacity must not stall preparation:
+prepare isolated prototypes, switches, fixtures, frozen baselines and exact
+runnable jobs with realistic budgets for later testing. Keep prepared, built,
+tested and accepted states distinct, and preserve each item's independent
+serial measurement/disposition gate. This does not resume owner-paused work,
+permit extra subagents, bypass reservations or qualify unmeasured changes.
+
+All three hosts passed today's declared CPU-only capacity probe. The read-only
+evidence audit also completed under a local capacity reservation; this is not
+a new game qualification. Historical quiet-host gates and accepted gameplay
+checks were not changed or repeated. Adding the pool does not authorize a
+new benchmark matrix. **Candidate 5 remains qualified; stop at this serial
+checkpoint. Candidate 3 remains paused, and no other candidate was started.**
+
+### Candidate 11: GPU high-resolution rendering
+
+Added at the owner's explicit request on 2026-10-31. This work was **not**
+covered by the previous candidate-10 copy/upload and hardware-presentation
+entry. Owning issue: `beads-ttbl.3`, related to `beads-oatv` and the optimization
+campaign. Source: [GPU-HIGH-RESOLUTION-RENDERING-GUIDE.md](C:/Users/Matthew/Desktop/GPU-HIGH-RESOLUTION-RENDERING-GUIDE.md),
+SHA256 `644ec4bb9efa5330351908e78e81ce9df2ebee7f71187c64f3cf19c27f8521bd`.
+Status is **tracked only**, with no GPU implementation or high-scale result
+claimed. The owner has resumed the remaining burndown; historical pause and
+checkpoint notes above describe earlier stops.
+
+The required outcome is **16x internal resolution at full native cadence with
+measured headroom on the owner's PC first**. Desired outcomes are 32x and 64x;
+16x on Steam Deck and server/lower-end hardware follows later. Set numerical
+budgets from this engine's baseline. The guide's historical approximately 90%
+figure is unverified and must never be used as a target or a claimed result.
+
+The implementation must satisfy the complete job contract:
+
+1. Publish compact immutable raster/draw jobs at a natural boundary. Keep CPU
+   preparation independent of scale; share the same preparation with exact
+   native output. Reuse the existing frame, line and source-identity work.
+2. Keep source data resident on the GPU and upload jobs plus changed source
+   ranges. Invalidate for every guest CPU/DMA writer, reset, state restore and
+   rollback. Never upload an expanded enhanced frame each field.
+3. Draw ordered visible work on the GPU at the selected density. Bound targets
+   and intermediates by the job/tile rather than a full scale-squared shadow
+   arena. Admit high scales using actual memory/texture limits and degrade
+   presentation gracefully with a logged reason.
+4. Preserve native framebuffer, guest-memory and canonical state/hash results
+   exactly at every scale and against the pre-change build. Preserve all guest
+   framebuffer readbacks and render-to-texture behavior. Enhanced output stays
+   outside canonical serialization, hashes and guest reads; invalidate its
+   caches/history on current-build save/load, rollback and reset.
+5. Keep enhancements local to presentation/netplay display settings by default.
+   Any GPU result feeding simulation requires integer-exact cross-vendor and
+   backend qualification plus mixed-peer rollback, a common profile selected
+   before frame 0 and a software fallback. Do not invent asset detail.
+6. Keep the same-contract portable CPU fallback and build/run it on another
+   compatible target. Gate optional host features without breaking other
+   supported builds. Old save-state compatibility is not required.
+
+Qualification must retain matched built-game before/after evidence, exact
+source/binary identities, settings, raw samples and host load/capacity records:
+
+- Establish CPU cost, per-pass **GPU timestamps**, upload bytes and process/GPU
+  memory at 1x, 2x, 4x and the current maximum. Separate upscaling overhead from
+  native-pass cost; use GPU timestamps at 1x/4x/maximum before and after.
+- Prove CPU preparation and per-frame upload do not grow with scale, while
+  native pixels/RAM/state remain exact. Actually exercise current-build
+  save/load, rollback, reset, guest readbacks and real window resize.
+- Qualify required 16x speed/headroom and bounded high-scale memory/admission
+  on the owner's PC first. Keep desired/lower-end results distinct from the
+  required acceptance. Enlarging a native SDL texture alone does not establish
+  the guide's internal-resolution and resident-job contract.
+- Read the in-house reference commits in `F:/Projects/gbarecomp/gbarecomp`:
+  `4edc278`, `ba32c62`, `f646f81`, `ffa4f2f`, `4ea8f55`, `a385e0b`, `4261f07`.
+  Design from hardware documentation, this ecosystem and that in-house work;
+  do not copy, translate or cite third-party renderer source or embed the
+  independent accuracy oracle into the shipping path.
+
+Candidate 10's remaining hardware-driver checks may be consolidated into this
+implementation only after the shared actual-window/backend profile, resize,
+expose and pixel-readback contracts pass. Neither dummy/software evidence nor
+this added checklist completes either candidate. Apply the independent final
+subagent keep/fix/reject review and branch-PR handoff before moving on.
+
+### Candidate 3 final independent review, 2026-10-31
+
+Independent review found that a delayed instruction stop activated inside a
+drawing callback, or a future-PC stop armed during a device clock, could be
+skipped by native orchestration. Both failures were reproduced through the
+real TCP debugger before repair. Source `49c6b21` publishes an observation epoch
+after stop changes and checks it before each private operation. It materializes
+the exact CPU prefix and resumes faithful execution at the current operation,
+with code invalidation retaining priority. Both held-state regression cases
+now match registers, full 1 MiB RAM and retained device state; each verifies
+actual native admission and one faithful fallback. The 58 production/reference
+cases and final Linux HLE=0/HLE=1 strict checks also pass.
+
+Fresh matched fixed-source comparisons use the supported LLE and HLE builds,
+both with the previous qualified frame/loader packages. Three headless pairs
+have process-cycle differences **−2.45%, +9.50%, +7.44%**; the contemporaneous
+identical-LLE control varies **+10.01%**. CPU differences are −2.51%, +8.89%,
++7.29%, against +8.72% control variation. The SDL dummy/software retained pair
+is +6.47% CPU/+6.35% cycles. All results are **neutral/inconclusive** within
+control variation: neither positive medians nor the earlier pre-fix gain
+establish a current speedup. No reproducible regression is shown.
+
+All eight final warm/retained comparisons match full guest contracts and every
+frame through 13,000. The independent reviewer recomputed raw comparisons,
+RAM hashes, identities, activity and lease evidence and recommends **KEEP**
+under the owner's neutral-per-game rule. This is a bounded complete native
+queue service with exact-identity admission, real callbacks, authoritative
+state and an independent faithful fallback; retention is not a speedup claim.
+Consumer integration `2123474` pins the fix. Passing source/binary identities,
+review and final raw evidence are indexed in
+[drawing-job-evidence.json](drawing-job-evidence.json). No PR is merged.
+
+The concrete [ready-to-test queue](hle-ready-to-test.json) separates preparation,
+builds, tests and acceptance. Candidate 4 already has an exact loading-phase
+profiling job and realistic resource budget prepared; it has not been run or
+implemented. Remaining candidates retain their individual measurement and
+independent final review gates. Continue from candidate 3's PR handoff to the
+next candidate without repeating accepted gameplay checks.
+
+### Candidate 3 publication and cleanup checkpoint, 2026-10-31
+
+Independent disposition is **KEEP**, with neutral/inconclusive performance.
+The stacked [engine PR #2](https://github.com/mstan/cdirecomp/pull/2) targets
+`perf/native-scanout-hle-20261027` (`a10bd45`); [Hotel Mario PR #2](https://github.com/mstan/HotelMarioRecomp/pull/2)
+targets `perf/native-jobs-20261028` (`cf5a4ed`). Creation heads are `4ab28cf`
+and `2123474`; tested implementation remains `49c6b21`. Both are open and
+unmerged. The independent review, raw evidence and exact identities remain
+indexed in [drawing-job-evidence.json](drawing-job-evidence.json).
+
+Audited cleanup removed 1,309,598 bytes of disposable compile scratch.
+Current C: build/generated cache, **all immutable source/input snapshots**,
+raw failures/results and passing debugger/reference fixtures remain. The new
+G: frozen builds depend on the older C: register-snapshot input files; those
+are permanent retained evidence for this campaign. Cleanup receipt:
+`G:/Temp/Codex/cdirecomp/drawing-review-20261031/cleanup.json`.
+
+Proceed directly to candidate **4**, owning issue `beads-ttbl.4`, on an
+isolated branch. Its exact profiling recipe is prepared, not measured. Select
+and implement a complete native memory operation through authoritative
+publication, then qualify correctness and built-game behavior and obtain an
+independent final review. Broad burndown and campaign remain open.

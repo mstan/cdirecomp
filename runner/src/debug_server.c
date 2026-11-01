@@ -20,6 +20,7 @@
  */
 #include "cdi_runtime.h"
 #include "cdi_loader_jobs.h"
+#include "cdi_drawing_jobs.h"
 #include "debug_server.h"
 #include "cosim_state.h"
 #include "cdi_media.h"
@@ -153,6 +154,11 @@ static uint64_t       s_trace_seq = 0;   /* number of blocks captured */
 uint64_t debug_trace_sequence(void) {
     return s_trace_seq;
 }
+int debug_trace_point(uint64_t seq,uint32_t *pc,uint64_t *cycles) {
+    if(seq>=s_trace_seq || s_trace_seq-seq>CDI_TRACE_RING_LEN)return 0;
+    const CdiTraceRecord *r=&s_trace_ring[seq&CDI_TRACE_MASK];
+    *pc=r->cpu.PC;*cycles=r->total_cyc;return 1;
+}
 
 /* Side-effect-free big-endian longword read of guest memory. debug_peek8 lives
  * in cdi_bus.c and, unlike m68k_read, does NOT touch g_last_access_addr — so
@@ -202,6 +208,7 @@ static volatile int s_debug_held;
 typedef struct { uint32_t pc; uint32_t skip; uint32_t delay; } CdiStopPc;
 static CdiStopPc  s_stoppc[CDI_STOPPC_MAX];
 static atomic_int s_stoppc_armed;   /* count of armed slots — hot-path gate */
+atomic_uint g_debug_native_observation_epoch;
 int debug_native_job_allowed(uint32_t first, uint32_t limit) {
 #ifdef CDI_COSIM
     (void)first; (void)limit;
@@ -222,7 +229,10 @@ static void debug_check_stop_pc(void) {
         if (s_stoppc[i].skip) { s_stoppc[i].skip--; continue; }
         s_stoppc[i].pc = 0;
         atomic_fetch_sub_explicit(&s_stoppc_armed, 1, memory_order_relaxed);
-        if (s_stoppc[i].delay) g_stop_seq = s_trace_seq + s_stoppc[i].delay;
+        if (s_stoppc[i].delay) {
+            g_stop_seq = s_trace_seq + s_stoppc[i].delay;
+            atomic_fetch_add_explicit(&g_debug_native_observation_epoch,1,memory_order_release);
+        }
         else cdi_fault_hold();
         return;
     }
@@ -617,6 +627,7 @@ static void resp_stop_pc(const char *line, char *out, int outlen) {
         s_stoppc[i].delay = (uint32_t)delay;
         s_stoppc[i].pc    = (uint32_t)pc;   /* pc last: scan gate below */
         atomic_fetch_add_explicit(&s_stoppc_armed, 1, memory_order_release);
+        atomic_fetch_add_explicit(&g_debug_native_observation_epoch,1,memory_order_release);
         snprintf(out, outlen,
                  "{\"ok\":true,\"slot\":%d,\"pc\":%llu,\"skip\":%llu,\"delay\":%llu}",
                  i, (unsigned long long)pc, (unsigned long long)skip,
@@ -1319,6 +1330,12 @@ static int handle_line(const char *line, char *out, int outlen) {
             (unsigned long long)job.spans,(unsigned long long)job.words,
             (unsigned long long)job.interrupted,(unsigned long long)job.yielded);
     }
+    else if (!strcmp(cmd, "drawing_jobs")) {
+        CdiDrawingJobState job;cdi_drawing_job_state(&job);
+        snprintf(out,outlen,"{\"ok\":true,\"jobs\":%llu,\"empty_checks\":%llu,\"callbacks\":%llu,\"interrupted\":%llu,\"fallbacks\":%llu}",
+            (unsigned long long)job.jobs,(unsigned long long)job.empty_checks,
+            (unsigned long long)job.callbacks,(unsigned long long)job.interrupted,(unsigned long long)job.fallbacks);
+    }
     else if (!strcmp(cmd, "video_clut"))     resp_video_clut(out, outlen);
     else if (!strcmp(cmd, "disc_state"))     resp_disc_state(out, outlen);
     else if (!strcmp(cmd, "mount_disc"))     resp_mount_disc(line, out, outlen);
@@ -1435,6 +1452,7 @@ int g_hold_on_fault = 0;
 
 void cdi_fault_hold(void) {
     cdi_loader_sync_cpu();
+    cdi_drawing_sync_cpu();
     s_debug_held = 1;   /* status reports "held":1 — distinct from g_halted (STOP) */
     fprintf(stderr, "[fault-hold] frozen at fault; rings live on :%d for inspection. "
                     "Ctrl-C to exit.\n", s_port);

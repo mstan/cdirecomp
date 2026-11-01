@@ -1,0 +1,779 @@
+{
+  "schema": 1,
+  "candidate": 3,
+  "status": "accepted complete native queue job; independent KEEP; neutral/inconclusive performance; stacked branch PRs open and unmerged",
+  "owner_issue": "beads-oatv",
+  "campaign_issue": "beads-2wy8.1",
+  "consumer_issue": "beads-7t8h",
+  "game": "Hotel Mario (USA)",
+  "engine_implementation": "49c6b21b6fa2312cdb8ecbab6bef5866681b64d8",
+  "core_head": "cd1e5e28dc26ec6a887197aac7eaaf8c8c870019",
+  "consumer_head": "2123474ded8ab6d962c48ed2531f3e4afe797207",
+  "package": "Previously qualified native frame/coarse PIC/line-reuse/module-verification jobs plus SHA-bound native deferred drawing orchestration",
+  "reference_package": "Same new generator/runtime and optimization package, with DrawingBackend=LLE instead of HLE",
+  "scope": "Complete deferred drawing queue service, executing actual guest callbacks and publishing authoritative queue/buffer state. Not a rewrite of every graphics callback or scene algorithm.",
+  "raw_evidence_root": "G:\\Temp\\Codex\\cdirecomp\\hle-burndown-20261031",
+  "selection": {
+    "profile": {
+      "path": "C:\\Users\\Matthew\\AppData\\Local\\Temp\\Codex\\cdirecomp\\drawing-job-20261028\\drawing-profile.json",
+      "bytes": 2378488,
+      "sha256": "36ff3909a309d2adf4ce963f69ddbd7ceca86c5fe08dcb86c48dd8a8a8179baf"
+    },
+    "analysis": {
+      "path": "C:\\Users\\Matthew\\AppData\\Local\\Temp\\Codex\\cdirecomp\\drawing-job-20261028\\selection-summary.json",
+      "bytes": 58298,
+      "sha256": "2f07d5f02c05d4c6e67091ec79acf6f21eb18abfb617dd56f04640b178dc8a71"
+    },
+    "samples": 4157,
+    "queue_bucket_samples": 1195,
+    "workload_fields": [
+      9400,
+      13000
+    ],
+    "module_sha256": "55efd93e44fdc31aceaed4d2651d648cc32370a95da7afabfd5740340a44296b",
+    "offset": "0x17018",
+    "notes": "ASLR-correct paired host/guest suspended-thread sampling, selection only; 256-byte bucket includes queue/device overhead. Actual bitmap callback at module+0x19E4."
+  },
+  "performance": {
+    "classification": "neutral/inconclusive in final headless and SDL software workloads; no proven speedup or reproducible regression",
+    "fields": [
+      9400,
+      13000
+    ],
+    "pairs": 3,
+    "control_pairs": 1,
+    "frontend_pairs": 1,
+    "cpu_reduction_percent": [
+      -2.507836990595602,
+      8.891712745131708,
+      7.288953500111073
+    ],
+    "process_cycle_reduction_percent": [
+      -2.4469097945193585,
+      9.497201146762556,
+      7.438118170114683
+    ],
+    "observed_median_cpu_reduction_percent": 7.288953500111073,
+    "observed_median_cycle_reduction_percent": 7.438118170114683,
+    "control_cpu_differences_percent": [
+      8.719201359388261
+    ],
+    "control_cycle_differences_percent": [
+      10.013733236200274
+    ],
+    "frontend_cpu_reduction_percent": [
+      6.473126716359356
+    ],
+    "frontend_cycle_reduction_percent": [
+      6.3462333499009755
+    ],
+    "interpretation": "The fixed-source mixed A/B differences lie within the contemporaneous identical-LLE control variation (10.0137% cycles,8.7192% CPU). Positive point estimates/medians are not proven wins. A single -2.45% slower headless pair is not a reproducible regression. SDL software remains neutral/inconclusive.",
+    "method": "Warm both builds; alternate pair order; same source/compiler/options except independent DrawingBackend; logical CPU15; fixed real controller input/RTC/config; muted. Keep capture outside timing and retain all raw host/process samples.",
+    "capacity_reservation": {
+      "path": "G:\\Temp\\Codex\\cdirecomp\\hle-burndown-20261031\\timing-reservation-retry.json",
+      "bytes": 1801,
+      "sha256": "f8a7d5555afed83f9b468b60d094e3ac79185fcb853d441ae7524a6d8ec74548"
+    },
+    "costs": [
+      {
+        "label": "pair1-reference",
+        "binary_bytes": 34051803,
+        "peak_rss_bytes": 216739840
+      },
+      {
+        "label": "pair1-candidate",
+        "binary_bytes": 34059563,
+        "peak_rss_bytes": 216657920
+      },
+      {
+        "label": "pair2-candidate",
+        "binary_bytes": 34059563,
+        "peak_rss_bytes": 216662016
+      },
+      {
+        "label": "pair2-reference",
+        "binary_bytes": 34051803,
+        "peak_rss_bytes": 216739840
+      },
+      {
+        "label": "pair3-reference",
+        "binary_bytes": 34051803,
+        "peak_rss_bytes": 216743936
+      },
+      {
+        "label": "pair3-candidate",
+        "binary_bytes": 34059563,
+        "peak_rss_bytes": 216657920
+      }
+    ],
+    "reassessment": "Initial older-binary comparisons were positive but the rebuilt LLE control also improved. The first direct same-source HLE/LLE experiment was mixed, so no isolated gain is claimed from it. Second implementation publishes only changed registers, retaining full materialization at exceptional frontiers. All first-attempt results and identities remain retained. Final independent review required an observation fix. Remeasured the changed source; current results are neutral and do not inherit the historical gain."
+  },
+  "correctness": {
+    "production_generated_reference": {
+      "path": "G:\\Temp\\Codex\\cdirecomp\\hle-burndown-20261031\\native-differential-fixed\\summary.json",
+      "bytes": 111370,
+      "sha256": "c74e99a02c85ddda7b2b2c5b769f2aae67f69537e55664437dc6a636d209ee10"
+    },
+    "cases": 58,
+    "coverage": [
+      "Budgets zero/negative/1/2/8/16 and large-budget fallback",
+      "Empty/nonempty/full/wrapping guest queue",
+      "Actual bitmap callback must paint RAM",
+      "Interpreted callback clobbers D4",
+      "Callback invalidates its own module",
+      "Stack prologue invalidates module",
+      "Real invalid-cursor bus fault",
+      "IRQ frontiers derived from actual generated-reference trace",
+      "Repeated CPU materialization followed by continuation at every device quantum, empty and wrapping nonempty queues"
+    ],
+    "game_contract": "All registers/flags, complete 1MiB RAM, device/video/audio state, module/IKAT events and every completed frame1..13000 match in every warm and retained comparison.",
+    "native_activity": {
+      "ok": true,
+      "jobs": 579679,
+      "empty_checks": 4425732,
+      "callbacks": 1092,
+      "interrupted": 9607,
+      "fallbacks": 0
+    },
+    "runtime_tests": 13,
+    "compiler_tests": 7,
+    "function_alias_integration": "pass",
+    "runtime_log": {
+      "path": "C:\\Users\\Matthew\\AppData\\Local\\Temp\\Codex\\cdirecomp\\drawing-job-20261028\\component-tests.log",
+      "bytes": 10060,
+      "sha256": "9131ab0334230d0cd2a5758614cced4b3109350bd8d9c07e642a1f9c2f830856"
+    },
+    "compiler_log": {
+      "path": "C:\\Users\\Matthew\\AppData\\Local\\Temp\\Codex\\cdirecomp\\drawing-job-20261028\\compiler-tests.log",
+      "bytes": 9646,
+      "sha256": "999fd65a95910d8769608fb52703ec510b6f2e70a37412a33fde0b680629dc9a"
+    },
+    "portable_log": {
+      "path": "C:\\Users\\Matthew\\AppData\\Local\\Temp\\Codex\\cdirecomp\\drawing-job-20261028\\portable-checks.log",
+      "bytes": 164,
+      "sha256": "75eb80d59106bebcfa0e0e57628bfd60d170882950aa6a6ec9b190dc737d2709"
+    },
+    "portable_checks": "Windows Release build and Linux GCC final HLE=0/HLE=1 strict syntax compilation. No assembly/SIMD/new platform dependency; no Linux runtime performance claim.",
+    "faithful_build": "Supported DrawingBackend=LLE matches prior package through13000 and records zero drawing jobs.",
+    "supported_equivalence": {
+      "path": "G:\\Temp\\Codex\\cdirecomp\\hle-burndown-20261031\\fixed-supported-equivalence.json",
+      "bytes": 2957,
+      "sha256": "b6116dc8eb3023bdaa19c4febf3a0bff3780fd60c2faa491a3f96e9319ed7ff7"
+    },
+    "generated_body_equivalence": {
+      "path": "C:\\Users\\Matthew\\AppData\\Local\\Temp\\Codex\\cdirecomp\\drawing-job-20261028\\generated-equivalence.json",
+      "bytes": 299,
+      "sha256": "c4d59c39c1c0379fb2fe82f14c841d3f394e8e42081cef1de0dc195e99380292"
+    },
+    "debugger_regression_before": {
+      "path": "G:\\Temp\\Codex\\cdirecomp\\hle-burndown-20261031\\debugger-before\\summary.json",
+      "bytes": 93863,
+      "sha256": "f2f6a093499d02ad96546d5057220693a61185e4e46e6fdb1639c94306605459"
+    },
+    "debugger_regression_after": {
+      "path": "G:\\Temp\\Codex\\cdirecomp\\hle-burndown-20261031\\debugger-fixed\\summary.json",
+      "bytes": 94566,
+      "sha256": "433c2996a5eaf5b8b0190a32086e9ae1b734f69b69cd1b2c59dfc95039df71cd"
+    },
+    "debugger_cases": 2,
+    "fix": "Per-operation atomic observation epoch; release publication after stop arm/delayed activation, acquire before skipped operations; invalidation first; materialize and resume faithful current operation.",
+    "portable_logs": [
+      {
+        "path": "G:\\Temp\\Codex\\cdirecomp\\hle-burndown-20261031\\linux-fix-HLE0.log",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "path": "G:\\Temp\\Codex\\cdirecomp\\hle-burndown-20261031\\linux-fix-HLE1.log",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    ],
+    "qualification_lease": {
+      "path": "G:\\Temp\\Codex\\cdirecomp\\hle-burndown-20261031\\fix-reservation.json",
+      "bytes": 1795,
+      "sha256": "8b50a5495d05180cdc51245b39517c79e6f37353f3942bf46aa2fe3d7d1412e0"
+    },
+    "supporting_suite_scope": "The prior13 runtime/7 compiler/alias checks remain supporting evidence; changed native job freshly compared in58 production cases,2 real debugger cases and final built-game pairs."
+  },
+  "experiments": [
+    {
+      "name": "fixed-control",
+      "role": "current same-binary A/A control",
+      "implementation": "49c6b21b6fa2312cdb8ecbab6bef5866681b64d8",
+      "evidence": {
+        "path": "G:\\Temp\\Codex\\cdirecomp\\hle-burndown-20261031\\fixed-control\\campaign-evidence.json",
+        "bytes": 7089,
+        "sha256": "ace0792c0369ad4bd225119665696722371b41c6956ba81284c9b798c9bea917"
+      },
+      "identity": {
+        "path": "G:\\Temp\\Codex\\cdirecomp\\hle-burndown-20261031\\fixed-control\\identity.json",
+        "bytes": 380804,
+        "sha256": "d098389a48c48fc2b5bbb4f53394ea9fb2b2f9af009a76c525856ab8809cfa4a"
+      },
+      "contracts": [
+        {
+          "pair": "warm",
+          "equal": true,
+          "differences": []
+        },
+        {
+          "pair": "pair1",
+          "equal": true,
+          "differences": []
+        }
+      ],
+      "cpu_reduction_percent": [
+        8.719201359388261
+      ],
+      "process_cycle_reduction_percent": [
+        10.013733236200274
+      ]
+    },
+    {
+      "name": "fixed-backend-pairs",
+      "role": "post-fix matched same-source HLE/LLE",
+      "implementation": "49c6b21b6fa2312cdb8ecbab6bef5866681b64d8",
+      "evidence": {
+        "path": "G:\\Temp\\Codex\\cdirecomp\\hle-burndown-20261031\\fixed-backend-pairs\\campaign-evidence.json",
+        "bytes": 20344,
+        "sha256": "8196aaa78e8550f4c95341e16b96097ae9e855a54c4a73ee2b4a3e307cb2a1ef"
+      },
+      "identity": {
+        "path": "G:\\Temp\\Codex\\cdirecomp\\hle-burndown-20261031\\fixed-backend-pairs\\identity.json",
+        "bytes": 380841,
+        "sha256": "04839a5f324faf6c38ad2907d798ebfd296d4349c9821d3f06b0dc7471bb0b38"
+      },
+      "contracts": [
+        {
+          "pair": "warm",
+          "equal": true,
+          "differences": []
+        },
+        {
+          "pair": "pair1",
+          "equal": true,
+          "differences": []
+        },
+        {
+          "pair": "pair2",
+          "equal": true,
+          "differences": []
+        },
+        {
+          "pair": "pair3",
+          "equal": true,
+          "differences": []
+        }
+      ],
+      "cpu_reduction_percent": [
+        -2.507836990595602,
+        8.891712745131708,
+        7.288953500111073
+      ],
+      "process_cycle_reduction_percent": [
+        -2.4469097945193585,
+        9.497201146762556,
+        7.438118170114683
+      ]
+    },
+    {
+      "name": "fixed-frontend",
+      "role": "post-fix SDL dummy/software; neutral/inconclusive",
+      "implementation": "49c6b21b6fa2312cdb8ecbab6bef5866681b64d8",
+      "evidence": {
+        "path": "G:\\Temp\\Codex\\cdirecomp\\hle-burndown-20261031\\fixed-frontend\\campaign-evidence.json",
+        "bytes": 7058,
+        "sha256": "0c2e1ab6bdfce1fe7faa8849baa7b3c14f6b8e6ff920b98a7edfb9bb14ac5432"
+      },
+      "identity": {
+        "path": "G:\\Temp\\Codex\\cdirecomp\\hle-burndown-20261031\\fixed-frontend\\identity.json",
+        "bytes": 380808,
+        "sha256": "bcee019be6e580c126c1830a9f61544b1a6be461ae76a17ed0a6532256abd0ad"
+      },
+      "contracts": [
+        {
+          "pair": "warm",
+          "equal": true,
+          "differences": []
+        },
+        {
+          "pair": "pair1",
+          "equal": true,
+          "differences": []
+        }
+      ],
+      "cpu_reduction_percent": [
+        6.473126716359356
+      ],
+      "process_cycle_reduction_percent": [
+        6.3462333499009755
+      ]
+    }
+  ],
+  "binaries": {
+    "drawing-fixed-hle": {
+      "executable": {
+        "path": "G:\\Temp\\Codex\\cdirecomp\\hle-burndown-20261031\\drawing-fixed-hle\\HotelMarioRecomp.exe",
+        "bytes": 34059563,
+        "sha256": "530742f1cdb6988019c0478856fd9d8fd2fa9ba0cfe3f49efa33607be4346a14"
+      },
+      "provenance": {
+        "path": "G:\\Temp\\Codex\\cdirecomp\\hle-burndown-20261031\\drawing-fixed-hle\\HotelMarioRecomp.exe.build.json",
+        "bytes": 182750,
+        "sha256": "05d94347700ceed071dedd27e0a63f6a0d1b2f95919df245bcc07dee13580f9e"
+      }
+    },
+    "drawing-fixed-lle": {
+      "executable": {
+        "path": "G:\\Temp\\Codex\\cdirecomp\\hle-burndown-20261031\\drawing-fixed-lle\\HotelMarioRecomp.exe",
+        "bytes": 34051803,
+        "sha256": "74f8c55032eb53c3cbf2b3cc3b2d6ad65b3ee62194a564b3f5360c114f2783d9"
+      },
+      "provenance": {
+        "path": "G:\\Temp\\Codex\\cdirecomp\\hle-burndown-20261031\\drawing-fixed-lle\\HotelMarioRecomp.exe.build.json",
+        "bytes": 182750,
+        "sha256": "401aafc30b00b2229b72530bd40de054092091fbee6c99557a8e605d7b8e7e03"
+      }
+    }
+  },
+  "contract": {
+    "selection": "Independent build-time CDI_DRAWING_BACKEND=LLE|HLE; generic defaultLLE, consumer defaultHLE.",
+    "identity": "Exact module SHA, live binding token, generated direct-call identity and ordinary BSR stack frame; unsupported calls/memory/observation modes remain faithful.",
+    "state": "Guest RAM, callback register changes, queue ownership, buffer publication, code invalidation, device quanta, interrupts and faults remain authoritative. No shadow kernel or fabricated progress.",
+    "native_saves": "No save serialization or native-save path changes; tests use isolated RAM/config; owner saves/settings/delivery folders preserved.",
+    "fallback": "Portable C and faithful build option; actual callback implementations remain available."
+  },
+  "limitations": [
+    "Only Hotel Mario USA and the fixed Hotel1 Stage1 workload are performance-qualified.",
+    "SDL dummy/software does not qualify a hardware GPU driver.",
+    "No whole-game, other-title, full-campaign, audio-listening or native-save-restoration claim.",
+    "Candidate9 event-span work remains separate; this job preserves all original device quanta."
+  ],
+  "storage_ledger": "C:\\Users\\Matthew\\AppData\\Local\\Temp\\Codex\\cdirecomp\\drawing-job-20261028\\resource-ledger.json",
+  "historical_raw_evidence_root": "C:\\Users\\Matthew\\AppData\\Local\\Temp\\Codex\\cdirecomp\\drawing-job-20261028",
+  "previous_version": {
+    "evidence": {
+      "path": "G:\\Temp\\Codex\\cdirecomp\\hle-burndown-20261031\\drawing-job-evidence-before-observation-fix.json",
+      "bytes": 21623,
+      "sha256": "d39ab28162fe4f3d3974edab03611aa85e812aadcef333702ad1d48ef3722316"
+    },
+    "implementation": "faf11af17c2c5ac923065ea98add4356ab2a4a6f",
+    "reason_superseded": "Independent review found delayed/asynchronously armed instruction stops could be skipped. Fixed through per-operation observation epoch and exact faithful continuation. Historical gains do not qualify the changed binary."
+  },
+  "historical_experiments": {
+    "first-game-pair": {
+      "evidence": {
+        "path": "C:\\Users\\Matthew\\AppData\\Local\\Temp\\Codex\\cdirecomp\\drawing-job-20261028\\first-game-pair\\campaign-evidence.json",
+        "bytes": 6712,
+        "sha256": "4d46726ec7624177c6a0904bfffc817502c615f78c93e513d0b70f007b12fd81"
+      },
+      "identity": {
+        "path": "C:\\Users\\Matthew\\AppData\\Local\\Temp\\Codex\\cdirecomp\\drawing-job-20261028\\first-game-pair\\identity.json",
+        "bytes": 217020,
+        "sha256": "b7cf97d48e3a9c7fbe177044db6aa977760af3021c27e3a7bcfe89758e31c687"
+      },
+      "contracts": [
+        {
+          "pair": "warm",
+          "equal": true,
+          "differences": []
+        },
+        {
+          "pair": "pair1",
+          "equal": true,
+          "differences": []
+        }
+      ],
+      "cpu_reduction_percent": [
+        5.3484827490647096
+      ],
+      "process_cycle_reduction_percent": [
+        4.199760296492205
+      ]
+    },
+    "gameplay-pairs": {
+      "evidence": {
+        "path": "C:\\Users\\Matthew\\AppData\\Local\\Temp\\Codex\\cdirecomp\\drawing-job-20261028\\gameplay-pairs\\campaign-evidence.json",
+        "bytes": 20164,
+        "sha256": "55ffe431ca6aba2816d3897f785c69b0f2cb3366ed6f32415e5d653dd58ff212"
+      },
+      "identity": {
+        "path": "C:\\Users\\Matthew\\AppData\\Local\\Temp\\Codex\\cdirecomp\\drawing-job-20261028\\gameplay-pairs\\identity.json",
+        "bytes": 284410,
+        "sha256": "e874f3b9bd4519f60f992ae35a0b383c3433336e8911a219afc8518e4ee237b4"
+      },
+      "contracts": [
+        {
+          "pair": "warm",
+          "equal": true,
+          "differences": []
+        },
+        {
+          "pair": "pair1",
+          "equal": true,
+          "differences": []
+        },
+        {
+          "pair": "pair2",
+          "equal": true,
+          "differences": []
+        },
+        {
+          "pair": "pair3",
+          "equal": true,
+          "differences": []
+        }
+      ],
+      "cpu_reduction_percent": [
+        6.268656716417908,
+        9.77011494252874,
+        6.6892709614826735
+      ],
+      "process_cycle_reduction_percent": [
+        7.328110667862042,
+        11.369145324609775,
+        6.373111241315755
+      ]
+    },
+    "gameplay-controls": {
+      "evidence": {
+        "path": "C:\\Users\\Matthew\\AppData\\Local\\Temp\\Codex\\cdirecomp\\drawing-job-20261028\\gameplay-controls\\campaign-evidence.json",
+        "bytes": 13259,
+        "sha256": "8f69465626fd1a8732870482e49a79f579189ad52cb8c3f57e45f796721767d5"
+      },
+      "identity": {
+        "path": "C:\\Users\\Matthew\\AppData\\Local\\Temp\\Codex\\cdirecomp\\drawing-job-20261028\\gameplay-controls\\identity.json",
+        "bytes": 195004,
+        "sha256": "d4c22c11ca380d6d315833bcc50e2df8a7983df3aec669abc9352b21d70a1389"
+      },
+      "contracts": [
+        {
+          "pair": "warm",
+          "equal": true,
+          "differences": []
+        },
+        {
+          "pair": "pair1",
+          "equal": true,
+          "differences": []
+        },
+        {
+          "pair": "pair2",
+          "equal": true,
+          "differences": []
+        }
+      ],
+      "cpu_reduction_percent": [
+        -2.43501512295623,
+        1.7348576988567177
+      ],
+      "process_cycle_reduction_percent": [
+        -1.1882788894580498,
+        0.9247938603528905
+      ]
+    },
+    "frontend-pair": {
+      "evidence": {
+        "path": "C:\\Users\\Matthew\\AppData\\Local\\Temp\\Codex\\cdirecomp\\drawing-job-20261028\\frontend-pair\\campaign-evidence.json",
+        "bytes": 7028,
+        "sha256": "7eec4658fbe83d5bc84bbc2918547d6f82bd627c8b5944717a868c9ad55dd2f1"
+      },
+      "identity": {
+        "path": "C:\\Users\\Matthew\\AppData\\Local\\Temp\\Codex\\cdirecomp\\drawing-job-20261028\\frontend-pair\\identity.json",
+        "bytes": 286897,
+        "sha256": "d98b437171e5750ca8b22c1a0ea9f29c37bb75c1ac9e473765d5fc6c8c44fba9"
+      },
+      "contracts": [
+        {
+          "pair": "warm",
+          "equal": true,
+          "differences": []
+        },
+        {
+          "pair": "pair1",
+          "equal": true,
+          "differences": []
+        }
+      ],
+      "cpu_reduction_percent": [
+        19.917355371900815
+      ],
+      "process_cycle_reduction_percent": [
+        17.24494148477229
+      ]
+    },
+    "lle-control": {
+      "evidence": {
+        "path": "C:\\Users\\Matthew\\AppData\\Local\\Temp\\Codex\\cdirecomp\\drawing-job-20261028\\lle-control\\campaign-evidence.json",
+        "bytes": 7044,
+        "sha256": "e7e2484602869519fb9df09a5c86f3ffaf4be99cf2d6618a2111e04c6e88fdb0"
+      },
+      "identity": {
+        "path": "C:\\Users\\Matthew\\AppData\\Local\\Temp\\Codex\\cdirecomp\\drawing-job-20261028\\lle-control\\identity.json",
+        "bytes": 284391,
+        "sha256": "ab81a67f523d0c6ae6b44bfc1a10150a945c9a3c0dad55f268b3359b4d35b23e"
+      },
+      "contracts": [
+        {
+          "pair": "warm",
+          "equal": true,
+          "differences": []
+        },
+        {
+          "pair": "pair1",
+          "equal": true,
+          "differences": []
+        }
+      ],
+      "cpu_reduction_percent": [
+        10.536713862364188
+      ],
+      "process_cycle_reduction_percent": [
+        6.662143534191644
+      ]
+    },
+    "backend-pairs": {
+      "evidence": {
+        "path": "C:\\Users\\Matthew\\AppData\\Local\\Temp\\Codex\\cdirecomp\\drawing-job-20261028\\backend-pairs\\campaign-evidence.json",
+        "bytes": 20613,
+        "sha256": "799f893d5cfc282e970163e84fe9066e4e33fd2860f13ae87eff9e070a5ee4e2"
+      },
+      "identity": {
+        "path": "C:\\Users\\Matthew\\AppData\\Local\\Temp\\Codex\\cdirecomp\\drawing-job-20261028\\backend-pairs\\identity.json",
+        "bytes": 379934,
+        "sha256": "fe950d6520603dd622acdde5d52b6d7bfb373de2bf0358d58c0c8e3684bb0ca9"
+      },
+      "contracts": [
+        {
+          "pair": "warm",
+          "equal": true,
+          "differences": []
+        },
+        {
+          "pair": "pair1",
+          "equal": true,
+          "differences": []
+        },
+        {
+          "pair": "pair2",
+          "equal": true,
+          "differences": []
+        },
+        {
+          "pair": "pair3",
+          "equal": true,
+          "differences": []
+        }
+      ],
+      "cpu_reduction_percent": [
+        -3.942340250568366,
+        22.398562407631328,
+        7.8544542032622395
+      ],
+      "process_cycle_reduction_percent": [
+        -3.8563350263003393,
+        18.45345651372532,
+        4.163581845696951
+      ]
+    },
+    "register-backend-pairs": {
+      "evidence": {
+        "path": "C:\\Users\\Matthew\\AppData\\Local\\Temp\\Codex\\cdirecomp\\drawing-job-20261028\\register-backend-pairs\\campaign-evidence.json",
+        "bytes": 20716,
+        "sha256": "fe7e389242f6041dcc70ca70a3f03b982084610d1c4c6338caac9baaa5e0d47b"
+      },
+      "identity": {
+        "path": "C:\\Users\\Matthew\\AppData\\Local\\Temp\\Codex\\cdirecomp\\drawing-job-20261028\\register-backend-pairs\\identity.json",
+        "bytes": 383316,
+        "sha256": "c179f58f250cc1c1de1b8c54fe4481f233f359e3790f11dc0611c44c81943a15"
+      },
+      "contracts": [
+        {
+          "pair": "warm",
+          "equal": true,
+          "differences": []
+        },
+        {
+          "pair": "pair1",
+          "equal": true,
+          "differences": []
+        },
+        {
+          "pair": "pair2",
+          "equal": true,
+          "differences": []
+        },
+        {
+          "pair": "pair3",
+          "equal": true,
+          "differences": []
+        }
+      ],
+      "cpu_reduction_percent": [
+        5.854509954737774,
+        8.00640512409927,
+        7.403294117647096
+      ],
+      "process_cycle_reduction_percent": [
+        5.879577372515454,
+        7.250974475062765,
+        5.824809366400851
+      ]
+    },
+    "register-controls": {
+      "evidence": {
+        "path": "C:\\Users\\Matthew\\AppData\\Local\\Temp\\Codex\\cdirecomp\\drawing-job-20261028\\register-controls\\campaign-evidence.json",
+        "bytes": 13913,
+        "sha256": "f198aa0ae4b0b7aea2bcb130ba1b7e25cd3e1a361d7154292cc827139f135873"
+      },
+      "identity": {
+        "path": "C:\\Users\\Matthew\\AppData\\Local\\Temp\\Codex\\cdirecomp\\drawing-job-20261028\\register-controls\\identity.json",
+        "bytes": 384949,
+        "sha256": "c3818a20bf706be50fc8ed1f573159305f1f90412040c3cec287aaed35dc024f"
+      },
+      "contracts": [
+        {
+          "pair": "warm",
+          "equal": true,
+          "differences": []
+        },
+        {
+          "pair": "pair1",
+          "equal": true,
+          "differences": []
+        },
+        {
+          "pair": "pair2",
+          "equal": true,
+          "differences": []
+        }
+      ],
+      "cpu_reduction_percent": [
+        3.969849246231172,
+        -7.986111111111116
+      ],
+      "process_cycle_reduction_percent": [
+        2.8603569268065954,
+        -0.4311672238948461
+      ]
+    },
+    "register-frontend": {
+      "evidence": {
+        "path": "C:\\Users\\Matthew\\AppData\\Local\\Temp\\Codex\\cdirecomp\\drawing-job-20261028\\register-frontend\\campaign-evidence.json",
+        "bytes": 7190,
+        "sha256": "004c310a5c82aebed589002e9605a65cb38739dc95ba9e80a884ebbf3024b227"
+      },
+      "identity": {
+        "path": "C:\\Users\\Matthew\\AppData\\Local\\Temp\\Codex\\cdirecomp\\drawing-job-20261028\\register-frontend\\identity.json",
+        "bytes": 383283,
+        "sha256": "4e30818c6360f95c63557eca084f0737ca41df6f0753050bda304e29ce35fc02"
+      },
+      "contracts": [
+        {
+          "pair": "warm",
+          "equal": true,
+          "differences": []
+        },
+        {
+          "pair": "pair1",
+          "equal": true,
+          "differences": []
+        }
+      ],
+      "cpu_reduction_percent": [
+        -2.783813905994137
+      ],
+      "process_cycle_reduction_percent": [
+        -1.729735999790205
+      ]
+    }
+  },
+  "historical_binaries": {
+    "hle-snapshot": {
+      "executable": {
+        "path": "C:\\Users\\Matthew\\AppData\\Local\\Temp\\Codex\\cdirecomp\\drawing-job-20261028\\hle-snapshot\\HotelMarioRecomp.exe",
+        "bytes": 34059369,
+        "sha256": "f793eb460016905d9a3fbbbfd141cd8d7c8833205b371b9f7291339e25c710e8"
+      },
+      "provenance": {
+        "path": "C:\\Users\\Matthew\\AppData\\Local\\Temp\\Codex\\cdirecomp\\drawing-job-20261028\\hle-snapshot\\HotelMarioRecomp.exe.build.json",
+        "bytes": 179168,
+        "sha256": "2c00af695dced8e1e1294532eed848c44f5f6b0c0dea0fe6cbc1bbc7cd6cd7ee"
+      }
+    },
+    "lle-snapshot": {
+      "executable": {
+        "path": "C:\\Users\\Matthew\\AppData\\Local\\Temp\\Codex\\cdirecomp\\drawing-job-20261028\\lle-snapshot\\HotelMarioRecomp.exe",
+        "bytes": 34051752,
+        "sha256": "ee25349b1f62935daf483e1ab8124ab65421b1041c763d8f269b0a75a720ab6d"
+      },
+      "provenance": {
+        "path": "C:\\Users\\Matthew\\AppData\\Local\\Temp\\Codex\\cdirecomp\\drawing-job-20261028\\lle-snapshot\\HotelMarioRecomp.exe.build.json",
+        "bytes": 179168,
+        "sha256": "e050280d086f82dd7e3dc2c7daac6bfc9ef23a3a6b65ae54dda04a6275f1a4d8"
+      }
+    },
+    "supported-snapshot": {
+      "executable": {
+        "path": "C:\\Users\\Matthew\\AppData\\Local\\Temp\\Codex\\cdirecomp\\drawing-job-20261028\\supported-snapshot\\HotelMarioRecomp.exe",
+        "bytes": 34059369,
+        "sha256": "d41e9853e2949f3715a4a2f194a7d3d1fdafbfd573ab42fdc7d5e6f4583e16d9"
+      },
+      "provenance": {
+        "path": "C:\\Users\\Matthew\\AppData\\Local\\Temp\\Codex\\cdirecomp\\drawing-job-20261028\\supported-snapshot\\HotelMarioRecomp.exe.build.json",
+        "bytes": 181664,
+        "sha256": "563237e719e254f11f38b116482220799520af5696cccbaa2c3e031a1b6a6d6c"
+      }
+    },
+    "register-snapshot": {
+      "executable": {
+        "path": "C:\\Users\\Matthew\\AppData\\Local\\Temp\\Codex\\cdirecomp\\drawing-job-20261028\\register-snapshot\\HotelMarioRecomp.exe",
+        "bytes": 34058857,
+        "sha256": "aa789a177f922b956b7b5f58a5c3966b6f96ac4bc4227d6cfd9a0d4c4ecd3d59"
+      },
+      "provenance": {
+        "path": "C:\\Users\\Matthew\\AppData\\Local\\Temp\\Codex\\cdirecomp\\drawing-job-20261028\\register-snapshot\\HotelMarioRecomp.exe.build.json",
+        "bytes": 181248,
+        "sha256": "64a25c861afdb249fa0a26f436ae0521b03ba22f6fa8cdd511780e8a5fbfd68a"
+      }
+    },
+    "register-lle-snapshot": {
+      "executable": {
+        "path": "C:\\Users\\Matthew\\AppData\\Local\\Temp\\Codex\\cdirecomp\\drawing-job-20261028\\register-lle-snapshot\\HotelMarioRecomp.exe",
+        "bytes": 34051752,
+        "sha256": "b04769b2f0a118718472fe6f7f8c77028aa27746ed57767701cff6d1cc7528a9"
+      },
+      "provenance": {
+        "path": "C:\\Users\\Matthew\\AppData\\Local\\Temp\\Codex\\cdirecomp\\drawing-job-20261028\\register-lle-snapshot\\HotelMarioRecomp.exe.build.json",
+        "bytes": 182912,
+        "sha256": "4c1be0686035305e2fb1e79295dd7f878185f33f5cc8162c6cec43b183d22ed3"
+      }
+    }
+  },
+  "independent_review": {
+    "agent": "review_drawing_candidate",
+    "verdict": "KEEP after objective debugger fix; neutral per-game acceptance",
+    "report": "G:/Temp/Codex/cdirecomp/drawing-review-20261031/review.md",
+    "audit": "G:/Temp/Codex/cdirecomp/drawing-review-20261031/audit.json",
+    "rationale": "Bounded identity/caller admission, authoritative guest/callback state, independent faithful fallback, exact reference/observation contracts and a contained native service job. Retention is not a speedup claim."
+  },
+  "cleanup_status": "Audited disposable compile objects/component CMake scratch removed (1309598 bytes); current C build/generated cache, all immutable source/input snapshots, raw results/failures and passing fixtures retained.",
+  "publication": {
+    "engine": {
+      "url": "https://github.com/mstan/cdirecomp/pull/2",
+      "head_at_creation": "4ab28cfc90e9290c2e3340776b8fa825eec157f9",
+      "base": "a10bd45a08941a3789013c8decca3f9177489de9",
+      "branch": "perf/native-drawing-jobs-20261028"
+    },
+    "consumer": {
+      "url": "https://github.com/mstan/HotelMarioRecomp/pull/2",
+      "head_at_creation": "2123474ded8ab6d962c48ed2531f3e4afe797207",
+      "base": "cf5a4ed70909fa59b8eee3c5a08b841696257cac",
+      "branch": "perf/native-drawing-job-20261028"
+    },
+    "state": "open_unmerged",
+    "review": "independent_KEEP_neutral_inconclusive"
+  },
+  "cleanup_report": "G:/Temp/Codex/cdirecomp/drawing-review-20261031/cleanup.json"
+}

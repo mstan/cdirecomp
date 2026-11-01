@@ -15,9 +15,11 @@ static uint32_t last_base,last_offset;
 static int has_offset(uint32_t offset) { return offset==52 || offset==54; }
 static int dispatch_a(uint32_t base,uint32_t offset) { calls++;last_base=base;last_offset=offset;return 1; }
 static int dispatch_b(uint32_t base,uint32_t offset) { return dispatch_a(base,offset); }
+static void direct_a(void) {}
+static const CdiNativeEntry direct_entries[]={{52,direct_a}};
 const CdiNativeModule g_cdi_native_modules[]={
     {"test1",64,{0x2e,0xba,0x2a,0x05,0x14,0xd8,0x9c,0x08,0xd0,0x4d,0x6f,0xb3,0xd3,0xfa,0xa3,0xcc,
-                0x3c,0xd1,0xb5,0xa5,0x0b,0xd4,0x8b,0x2c,0x45,0x30,0x2d,0x6b,0x24,0xdd,0xc9,0x35},has_offset,dispatch_a},
+                0x3c,0xd1,0xb5,0xa5,0x0b,0xd4,0x8b,0x2c,0x45,0x30,0x2d,0x6b,0x24,0xdd,0xc9,0x35},has_offset,dispatch_a,direct_entries,1},
     {"test2",64,{0x6c,0x83,0x6a,0x43,0xc7,0xad,0xc6,0x15,0xeb,0x76,0x50,0x06,0x18,0x75,0x0b,0x4c,
                 0xc1,0x22,0x7a,0x7b,0xd5,0x3c,0xe6,0xab,0x63,0x76,0x03,0xd1,0xb3,0x6b,0x58,0x5a},has_offset,dispatch_b},
     {"large",65536,{0x9a,0x25,0xe8,0x4c,0x3e,0x15,0xbe,0x3c,0x6d,0x9a,0xfa,0xf3,0x0d,0x4c,0x79,0xa0,
@@ -43,12 +45,21 @@ int main(void) {
     const uint32_t a=0x2000,b=0x210000;
     CdiNativeState state;uint64_t token_a=0,token_b=0;
     cdi_native_reset();
+    const CdiNativeModule *direct_module=NULL;uint32_t job_base=0;uint64_t job_token=0;
+    CHECK(cdi_native_find_function(g_cdi_native_modules[0].sha256,52,&direct_module)==direct_a);
+    CHECK(direct_module==&g_cdi_native_modules[0]);
+    CHECK(!cdi_native_find_function(g_cdi_native_modules[0].sha256,54,NULL));
+    CHECK(!cdi_native_find_function(g_cdi_native_modules[1].sha256,52,NULL));
+    CHECK(!cdi_native_job_binding(&g_cdi_native_modules[0],a+52,&job_base,&job_token));
     CHECK(!cdi_native_has_address(a+52));
     copy(a,image,60); /* incomplete loader copy must not bind */
     CHECK(!cdi_native_has_address(a+52));
     copy(a+60,image+60,4);
     CHECK(cdi_native_has_address(a+52));
     token_a=cdi_native_execution_token(a,dispatch_a);
+    CHECK(cdi_native_job_binding(&g_cdi_native_modules[0],a+52,&job_base,&job_token));
+    CHECK(job_base==a && job_token==token_a);
+    CHECK(!cdi_native_job_binding(&g_cdi_native_modules[1],a+52,&job_base,&job_token));
     CHECK(!cdi_native_has_address(a+53));CHECK(!cdi_native_has_address(a+56));
     cdi_native_record_target(a+56);cdi_native_record_target(a+56);
     CdiNativeTarget target[4];uint32_t total;uint64_t dropped;
@@ -62,6 +73,7 @@ int main(void) {
     CHECK(calls==2 && last_base==b && last_offset==52);
     token_b=cdi_native_execution_token(b,dispatch_a);
     byte(a+51,image[51]); /* even unchanged overlapping write revokes execution */
+    CHECK(!cdi_native_job_binding(&g_cdi_native_modules[0],a+52,&job_base,&job_token));
     CHECK(!cdi_native_instruction_valid(a+52,dispatch_a,token_a));
     CHECK(cdi_native_instruction_valid(b+52,dispatch_a,token_b));
     CHECK(cdi_native_has_address(a+52));

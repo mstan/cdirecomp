@@ -91,8 +91,16 @@ bool cdi_emit_modules(CdiDisc *disc, const Os9Module *modules, int count,
         ok=codegen_emit_module(&rom,&functions,full,dispatch,&annotations,&cfg,symbol);
         int diagnostics=codegen_diag_total();
         if (diagnostics) { codegen_diag_print_summary(stderr);ok=false; }
+        if (!ok) { function_list_free(&functions);break; }
+        /* Native jobs bind exact direct-call functions through the same
+         * full-image identity as the faithful instruction/resume catalog. */
+        for (int j=0;j<functions.count;j++)
+            fprintf(manifest,"void %s_func_%06X(void);\n",symbol,functions.entries[j].addr);
+        fprintf(manifest,"static const CdiNativeEntry %s_entries[] = {\n",symbol);
+        for (int j=0;j<functions.count;j++)
+            fprintf(manifest,"  {0x%06Xu, %s_func_%06X},\n",functions.entries[j].addr,symbol,functions.entries[j].addr);
+        fprintf(manifest,"};\n");
         function_list_free(&functions);
-        if (!ok) break;
         memcpy(digests[emitted],digest,32);indices[emitted++]=i;
         fprintf(manifest,"int %s_has_offset(uint32_t);\nint %s_dispatch(uint32_t,uint32_t);\n",symbol,symbol);
     }
@@ -111,7 +119,8 @@ bool cdi_emit_modules(CdiDisc *disc, const Os9Module *modules, int count,
                 fprintf(manifest,"\\%03o",*p);
             fprintf(manifest,"\", %uu, {",modules[i].size);
             for (unsigned b=0;b<32;b++) fprintf(manifest,"%s0x%02X",b?",":"",digests[j][b]);
-            fprintf(manifest,"}, cdi_module_%03d_has_offset, cdi_module_%03d_dispatch},\n",i,i);
+            fprintf(manifest,"}, cdi_module_%03d_has_offset, cdi_module_%03d_dispatch, "
+                "cdi_module_%03d_entries, sizeof cdi_module_%03d_entries/sizeof *cdi_module_%03d_entries},\n",i,i,i,i,i);
         }
         fprintf(manifest,"};\nconst size_t g_cdi_native_module_count = %d;\n",emitted);
     } else {
