@@ -3,7 +3,7 @@
   "owner_issue": "beads-oatv",
   "campaign_issue": "beads-2wy8.1",
   "consumer_issue": "beads-7t8h",
-  "status": "in_progress; candidate4 independently KEEP-qualified for normal-paced Hotel Mario boot; PR handoff then candidate 6",
+  "status": "in_progress; selected candidate6 lookup/publication package independently KEEP with neutral/inconclusive Hotel Mario boot/scripted-gameplay performance; PR handoff then candidate8",
   "engine_head": "85c869ee808b438905f2c1bc29a46d30f27647f8",
   "core_head": "3955bf3311f55e031836f70b5c1839e95b81f9cf",
   "game_head": "16353fc849ef8056af891e2c3b7d3e29ae3a41da",
@@ -936,15 +936,73 @@
     {
       "candidate": 6,
       "name": "Frequent OS-9 service jobs",
-      "status": "open_queued",
+      "status": "qualified_selected_native_job",
       "evidence": [
-        "profile-final.json",
-        "profile-residual.json"
+        "G:/Temp/Codex/cdirecomp/service-job-20261101/actual-reference-bounds/summary.json",
+        "G:/Temp/Codex/cdirecomp/service-job-20261101/gameplay-control-bounds/campaign-evidence.json",
+        "G:/Temp/Codex/cdirecomp/service-job-20261101/gameplay-pairs-bounds/campaign-evidence.json",
+        "G:/Temp/Codex/cdirecomp/service-job-20261101/build-bounds-reservation.json",
+        "G:/Temp/Codex/cdirecomp/service-job-20261101/evaluate-bounds-reservation.json"
       ],
-      "reason": "Final selection sampling has7/344 samples in named ROM-native bodies and identifies no particular expensive service. Leaf sampling cannot establish per-service cost or its full ABI. OS HLE remains allowed.",
-      "prerequisite": "Service-boundary cost attribution and a concrete hot service corpus including success/error, interrupted/reentrant execution, caller registers, kernel structures and native-save effects; validate a native job at those boundaries.",
+      "reason": "Complete firmware process-ID lookup and conservative cached-binding write-publication bounds; authoritative tables/errors/callbacks and faithful fallbacks retained. Independent KEEP for measured selected package under neutral-per-game acceptance.",
+      "prerequisite": null,
       "prior_deferral_rejected": true,
-      "work_remaining": "Service-boundary cost attribution and a concrete hot service corpus including success/error, interrupted/reentrant execution, caller registers, kernel structures and native-save effects; validate a native job at those boundaries."
+      "work_remaining": null,
+      "owner_issue": "beads-ttbl.5",
+      "engine_implementation": "ea86bdb03f3b86fb0507606a9bada3fd16146580",
+      "consumer_head": "d3c8c1e5a98e0e3b9fe55393dbda7af6bb36cb28",
+      "engine_branch": "perf/native-service-jobs-20261101",
+      "consumer_branch": "perf/native-service-job-20261101",
+      "job": "Complete 490a process-ID lookup 0x40829A..0x4082BE plus conservative per-bank bounds of every cached binding span; preserve original notification callbacks and all write/tag ownership.",
+      "cached_binding_spans_observed": 7,
+      "compiled_catalog_images": 174,
+      "correctness_cases": 40,
+      "irq_frontiers": 14,
+      "portable_checks": "Windows HLE/LLE production and focused binding tests plus strict Linux HLE=0/HLE=1 syntax pass; no Linux runtime claim.",
+      "binaries": {
+        "lle_sha256": "c1809322456296caed37d56275758a79eff2bad2e012ae1590ebdfa884cc6652",
+        "hle_sha256": "d3f6cda88d8f42711be3876e454a09d39c93d9fd6e1f88510fe50b47ecc10a1c"
+      },
+      "native_activity": {"jobs": 8532, "errors": 0, "interrupted": 22, "fallbacks": 0},
+      "performance": {
+        "classification": "neutral/inconclusive; no proven speedup or observed regression",
+        "scope": "Hotel Mario USA process creation through scripted gameplay field 13000; selected lookup/publication package only",
+        "start_origin": "process_creation",
+        "end_frame": 13000,
+        "pairs": 2,
+        "control_pairs": 1,
+        "paired_cpu_reductions_percent": [2.506596306068598, 5.521472392638039],
+        "paired_cycle_reductions_percent": [1.5458602627940299, 3.392852477964592],
+        "AA_cpu_difference_percent": [-7.530864197530862],
+        "AA_cycle_difference_percent": [-5.889824891387119],
+        "samples": [
+          {"label": "pair1-reference", "cpu_ms": 11843.75, "process_cycles": 55307916930, "peak_rss_bytes": 216682496},
+          {"label": "pair1-candidate", "cpu_ms": 11546.875, "process_cycles": 54452933820, "peak_rss_bytes": 216702976},
+          {"label": "pair2-candidate", "cpu_ms": 12031.25, "process_cycles": 56662410400, "peak_rss_bytes": 216707072},
+          {"label": "pair2-reference", "cpu_ms": 12734.375, "process_cycles": 58652399800, "peak_rss_bytes": 216678400}
+        ],
+        "control_samples": [
+          {"label": "pair1-reference", "cpu_ms": 12656.25, "process_cycles": 59546285750},
+          {"label": "pair1-candidate", "cpu_ms": 13609.375, "process_cycles": 63053457710}
+        ],
+        "settings": {"host": "DESKTOP-HN15M1H", "platform": "Windows", "compiler": "MinGW GCC 15.2.0 Release -O3", "cpu_affinity": [15], "presentation": "headless", "audio": "dummy", "pace_speed": 32, "rtc_sync_host_on_startup": false, "other_backends": "scanout/loader/drawing/memory=HLE on both sides; service=LLE excludes lookup and binding bounds"},
+        "interpretation": "Both positive pairs remain within contemporaneous identical-LLE control variation. No additional tuning or attribution matrix after the second experiment."
+      },
+      "historical_unresolved_trial": {
+        "engine": "42df55ab4d0cb86392f3db1688aed96868179730",
+        "consumer": "af1ef6d89d74f7151a6692e6f76b7c4d613412c8",
+        "package": "process lookup plus conservative binding-page bitmap",
+        "evidence": ["G:/Temp/Codex/cdirecomp/service-job-20261101/gameplay-control/campaign-evidence.json", "G:/Temp/Codex/cdirecomp/service-job-20261101/gameplay-pairs/campaign-evidence.json"],
+        "paired_cpu_reductions_percent": [-0.7782101167315147, -5.217391304347818],
+        "paired_cycle_reductions_percent": [-1.5481874476081847, -4.262578508861803],
+        "AA_cpu_difference_percent": [-3.653585926928282],
+        "AA_cycle_difference_percent": [-5.341291612070975],
+        "classification": "unresolved/concerning, not neutral accepted; second CPU pair exceeded the one CPU-control difference"
+      },
+      "independent_review": {"verdict": "KEEP", "date": "2026-11-01", "reviewer": "parent-arranged independent reviewer", "scope": "selected lookup/publication package and measured Hotel Mario boot/scripted gameplay through field 13000; neutral/inconclusive"},
+      "branch_pr_status": "handoff_pending_no_PR_created",
+      "limits": "No whole notification-chain, other-title/platform, Linux-runtime, current-build save/load or final owner merge-gate qualification.",
+      "retained_storage": "G:/Temp/Codex/cdirecomp/service-job-20261101 frozen binaries, all sidecar dependencies, fixtures and both experiments; reusable C: HLE cache and older shared immutable input paths remain required. Empty agent-created compiler temp removed."
     },
     {
       "candidate": 7,
@@ -1063,7 +1121,7 @@
     "ledger": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\resource-ledger.json"
   },
   "current_serial_candidate": null,
-  "completed_serial_candidate": 4,
+  "completed_serial_candidate": 6,
   "awaiting_owner_checkin": false,
   "loader_job_evidence": "docs/loader-job-evidence.json",
   "drawing_job_evidence": "docs/drawing-job-evidence.json",
@@ -1105,9 +1163,9 @@
     "review": "independent_KEEP_neutral_inconclusive"
   },
   "candidate4_owner_issue": "beads-ttbl.4",
-  "next_serial_candidate": 6,
+  "candidate6_owner_issue": "beads-ttbl.5",
+  "next_serial_candidate": 8,
   "remaining_candidates": [
-    6,
     8,
     9,
     10,
