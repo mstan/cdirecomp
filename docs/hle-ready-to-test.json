@@ -201,6 +201,7 @@
   "delivery": {
     "issue": "beads-ttbl.9",
     "version": "v0.0.3",
-    "state": "owner_authorized_merged_building_releases"
+    "state": "published_verified",
+    "evidence": "docs/releases/v0.0.3-windows.json"
   }
 }

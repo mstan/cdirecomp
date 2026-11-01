@@ -105,8 +105,10 @@ have corrected descriptions. Actual live candidate-8 coverage uses TCP
 - No release package, delivery folder or native player save was changed.
 
 
-Current delivery task: `beads-ttbl.9`, Windows v0.0.3 runtime releases for
-cdirecomp and HotelMarioRecomp. Historical pending-merge/handoff notes below
+Delivery completed under `beads-ttbl.9`: Windows v0.0.3 previews are published
+for [cdirecomp](https://github.com/mstan/cdirecomp/releases/tag/v0.0.3) and
+[HotelMarioRecomp](https://github.com/mstan/HotelMarioRecomp/releases/tag/v0.0.3).
+Exact release identities and artifact qualification: [release evidence](releases/v0.0.3-windows.json). Historical pending-merge/handoff notes below
 refer to their earlier checkpoints and are superseded by this authorization.
 
 ## Evidence and limits
