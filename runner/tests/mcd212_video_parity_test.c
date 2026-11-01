@@ -123,6 +123,13 @@ static void compare_frame(void) {
             unsigned y=edge_y[iy]<frame->height?edge_y[iy]:frame->height-1u;
             SDL_Rect rectangle={(int)((2u*x+1u)*(unsigned)output_w/(2u*frame->width)),(int)((2u*y+1u)*(unsigned)output_h/(2u*frame->height)),1,1};
             uint32_t pixel=0;CHECK(!SDL_RenderReadPixels(gpu_renderer,&rectangle,SDL_PIXELFORMAT_ARGB8888,&pixel,4));
+            if(pixel!=pixels[1][(size_t)y*frame->width+x]) {
+                fprintf(stderr,"display sample scale=%u native=%ux%u output=%dx%d at=%u,%u rect=%d,%d got=%08x expected=%08x\n",scales[gpu_cases%5],frame->width,frame->height,output_w,output_h,x,y,rectangle.x,rectangle.y,pixel,pixels[1][(size_t)y*frame->width+x]);
+                if(output_w==frame->width && output_h==frame->height) {
+                    CHECK(!SDL_RenderReadPixels(gpu_renderer,NULL,SDL_PIXELFORMAT_ARGB8888,raster_pixels,frame->width*4));
+                    fprintf(stderr,"full native read same=%d at=%08x mirrored=%08x\n",!memcmp(raster_pixels,pixels[1],(size_t)frame->width*frame->height*4),raster_pixels[(size_t)y*frame->width+x],raster_pixels[(size_t)(frame->height-1u-y)*frame->width+x]);
+                }
+            }
             CHECK(pixel==pixels[1][(size_t)y*frame->width+x]);
         }
         CHECK(!SDL_SetRenderTarget(gpu_renderer,NULL));

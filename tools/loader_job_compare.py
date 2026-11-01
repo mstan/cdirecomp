@@ -1,5 +1,5 @@
 """Matched real module loading, ending at its verified native execution entry."""
-import argparse,copy,hashlib,json,os,pathlib,platform,shutil,socket,statistics,subprocess,time
+import argparse,base64,copy,hashlib,json,os,pathlib,platform,shutil,socket,statistics,subprocess,time
 import psutil
 from bios_options_smoke import request
 from build_provenance import verify
@@ -37,6 +37,19 @@ class CycleCounter:
     def close(self):
         if self.handle is not None:self.api.CloseHandle(self.handle);self.handle=None
 
+def gpu_memory(pid):
+    """One endpoint sample of actual WDDM process allocations, outside timing."""
+    if os.name!='nt':return None
+    script=r"""$s=@((Get-Counter '\GPU Process Memory(*)\Dedicated Usage','\GPU Process Memory(*)\Shared Usage' -ErrorAction SilentlyContinue).CounterSamples | Where-Object {$_.InstanceName -like 'pid_PID_*'});
+if($s.Count -lt 2 -or @($s | Where-Object {$_.Status -ne 0}).Count){throw 'Missing valid process GPU memory counters'}
+@{source='Windows GPU Process Memory';dedicated_bytes=[int64](($s | Where-Object {$_.Path -like '*\Dedicated Usage'} | Measure-Object CookedValue -Sum).Sum);shared_bytes=[int64](($s | Where-Object {$_.Path -like '*\Shared Usage'} | Measure-Object CookedValue -Sum).Sum);counter_samples=$s.Count} | ConvertTo-Json -Compress
+""".replace('PID',str(int(pid)))
+    encoded=base64.b64encode(script.encode('utf-16le')).decode()
+    output=subprocess.check_output(['C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe',
+        '-NoProfile','-EncodedCommand',encoded],text=True,timeout=20,
+        creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
+    return json.loads(output)
+
 def run(exe,args,label):
     out=args.output/label;out.mkdir()
     env=os.environ.copy();env.update(CDI_PACE_SPEED=str(args.pace_speed),SDL_AUDIODRIVER='dummy',
@@ -73,6 +86,7 @@ def run(exe,args,label):
             assert s['held'] and (s['frame']==args.end_frame if args.end_frame else s['pc']==args.stop_pc),s
             if args.expect_end_frame is not None:assert s['frame']==args.expect_end_frame,s
             host_after=psutil.cpu_times()
+            gpu_memory_sample=gpu_memory(proc.pid) if args.presentation=='hardware' else None
             state={k:request(args.port,{'cmd':k}) for k in ('status','get_registers','ciap_state',
                 'video_frame','video_state','audio_state','native_state','native_events','ikat_events')}
             state['loader_jobs']=request(args.port,{'cmd':'loader_jobs'})
@@ -123,6 +137,7 @@ def run(exe,args,label):
                 'peak_rss_bytes':max(v['rss_bytes'] for v in samples),'start_bracket':start_bracket,
                 'start_origin':start_origin,'first_sample':samples[0],'final_sample':samples[-1],
                 'host_cpu_before':host_before._asdict(),'host_cpu_after':host_after._asdict(),
+                'gpu_memory':gpu_memory_sample,
                 'loader_jobs':state['loader_jobs'],'drawing_jobs':state['drawing_jobs'],'memory_jobs':state['memory_jobs'],
                 'service_jobs':state['service_jobs'],'streaming_jobs':state['streaming_jobs'],
                 'board_jobs':state['board_jobs'],'render_state':state['render_state']}

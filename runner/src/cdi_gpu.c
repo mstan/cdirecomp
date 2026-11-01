@@ -35,6 +35,8 @@
  X(void,GenVertexArrays,(GLsizei,GLuint *)) X(void,DeleteVertexArrays,(GLsizei,const GLuint *)) \
  X(void,BindVertexArray,(GLuint)) X(void,MultiDrawArraysIndirect,(GLenum,const void *,GLsizei,GLsizei)) \
  X(void,BindFramebuffer,(GLenum,GLuint)) \
+ X(void,GenFramebuffers,(GLsizei,GLuint *)) X(void,DeleteFramebuffers,(GLsizei,const GLuint *)) \
+ X(void,FramebufferTexture2D,(GLenum,GLenum,GLenum,GLuint,GLint)) X(GLenum,CheckFramebufferStatus,(GLenum)) \
  X(void,BlitFramebuffer,(GLint,GLint,GLint,GLint,GLint,GLint,GLint,GLint,GLbitfield,GLenum)) \
  X(void,ClearColor,(GLfloat,GLfloat,GLfloat,GLfloat)) X(void,Clear,(GLbitfield))
 #define DECLARE(ret,name,args) typedef ret(APIENTRY *name##Fn)args;
@@ -48,7 +50,7 @@ static struct {
 static struct {
     SDL_Renderer *renderer;SDL_GLContext context;
     SDL_Texture *tile,*output,*check;
-    GLuint program,vao,source,commands;
+    GLuint program,vao,source,commands,output_fbo,check_fbo,tile_fbo;
     GLint region_location,limit;
     uint64_t rows[MCD212_VIDEO_MAX_HEIGHT],epoch,frames,uploads,upload_bytes,draws,resets;
     unsigned requested,effective,width,height,output_w,output_h,tile_w,tile_h,check_w,check_h;
@@ -72,8 +74,8 @@ static const char *fragment_source=
     "else{c=contribution(c,int((data.z>>2u)&63u));"
     "if(mode==2u)c=clamp(c+contribution(rgb(data.y),int((data.z>>8u)&63u))-ivec3(16),ivec3(0),ivec3(255));}"
     "result=vec4(vec3(c)/255.0,alpha);}\n";
-enum {SWITCHES=8,STORES=6};
-static const GLenum switches[SWITCHES]={GL_BLEND,GL_SCISSOR_TEST,GL_DEPTH_TEST,GL_STENCIL_TEST,GL_CULL_FACE,GL_DITHER,GL_FRAMEBUFFER_SRGB,GL_RASTERIZER_DISCARD};
+enum {SWITCHES=9,STORES=6};
+static const GLenum switches[SWITCHES]={GL_BLEND,GL_SCISSOR_TEST,GL_DEPTH_TEST,GL_STENCIL_TEST,GL_CULL_FACE,GL_DITHER,GL_FRAMEBUFFER_SRGB,GL_RASTERIZER_DISCARD,GL_TEXTURE_2D};
 static const GLenum stores[STORES]={GL_UNPACK_ALIGNMENT,GL_UNPACK_ROW_LENGTH,GL_UNPACK_SKIP_PIXELS,GL_UNPACK_SKIP_ROWS,GL_UNPACK_SWAP_BYTES,GL_UNPACK_LSB_FIRST};
 typedef struct {
     GLint program,active,texture,vao,unpack_buffer,indirect_buffer,read_fbo,draw_fbo,viewport[4],scissor[4],unpack[STORES];
@@ -152,9 +154,17 @@ static int target(SDL_Texture **texture,unsigned width,unsigned height,unsigned 
     if(*texture)SDL_DestroyTexture(*texture);
     *texture=fresh;*old_w=width;*old_h=height;return 1;
 }
-static GLuint framebuffer(SDL_Texture *target) {
-    if(SDL_SetRenderTarget(gpu.renderer,target) || SDL_RenderFlush(gpu.renderer))return 0;
-    GLint value=0;gl.GetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING,&value);return (GLuint)value;
+static GLuint framebuffer(SDL_Texture *target,GLuint *owned) {
+    /* SDL owns the texture; this consumer owns its attachment. A framebuffer
+     * handle observed after SDL_SetRenderTarget is not an owned attachment:
+     * a later target switch can reattach another equal-sized texture. */
+    if(SDL_GL_BindTexture(target,NULL,NULL))return 0;
+    GLint texture=0;gl.GetIntegerv(GL_TEXTURE_BINDING_2D,&texture);SDL_GL_UnbindTexture(target);
+    if(!texture)return 0;
+    if(!*owned)gl.GenFramebuffers(1,owned);
+    gl.BindFramebuffer(GL_FRAMEBUFFER,*owned);
+    gl.FramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_TEXTURE_2D,(GLuint)texture,0);
+    return gl.CheckFramebufferStatus(GL_FRAMEBUFFER)==GL_FRAMEBUFFER_COMPLETE?*owned:0;
 }
 SDL_Texture *cdi_gpu_render(const CdiRasterFrame *frame,unsigned requested,const uint32_t *native_check) {
     if(!frame)return NULL;
@@ -187,7 +197,7 @@ SDL_Texture *cdi_gpu_render(const CdiRasterFrame *frame,unsigned requested,const
     if(SDL_RenderFlush(gpu.renderer))return NULL;
     SDL_Texture *old_target=SDL_GetRenderTarget(gpu.renderer);
     GlState previous;save_state(&previous);
-    GLuint output=framebuffer(gpu.output),check=native_check?framebuffer(gpu.check):0,tile=framebuffer(gpu.tile);
+    GLuint output=framebuffer(gpu.output,&gpu.output_fbo),check=native_check?framebuffer(gpu.check,&gpu.check_fbo):0,tile=framebuffer(gpu.tile,&gpu.tile_fbo);
     if(!output || !tile || (native_check && !check)){SDL_SetRenderTarget(gpu.renderer,old_target);restore_state(&previous);return NULL;}
     if(gpu.epoch!=frame->epoch){memset(gpu.rows,0,sizeof gpu.rows);gpu.epoch=frame->epoch;gpu.resets++;}
     cdi_render_profile_begin(0);gl.ActiveTexture(GL_TEXTURE0);gl.BindTexture(GL_TEXTURE_2D,gpu.source);
@@ -248,6 +258,7 @@ void cdi_gpu_reset(int lost) {
     if(!lost && gl.DeleteTextures && SDL_GL_GetCurrentContext()==gpu.context) {
         gl.DeleteTextures(1,&gpu.source);gl.DeleteVertexArrays(1,&gpu.vao);gl.DeleteProgram(gpu.program);
         gl.DeleteBuffers(1,&gpu.commands);
+        gl.DeleteFramebuffers(1,&gpu.output_fbo);gl.DeleteFramebuffers(1,&gpu.check_fbo);gl.DeleteFramebuffers(1,&gpu.tile_fbo);
     }
     if(gpu.tile)SDL_DestroyTexture(gpu.tile);
     if(gpu.output)SDL_DestroyTexture(gpu.output);
