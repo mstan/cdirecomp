@@ -50,6 +50,43 @@ if($s.Count -lt 2 -or @($s | Where-Object {$_.Status -gt 1}).Count){throw 'Missi
         creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
     return json.loads(output)
 
+def exercise_window(pid):
+    """Resize/expose this runtime offscreen without activating any window."""
+    import ctypes
+    from ctypes import wintypes as w
+    user=ctypes.WinDLL('user32',use_last_error=True)
+    user.GetForegroundWindow.restype=w.HWND
+    user.GetWindowThreadProcessId.argtypes=[w.HWND,ctypes.POINTER(w.DWORD)]
+    user.GetClassNameW.argtypes=[w.HWND,w.LPWSTR,ctypes.c_int]
+    user.GetWindowRect.argtypes=[w.HWND,ctypes.POINTER(w.RECT)]
+    user.GetClientRect.argtypes=[w.HWND,ctypes.POINTER(w.RECT)]
+    user.SetWindowPos.argtypes=[w.HWND,w.HWND,ctypes.c_int,ctypes.c_int,ctypes.c_int,ctypes.c_int,w.UINT]
+    user.ShowWindow.argtypes=[w.HWND,ctypes.c_int]
+    user.RedrawWindow.argtypes=[w.HWND,ctypes.c_void_p,ctypes.c_void_p,w.UINT]
+    callback_type=ctypes.WINFUNCTYPE(w.BOOL,w.HWND,w.LPARAM)
+    user.EnumWindows.argtypes=[callback_type,w.LPARAM]
+    windows=[]
+    @callback_type
+    def collect(hwnd,unused):
+        owner=w.DWORD();user.GetWindowThreadProcessId(hwnd,ctypes.byref(owner))
+        if owner.value==pid:
+            name=ctypes.create_unicode_buffer(128);user.GetClassNameW(hwnd,name,len(name))
+            if name.value=='SDL_app':windows.append(hwnd)
+        return True
+    user.EnumWindows(collect,0);assert len(windows)==1,windows
+    hwnd=windows[0];foreground=user.GetForegroundWindow();before=w.RECT();after=w.RECT();client=w.RECT()
+    assert user.GetWindowRect(hwnd,ctypes.byref(before))
+    width=2*(before.right-before.left)+1;height=2*(before.bottom-before.top)+1
+    x=user.GetSystemMetrics(76)-width-128;y=user.GetSystemMetrics(77)-height-128
+    assert user.SetWindowPos(hwnd,None,x,y,width,height,0x14) # NOACTIVATE | NOZORDER
+    user.ShowWindow(hwnd,4) # SHOWNOACTIVATE; the complete window is offscreen
+    assert user.RedrawWindow(hwnd,None,None,0x105) # INVALIDATE | ERASE | UPDATENOW
+    assert user.GetForegroundWindow()==foreground,'Owner foreground changed'
+    assert user.GetWindowRect(hwnd,ctypes.byref(after)) and user.GetClientRect(hwnd,ctypes.byref(client))
+    return dict(kind='real_Win32_resize_expose_offscreen',foreground_preserved=True,
+        outer_before=[before.right-before.left,before.bottom-before.top],
+        outer_after=[after.right-after.left,after.bottom-after.top],client_after=[client.right,client.bottom])
+
 def run(exe,args,label):
     out=args.output/label;out.mkdir()
     env=os.environ.copy();env.update(CDI_PACE_SPEED=str(args.pace_speed),SDL_AUDIODRIVER='dummy',
@@ -60,7 +97,7 @@ def run(exe,args,label):
         '--fault-hold','--port',str(args.port),'--input-script',SCRIPT]
     if args.presentation=='headless':command.append('--headless')
     if args.end_frame and not args.live_frame_stop:command+=['--stop-frame',str(args.end_frame)]
-    samples=[];started=time.monotonic();host_before=psutil.cpu_times();armed=False
+    samples=[];started=time.monotonic();host_before=psutil.cpu_times();armed=False;window_event=None
     with (out/'stdout.log').open('w') as stdout,(out/'stderr.log').open('w') as stderr:
         proc=subprocess.Popen(command,env=env,stdout=stdout,stderr=stderr,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
         cycles=None
@@ -76,6 +113,10 @@ def run(exe,args,label):
                 if args.end_frame and args.live_frame_stop and not armed:
                     assert s['frame']<args.end_frame,'Frame stop armed too late'
                     arm=request(args.port,{'cmd':'stop_frame','frame':args.end_frame});assert arm['ok'];armed=True
+                if args.window_events and window_event is None and s['frame']>=900:
+                    before=request(args.port,{'cmd':'render_state'})['jobs']
+                    window_event=exercise_window(proc.pid);window_event['before']=before
+                    (out/'window-events.json').write_text(json.dumps(window_event,indent=2))
                 if not args.end_frame and not armed and s['frame']>=args.arm_frame:
                     arm=request(args.port,{'cmd':'stop_pc','pc':args.stop_pc});assert arm['ok'];armed=True
                 cpu=process.cpu_times();samples.append({'wall_s':time.monotonic()-started,
@@ -109,6 +150,8 @@ def run(exe,args,label):
                 assert not any(name in render['renderer'].lower() for name in ('llvmpipe','software','swiftshader')),render
                 assert not render['native_mismatches'],render
                 if int(env.get('CDI_GPU_READBACK_STRIDE','60')):assert render['native_readbacks']>0,render
+                if args.window_events:
+                    gpu=render['jobs'];assert window_event and (gpu['output_width']>window_event['before']['output_width'] or gpu['output_height']>window_event['before']['output_height']),gpu
             if args.expect_crc_error:
                 assert state['get_registers']['d1']&0xFFFF==0xE8 and state['get_registers']['sr']&1,state['get_registers']
             frames=[];cursor=1
@@ -145,6 +188,7 @@ def run(exe,args,label):
                 'start_origin':start_origin,'first_sample':samples[0],'final_sample':samples[-1],
                 'host_cpu_before':host_before._asdict(),'host_cpu_after':host_after._asdict(),
                 'gpu_memory':gpu_memory_sample,
+                'window_event':window_event,
                 'loader_jobs':state['loader_jobs'],'drawing_jobs':state['drawing_jobs'],'memory_jobs':state['memory_jobs'],
                 'service_jobs':state['service_jobs'],'streaming_jobs':state['streaming_jobs'],
                 'board_jobs':state['board_jobs'],'render_state':state['render_state']}
@@ -186,11 +230,13 @@ def main():
     p.add_argument('--pace-speed',type=float,default=32,help='Emulated pacing multiplier, identical for both builds')
     p.add_argument('--expect-end-frame',type=int,help='Reject a repeated stop PC reached at the wrong frame')
     p.add_argument('--presentation',choices=('headless','dummy','hardware'),default='headless')
+    p.add_argument('--window-events',action='store_true',help='Exercise this runtime window offscreen with real resize/expose and preserve foreground')
     p.add_argument('--native-job',choices=('loader','drawing','memory','service','streaming','board','gpu'),default='loader')
     args=p.parse_args()
     assert args.start_frame>=0,'Start frame must be zero (process creation) or positive'
     assert args.pace_speed>0,'Pacing multiplier must be positive'
     assert not args.live_frame_stop or args.end_frame,'Live frame stop requires --end-frame'
+    assert not args.window_events or (os.name=='nt' and args.presentation=='hardware'),'Window event check requires Windows hardware frontend'
     with socket.socket() as probe:assert probe.connect_ex(('127.0.0.1',args.port))!=0
     args.output.mkdir(parents=True,exist_ok=False)
     harness=args.output/'harness';harness.mkdir()
@@ -207,6 +253,7 @@ def main():
         'machine':{'platform':platform.platform(),'processor':platform.processor(),
                    'processor_identifier':os.environ.get('PROCESSOR_IDENTIFIER'),'logical_cpus':psutil.cpu_count()},
         'settings':{'presentation':args.presentation,'audio':'dummy','pace_speed':args.pace_speed,
+                    'window_events':args.window_events,
                     'rtc_sync_host_on_startup':False,'start_frame':args.start_frame,
                     'actual_pacing':not args.end_frame or args.live_frame_stop,
                     'actual_frontend':args.presentation in ('dummy','hardware') and (not args.end_frame or args.live_frame_stop),
