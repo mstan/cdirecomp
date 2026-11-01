@@ -3,7 +3,7 @@
   "owner_issue": "beads-oatv",
   "campaign_issue": "beads-2wy8.1",
   "consumer_issue": "beads-7t8h",
-  "status": "candidate_burndown_complete; all11 selected jobs/consolidations qualified; independent KEEP10/11; stacked PRs open/unmerged; owner visual/play-and-merge handoff separate",
+  "status": "candidate_burndown_complete; owner explicitly authorized merge/release; corePR7 and engine/consumerPR1-7 merged; Windowsv0.0.3 release validation in progress",
   "frontend_scope_correction": "2026-11-01: old nominal SDL runs via scanout_hle_compare.py or loader_job_compare.py startup --stop-frame disabled both pacing/frontend. Their raw samples establish unpaced backend equality/performance only. Previous frontend/copy/upload/presentation qualification claims are withdrawn; raw history/backend qualification preserved. Old engine/consumer PR1/2 descriptions corrected; candidate10 remained open at that correction; subsequent actual-hardware qualification is in renderer_qualification.",
   "engine_head": "85c869ee808b438905f2c1bc29a46d30f27647f8",
   "core_head": "3955bf3311f55e031836f70b5c1839e95b81f9cf",
@@ -1497,7 +1497,7 @@
   },
   "current_serial_candidate": null,
   "completed_serial_candidate": 11,
-  "awaiting_owner_checkin": true,
+  "awaiting_owner_checkin": false,
   "loader_job_evidence": "docs/loader-job-evidence.json",
   "drawing_job_evidence": "docs/drawing-job-evidence.json",
   "latest_qualified_heads": {
@@ -1858,7 +1858,7 @@
       "Desired32x/64x actually attempted within bounded GPU memory.32x has GPU outliers beyond one native field;64x mean35.24ms and29.718s to1600 in the candidate setup sample, so64x is not native-cadence-qualified. Required16x normal gameplay result is separate.",
       "Source bitmap detail is preserved through authored integer spans; no additional scene detail is invented.",
       "Baseline has no save-state/restore/rewind/rollback serializer or debug commands. These unsupported checks are not claimed passed; no serializer project added. Supported native SRAM and reset invalidation are covered.",
-      "Independent KEEP10/11 completed; owner final visual/play review and explicit merge approval remain pending."
+      "Independent KEEP10/11 completed; owner explicitly authorized merge/release on2026-11-01."
     ],
     "historical": [
       "Initial padded-instance variant had one 1600-field pair CPU -2.7907% / cycles -5.1268%, not current performance evidence. Its and the first indirect prototype displayed-output claims are withdrawn after the target-attachment alias finding; raw files/binaries preserved.",
@@ -1932,7 +1932,21 @@
       "audio": "default real output, dummy driver removed",
       "profile": "isolated owner-review/player.cfg and nvram.bin; owner saves/settings untouched",
       "density": "requested16/effective16, real GPU jobs, no fallbacks at ready checkpoint",
-      "merge": "explicit owner approval pending; all stacked PRs unmerged"
+      "merge": "Owner explicitly authorized merging all reviewed work and cutting releases on2026-11-01; corePR7 and engine/consumerPR1-7 merged."
     }
+  },
+  "delivery": {
+    "issue": "beads-ttbl.9",
+    "version": "v0.0.3",
+    "state": "merged_building_releases",
+    "products": [
+      "cdirecomp",
+      "HotelMarioRecomp"
+    ],
+    "core_PR7": "merged",
+    "engine_PRs1_7": "merged",
+    "consumer_PRs1_7": "merged",
+    "owner_authorization": "please merge out everything to cdi recomp and hotel mario and cut new exe releases for each",
+    "raw_root": "G:/Temp/Codex/cdirecomp/release-v0.0.3-20261101"
   }
 }

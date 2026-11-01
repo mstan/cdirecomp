@@ -197,5 +197,10 @@
       ]
     }
   ],
-  "remaining_candidates": []
+  "remaining_candidates": [],
+  "delivery": {
+    "issue": "beads-ttbl.9",
+    "version": "v0.0.3",
+    "state": "owner_authorized_merged_building_releases"
+  }
 }

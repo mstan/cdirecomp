@@ -38,24 +38,24 @@ subsystem boundaries or a requirement to adopt every proposed optimization.
 | --- | --- | --- | --- |
 | 1 | **Qualify the scanout candidate already written** | Repeated decoding, transparency, contribution and composition work across pixels | **Qualified as part of the combined native frame job.** Three alternating Hotel Mario pairs save 23.0-26.0% CPU/field with complete contract equality. Scanout-only performance remains inconclusive. |
 | 2 | **Complete frame production and publication** | Repeated framebuffer hashing, copying, diagnostic reconstruction and publication work | **Implemented and qualified with candidate 1.** Exact content identity, retained storage and frontend handoff remove duplicate work without changing field cadence. |
-| 3 | **Graphics service to completed drawing job** | Guest drawing preparation, intermediate memory traffic, control-list construction and repeated renderer preparation | **Qualified native queue job; independent review KEEP, final performance neutral/inconclusive.** Real callbacks, queue publication and device/IRQ frontiers match. Reviewer-found debugger stops are fixed and regression-tested. Stacked [engine PR #2](https://github.com/mstan/cdirecomp/pull/2) and [consumer PR #2](https://github.com/mstan/HotelMarioRecomp/pull/2) are open and unmerged; historical pre-fix gains are not a current speedup claim. |
+| 3 | **Graphics service to completed drawing job** | Guest drawing preparation, intermediate memory traffic, control-list construction and repeated renderer preparation | **Qualified native queue job; independent review KEEP, final performance neutral/inconclusive.** Real callbacks, queue publication and device/IRQ frontiers match. Reviewer-found debugger stops are fixed and regression-tested. Stacked [engine PR #2](https://github.com/mstan/cdirecomp/pull/2) and [consumer PR #2](https://github.com/mstan/HotelMarioRecomp/pull/2) are merged; historical pre-fix gains are not a current speedup claim. |
 | 4 | **Memory operation to fully published result** | Instruction-by-instruction copying/filling plus repeated module invalidation, tag maintenance and dirty tracking | **Qualified selected firmware fill; independent KEEP.**37 generated-reference cases and normal-paced full-boot/control contracts match. Performance is neutral/inconclusive; per-byte write/invalidation bookkeeping is retained. |
 | 5 | **File/module load to executable module ready** | Repeated sector handling, copying, validation, relocation, linking, hashing and native binding | **Selected native verification job implemented and qualified in the real load-to-ready pipeline.** Three matched pairs use 23.4–33.3% fewer process cycles during loading; later gameplay is neutral/inconclusive. Kernel I/O, linking and scheduling stay authoritative. |
-| 6 | **Frequently executed OS-9 service jobs** | Recompiled kernel algorithms and internal dispatch that a complete native operation could replace | **Selected complete process-ID lookup/publication package qualified; independent KEEP, neutral/inconclusive.** Exact success/error/IRQ contracts and all frames through 13000 match. Conservative cached-binding bounds retain original notification callbacks and authoritative guest state. Stacked [engine PR #4](https://github.com/mstan/cdirecomp/pull/4) and [consumer PR #4](https://github.com/mstan/HotelMarioRecomp/pull/4) are open and unmerged. |
+| 6 | **Frequently executed OS-9 service jobs** | Recompiled kernel algorithms and internal dispatch that a complete native operation could replace | **Selected complete process-ID lookup/publication package qualified; independent KEEP, neutral/inconclusive.** Exact success/error/IRQ contracts and all frames through 13000 match. Conservative cached-binding bounds retain original notification callbacks and authoritative guest state. Stacked [engine PR #4](https://github.com/mstan/cdirecomp/pull/4) and [consumer PR #4](https://github.com/mstan/HotelMarioRecomp/pull/4) are merged. |
 | 7 | **Native execution spans** | Repeated dispatch, interpreter handoffs, instruction bookkeeping and checks between operations with no observable intervening event | **Implemented and qualified.** Reused the existing observed native catalog, then coalesced legal PIC continuations into shared native bodies. SDK `3955bf3`; incremental 3-pair median CPU reduction 23.77% versus the seeded catalog, with exact canonical guest contracts. |
 | 8 | **Complete CD/XA streaming jobs** | Repeated work across sector selection, decoding, buffer ownership, DMA/refill, guest drivers and audio handoff | **Qualified CIAP progression; independent KEEP.** Real seek/filter/refill/DMA/IRQ and PCM contracts match. CPU time is neutral/inconclusive; live cycle concerns are retained below. Whole-board advancement remains candidate 9. |
 | 9 | **Whole-board event advancement** | Repeated timer, input transport, CD/audio, RTC, raster and pacing calls during quiet STOP intervals | **Qualified selected quiet STOP-board job; independent KEEP, neutral/inconclusive.** Original event quanta, per-quantum time and observation boundaries match. Active-CPU advancement stays faithful; the initial negative timing outlier did not reproduce. |
-| 10 | **Frame to host presentation** | Redundant frame copies, texture uploads, conversions and presentation preparation | **Qualified; independent KEEP.** Actual NVIDIA hardware/native readbacks, real offscreen resize/expose and matched native1x gameplay pass; CPU is neutral/inconclusive. Uploads fall about 69%. Stacked engine/consumer PRs #7 are open and unmerged. |
+| 10 | **Frame to host presentation** | Redundant frame copies, texture uploads, conversions and presentation preparation | **Qualified; independent KEEP.** Actual NVIDIA hardware/native readbacks, real offscreen resize/expose and matched native1x gameplay pass; CPU is neutral/inconclusive. Uploads fall about 69%. Stacked engine/consumer PRs #7 are merged. |
 | 11 | **GPU resident jobs and high-resolution rendering** | Expanded CPU rendering/uploads and scale-dependent frame intermediates | **Qualified required target; independent KEEP.** Required16x normal gameplay cadence/headroom passes on the owner RTX3080Ti with bounded tiles and portable fallback. Desired32x/64x full-speed and later lower-end16x remain unqualified;64x misses cadence. |
 
 ## Current checkpoint
 
-- Current engine branch: `perf/native-gpu-jobs-20261101`; consumer branch:
-  `HotelMarioRecomp/perf/native-gpu-job-20261101`.
+- Current engine and consumer branches: `master`; reviewed native-job stacks
+  merged on 2026-11-01 after the owner explicitly authorized merge and release.
 - Combined10/11 runtime `d81b77f`, consumer `4115efc`, is independently KEEP.
   [Engine PR #7](https://github.com/mstan/cdirecomp/pull/7) and
   [consumer PR #7](https://github.com/mstan/HotelMarioRecomp/pull/7) extend the
-  open, unmerged stack through #6. Exact renderer identities,
+  merged stack through #6. Exact renderer identities,
   raw evidence and limitations are in the current checkpoint below and the
   [machine index](hle-campaign-evidence.json).
 - Qualified engine checkpoints: `a83c317` (frame job), `e92baf8` (coarse native
@@ -66,8 +66,8 @@ subsystem boundaries or a requirement to adopt every proposed optimization.
   validated jobs; zero candidate areas remain.** Measured scopes, historical
   failed/inconclusive experiments and limitations remain below. Independent
   review approved 10/11 on 2026-11-01. Desired/later scale targets are explicit
-  follow-ups, not qualified results. Owner visual/play review and explicit
-  merge approval remain separate; no PR has been merged.
+  follow-ups, not qualified results. The owner explicitly authorized merging the stack and cutting both Windows
+  executable releases on 2026-11-01; core PR7 and engine/consumer PR1-7 are merged.
 
 **Frontend scope correction, 2026-11-01:** older nominal SDL runs through
 `scanout_hle_compare.py` or `loader_job_compare.py --end-frame` supplied startup
@@ -103,6 +103,11 @@ have corrected descriptions. Actual live candidate-8 coverage uses TCP
   active player, enemies and door interactions. SDL mode explicitly excludes
   host-time PCM queue/drop counters while retaining the full decoded PCM hash.
 - No release package, delivery folder or native player save was changed.
+
+
+Current delivery task: `beads-ttbl.9`, Windows v0.0.3 runtime releases for
+cdirecomp and HotelMarioRecomp. Historical pending-merge/handoff notes below
+refer to their earlier checkpoints and are superseded by this authorization.
 
 ## Evidence and limits
 
