@@ -45,28 +45,29 @@ subsystem boundaries or a requirement to adopt every proposed optimization.
 | 7 | **Native execution spans** | Repeated dispatch, interpreter handoffs, instruction bookkeeping and checks between operations with no observable intervening event | **Implemented and qualified.** Reused the existing observed native catalog, then coalesced legal PIC continuations into shared native bodies. SDK `3955bf3`; incremental 3-pair median CPU reduction 23.77% versus the seeded catalog, with exact canonical guest contracts. |
 | 8 | **Complete CD/XA streaming jobs** | Repeated work across sector selection, decoding, buffer ownership, DMA/refill, guest drivers and audio handoff | **Qualified CIAP progression; independent KEEP.** Real seek/filter/refill/DMA/IRQ and PCM contracts match. CPU time is neutral/inconclusive; live cycle concerns are retained below. Whole-board advancement remains candidate 9. |
 | 9 | **Whole-board event advancement** | Repeated timer, input transport, CD/audio, RTC, raster and pacing calls during quiet STOP intervals | **Qualified selected quiet STOP-board job; independent KEEP, neutral/inconclusive.** Original event quanta, per-quantum time and observation boundaries match. Active-CPU advancement stays faithful; the initial negative timing outlier did not reproduce. |
-| 10 | **Frame to host presentation** | Redundant frame copies, texture uploads, conversions and presentation preparation | **Implemented, built and tested; independent review pending.** Actual NVIDIA hardware/native readbacks, real offscreen resize/expose and matched native1x gameplay are covered; CPU is neutral/inconclusive within A/A variation. |
-| 11 | **GPU resident jobs and high-resolution rendering** | Expanded CPU rendering/uploads and scale-dependent frame intermediates | **Implemented, built and tested; independent review pending.** Required16x normal gameplay cadence/headroom measured on the owner RTX3080Ti;32x/64x attempted with bounded tiles.64x is not cadence-qualified. |
+| 10 | **Frame to host presentation** | Redundant frame copies, texture uploads, conversions and presentation preparation | **Qualified; independent KEEP.** Actual NVIDIA hardware/native readbacks, real offscreen resize/expose and matched native1x gameplay pass; CPU is neutral/inconclusive. Uploads fall about 69%. Stacked engine/consumer PRs #7 are open and unmerged. |
+| 11 | **GPU resident jobs and high-resolution rendering** | Expanded CPU rendering/uploads and scale-dependent frame intermediates | **Qualified required target; independent KEEP.** Required16x normal gameplay cadence/headroom passes on the owner RTX3080Ti with bounded tiles and portable fallback. Desired32x/64x full-speed and later lower-end16x remain unqualified;64x misses cadence. |
 
 ## Current checkpoint
 
 - Current engine branch: `perf/native-gpu-jobs-20261101`; consumer branch:
   `HotelMarioRecomp/perf/native-gpu-job-20261101`.
-- Combined10/11 runtime `d81b77f`, consumer `4115efc`, is built and tested;
-  independent disposition is pending. Earlier accepted jobs remain on open,
-  unmerged stacked PRs through engine/consumer #6. Exact renderer identities,
+- Combined10/11 runtime `d81b77f`, consumer `4115efc`, is independently KEEP.
+  [Engine PR #7](https://github.com/mstan/cdirecomp/pull/7) and
+  [consumer PR #7](https://github.com/mstan/HotelMarioRecomp/pull/7) extend the
+  open, unmerged stack through #6. Exact renderer identities,
   raw evidence and limitations are in the current checkpoint below and the
   [machine index](hle-campaign-evidence.json).
 - Qualified engine checkpoints: `a83c317` (frame job), `e92baf8` (coarse native
   catalog), `85c869e` (completed-line jobs). Shared core: `3955bf3`.
 - Supported consumer integration: `16353fc` on
   `HotelMarioRecomp/perf/native-jobs-20261028`, owning issue `beads-7t8h`.
-- **Broad burndown remains open.** The owner resumed the remaining set on
-  2026-10-31. Selected jobs for 1/2/3/4/5/6/7/8/9 are now qualified; their measured
-  scopes and historical failed/inconclusive experiments remain below. After
-  independent keep/fix/reject review, create stacked PRs for retained work and
-  assign the next candidate. Do not merge without owner approval. **Two areas
-  remain: frontend/hardware 10 and GPU/high-resolution 11.**
+- **All 11 candidate areas have validated selected jobs or consolidation into
+  validated jobs; zero candidate areas remain.** Measured scopes, historical
+  failed/inconclusive experiments and limitations remain below. Independent
+  review approved 10/11 on 2026-11-01. Desired/later scale targets are explicit
+  follow-ups, not qualified results. Owner visual/play review and explicit
+  merge approval remain separate; no PR has been merged.
 
 **Frontend scope correction, 2026-11-01:** older nominal SDL runs through
 `scanout_hle_compare.py` or `loader_job_compare.py --end-frame` supplied startup
@@ -986,7 +987,7 @@ Stacked PR publication is next; no merge is authorized. **Two areas remain:
 incremental frontend/hardware 10 and GPU/high-resolution 11.** Combined
 current-build save/load and final owner merge handoff remain separate.
 
-### Combined 10/11 renderer checkpoint - tested, review pending, 2026-11-01
+### Combined 10/11 renderer qualified - independent KEEP, 2026-11-01
 
 Measured runtime `ce2975f` publishes immutable visible raster rows at draw/publication
 boundaries. The GPU keeps changed source rows resident, applies the exact native
@@ -1039,8 +1040,8 @@ wall span including waits; scheduled CPU comes from process accounting.
 The baseline has no current-build save-state/restore/rewind/rollback serializer
 or debug commands. Those unsupported checks remain explicit gaps; this work
 adds no serializer. Source bitmap detail is preserved without invention.
-Independent KEEP/FIX/REJECT, final owner visual/merge handoff and separate 10/11
-acceptance remain pending. No PR or merge is claimed for these candidates.
+Independent review accepts both 10 and 11 for this measured package. Final
+owner visual/play review and explicit merge approval remain pending.
 
 Final runtime `d81b77f` / consumer `4115efc` adds only error-path fallback
 reporting after the successful-path measurements above. Allocation/GL errors
@@ -1051,5 +1052,33 @@ real context-local GL error and verifies exact CPU-job output with
 requested64/effective1/fallbacks1. A fresh normal16x built-game checkpoint
 through1600 matches the faithful reference with26 native reads and zero
 fallbacks. Both current build selectors link; Linux selectors compile strictly.
-The machine index preserves the exact measured and post-fix identities for
-independent review of evidence reuse. The mutable C cache is restored to HLE.
+The machine index preserves the exact measured and post-fix identities.
+Independent review approves reuse of the successful-path measurements: shaders,
+uploads and successful GL commands are unchanged, while current component,
+error-fallback and targeted runtime checks cover the final difference. CPU
+preparation/submission is scale-independent; raw scheduled CPU does not grow
+quadratically, without establishing literally identical timings at all scales.
+The mutable C cache is restored to HLE.
+
+Reviewer `burndown_focus_check` found no objective blocker and returned KEEP10
+and KEEP11. Future save-state/rollback support must first provide a supported
+serializer/restore boundary, invalidate publication epochs/resident identities/
+presentation caches there, then verify restored canonical state and output.
+The inherited missing feature does not block the display-only change.
+
+Stacked [engine PR #7](https://github.com/mstan/cdirecomp/pull/7) and
+[consumer PR #7](https://github.com/mstan/HotelMarioRecomp/pull/7) are open and
+unmerged. No further candidate is queued. Removed only the unused clean old
+preparatory GPU worktree (7,062,522 bytes); retained all frozen evidence,
+immutable dependencies and current build/generated cache. No release/delivery
+folder, owner save or owner setting was changed.
+
+The final `d81b77f` Hotel Mario candidate is open for the owner's visual/play
+check in a normal window with default real audio, requested/effective16x and
+zero fallback episodes at the ready checkpoint. Its isolated profile and native
+battery are under the retained `owner-review` directory; owner files are
+untouched. F8 cycles density; arrows move, Enter/Space/Z is button1 and
+Backspace/X is button2. The existing runtime has no resumable debugger pause,
+so this handoff is running normally. See the machine index for its owned
+process/debug port and launch receipt. Explicit owner approval is still needed
+before merging the stack.

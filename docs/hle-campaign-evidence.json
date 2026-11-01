@@ -3,8 +3,8 @@
   "owner_issue": "beads-oatv",
   "campaign_issue": "beads-2wy8.1",
   "consumer_issue": "beads-7t8h",
-  "status": "in_progress; combined renderer10/11 built/tested, native1x CPU neutral and required16x normal cadence/headroom measured; independent review pending;64x not cadence-qualified; stacked earlier PRs unmerged",
-  "frontend_scope_correction": "2026-11-01: old nominal SDL runs via scanout_hle_compare.py or loader_job_compare.py startup --stop-frame disabled both pacing/frontend. Their raw samples establish unpaced backend equality/performance only. Previous frontend/copy/upload/presentation qualification claims are withdrawn; raw history/backend qualification preserved. Old engine/consumer PR1/2 descriptions corrected; candidate10 remains open.",
+  "status": "candidate_burndown_complete; all11 selected jobs/consolidations qualified; independent KEEP10/11; stacked PRs open/unmerged; owner visual/play-and-merge handoff separate",
+  "frontend_scope_correction": "2026-11-01: old nominal SDL runs via scanout_hle_compare.py or loader_job_compare.py startup --stop-frame disabled both pacing/frontend. Their raw samples establish unpaced backend equality/performance only. Previous frontend/copy/upload/presentation qualification claims are withdrawn; raw history/backend qualification preserved. Old engine/consumer PR1/2 descriptions corrected; candidate10 remained open at that correction; subsequent actual-hardware qualification is in renderer_qualification.",
   "engine_head": "85c869ee808b438905f2c1bc29a46d30f27647f8",
   "core_head": "3955bf3311f55e031836f70b5c1839e95b81f9cf",
   "game_head": "16353fc849ef8056af891e2c3b7d3e29ae3a41da",
@@ -1413,24 +1413,28 @@
     {
       "candidate": 10,
       "name": "Frame to host presentation",
-      "status": "built_tested_pending_independent_review",
+      "status": "qualified_independent_KEEP",
       "job": "Exact content publication skips unchanged frontend copy/upload while retaining field presentation/redraw",
       "evidence": [
         "docs/hle-campaign-evidence.json#renderer_qualification"
       ],
       "deferred_extension": null,
-      "prerequisite": "Independent keep/fix/reject; owner visual/merge handoff separate.",
-      "hardware_extension_status": "tested_pending_independent_review",
-      "implementation_state": "implemented_built_tested",
+      "prerequisite": null,
+      "hardware_extension_status": "qualified_actual_hardware",
+      "implementation_state": "accepted",
       "implementation": "d81b77f0b78c06c9c06e99db3f17e054b551c191",
       "consumer": "4115efc60f0e53407a55affb0a3d3559af6b1dd2",
-      "owner_issue": "beads-ttbl.8"
+      "owner_issue": "beads-ttbl.8",
+      "engine_pr": "https://github.com/mstan/cdirecomp/pull/7",
+      "consumer_pr": "https://github.com/mstan/HotelMarioRecomp/pull/7",
+      "independent_review": "burndown_focus_check: KEEP, 2026-11-01",
+      "owner_handoff": "Visual/play check and explicit merge approval pending; no merge or release."
     },
     {
       "candidate": 11,
       "name": "Resident GPU raster jobs and high-resolution output",
-      "status": "built_tested_pending_independent_review",
-      "implementation_state": "implemented_built_tested",
+      "status": "qualified_independent_KEEP",
+      "implementation_state": "accepted",
       "owner_issue": "beads-ttbl.3",
       "guide": {
         "path": "C:\\Users\\Matthew\\Desktop\\GPU-HIGH-RESOLUTION-RENDERING-GUIDE.md",
@@ -1463,13 +1467,17 @@
         "a385e0b",
         "4261f07"
       ],
-      "prerequisite": "Independent keep/fix/reject; owner visual/merge handoff separate.",
+      "prerequisite": null,
       "related_candidate": 10,
       "evidence": [
         "docs/hle-campaign-evidence.json#renderer_qualification"
       ],
       "implementation": "d81b77f0b78c06c9c06e99db3f17e054b551c191",
-      "consumer": "4115efc60f0e53407a55affb0a3d3559af6b1dd2"
+      "consumer": "4115efc60f0e53407a55affb0a3d3559af6b1dd2",
+      "engine_pr": "https://github.com/mstan/cdirecomp/pull/7",
+      "consumer_pr": "https://github.com/mstan/HotelMarioRecomp/pull/7",
+      "independent_review": "burndown_focus_check: KEEP, 2026-11-01",
+      "owner_handoff": "Visual/play check and explicit merge approval pending; no merge or release."
     }
   ],
   "boundary_policy": "Current exact instruction-history comparison applies to CPU-preserving frame and AOT changes. A future native OS/memory/drawing replacement may change interior instruction execution; qualify caller-visible input/output, authoritative guest state, time/events/interrupts and errors at the complete job boundary instead of imposing internal LLE algorithms.",
@@ -1487,15 +1495,20 @@
     "report": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\cleanup-report.json",
     "ledger": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\resource-ledger.json"
   },
-  "current_serial_candidate": 10,
-  "completed_serial_candidate": 9,
-  "awaiting_owner_checkin": false,
+  "current_serial_candidate": null,
+  "completed_serial_candidate": 11,
+  "awaiting_owner_checkin": true,
   "loader_job_evidence": "docs/loader-job-evidence.json",
   "drawing_job_evidence": "docs/drawing-job-evidence.json",
   "latest_qualified_heads": {
     "engine_implementation": "7181cfd3cf52d2f87116fa42a328ec4191d4ce2d",
     "core": "cd1e5e28dc26ec6a887197aac7eaaf8c8c870019",
-    "consumer": "da8ff6f89cf573d8d345b311bb4a9a5388d29cc4"
+    "consumer": "da8ff6f89cf573d8d345b311bb4a9a5388d29cc4",
+    "renderer": {
+      "runtime": "d81b77f0b78c06c9c06e99db3f17e054b551c191",
+      "consumer": "4115efc60f0e53407a55affb0a3d3559af6b1dd2",
+      "review": "independent_KEEP10_and_KEEP11"
+    }
   },
   "loader_completion_audit": "docs/loader-job-evidence.json#reaudit_20261030",
   "benchmark_target_pool": {
@@ -1533,13 +1546,10 @@
   "candidate6_owner_issue": "beads-ttbl.5",
   "candidate8_owner_issue": "beads-ttbl.6",
   "next_serial_candidate": null,
-  "remaining_candidates": [
-    10,
-    11
-  ],
+  "remaining_candidates": [],
   "candidate9_owner_issue": "beads-ttbl.7",
   "renderer_qualification": {
-    "status": "built_tested_pending_independent_review",
+    "status": "qualified_independent_KEEP_required16x_native1x_CPU_neutral",
     "candidates": [
       10,
       11
@@ -1848,7 +1858,7 @@
       "Desired32x/64x actually attempted within bounded GPU memory.32x has GPU outliers beyond one native field;64x mean35.24ms and29.718s to1600 in the candidate setup sample, so64x is not native-cadence-qualified. Required16x normal gameplay result is separate.",
       "Source bitmap detail is preserved through authored integer spans; no additional scene detail is invented.",
       "Baseline has no save-state/restore/rewind/rollback serializer or debug commands. These unsupported checks are not claimed passed; no serializer project added. Supported native SRAM and reset invalidation are covered.",
-      "Independent keep/fix/reject and owner final visual/merge handoff remain pending."
+      "Independent KEEP10/11 completed; owner final visual/play review and explicit merge approval remain pending."
     ],
     "historical": [
       "Initial padded-instance variant had one 1600-field pair CPU -2.7907% / cycles -5.1268%, not current performance evidence. Its and the first indirect prototype displayed-output claims are withdrawn after the target-attachment alias finding; raw files/binaries preserved.",
@@ -1890,6 +1900,39 @@
       "live_checkpoint": "G:\\Temp\\Codex\\cdirecomp\\gpu-jobs-20261101\\postfallback-check16",
       "checkpoint": "Normal hardware16x through1600 matches faithful reference;26 native GPU reads/0 mismatch,299 GPU jobs,zero fallbacks.",
       "selectors": "Current Windows HLE/LLE link and Linux HLE0/HLE1 strict syntax pass; link-selectors-reservation.json/build-postfallback-reservation.json exit0."
+    },
+    "independent_review": {
+      "reviewer": "burndown_focus_check",
+      "date": "2026-11-01",
+      "decisions": {
+        "10": "KEEP",
+        "11": "KEEP"
+      },
+      "scope": "Hotel Mario USA / Windows / RTX 3080 Ti; required16x qualified, native1x CPU neutral/inconclusive",
+      "source": "d81b77f0b78c06c9c06e99db3f17e054b551c191",
+      "successful_path_evidence_reuse": "Approved: ce2975f shaders, uploads and successful GL draw/resolve commands unchanged; current component/error-fallback and16x1600 checks cover final difference.",
+      "CPU_scale": "Preparation/submission loops are independent of scale; raw scheduled CPU shows no quadratic growth, not literal identical timing.",
+      "restore_prerequisite": "Baseline has no serializer/restore/rollback implementation. Future supported restore boundary must invalidate publication epochs, resident identities and presentation caches, then verify restored canonical state/output.",
+      "next_action": "Stacked PR pair published; owner visual/play review and explicit merge approval remain pending."
+    },
+    "pull_requests": [
+      "https://github.com/mstan/cdirecomp/pull/7",
+      "https://github.com/mstan/HotelMarioRecomp/pull/7"
+    ],
+    "cleanup": "Removed only clean unused old preparatory GPU worktree,193 tracked files/7062522 bytes, without forcing. All raw/frozen evidence, immutable source dependencies and current HLE build/generated cache retained.",
+    "owner_handoff": {
+      "state": "running_for_owner_visual_play_check",
+      "receipt": "G:/Temp/Codex/cdirecomp/gpu-jobs-20261101/owner-review/handoff.json",
+      "ready_state": "G:/Temp/Codex/cdirecomp/gpu-jobs-20261101/owner-review/ready.json",
+      "reservation": "G:/Temp/Codex/cdirecomp/gpu-jobs-20261101/owner-review-reservation.json",
+      "runtime": "d81b77f0b78c06c9c06e99db3f17e054b551c191",
+      "pid": 44480,
+      "port": 51377,
+      "window": "normal800x640 shown without activation; owner foreground preserved",
+      "audio": "default real output, dummy driver removed",
+      "profile": "isolated owner-review/player.cfg and nvram.bin; owner saves/settings untouched",
+      "density": "requested16/effective16, real GPU jobs, no fallbacks at ready checkpoint",
+      "merge": "explicit owner approval pending; all stacked PRs unmerged"
     }
   }
 }
