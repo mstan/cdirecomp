@@ -7,6 +7,7 @@
 #include "cdi_media.h"
 #include "cdi_audio.h"
 #include "mcd212_video.h"
+#include "cdi_render_profile.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -16,6 +17,7 @@ typedef struct {
     SDL_Window *window;
     SDL_Renderer *renderer;
     SDL_Texture *texture;
+    SDL_Texture *native_target;
     SDL_GameController *controller;
     SDL_JoystickID controller_id;
     SDL_AudioDeviceID audio_device;
@@ -105,6 +107,7 @@ static uint32_t input_mask(void) {
 static int ensure_texture(uint16_t width, uint16_t height) {
     if (s.texture && width == s.texture_width && height == s.texture_height) return 1;
     if (s.texture) SDL_DestroyTexture(s.texture);
+    if (s.native_target){SDL_DestroyTexture(s.native_target);s.native_target=NULL;}
     s.texture = SDL_CreateTexture(s.renderer, SDL_PIXELFORMAT_ARGB8888,
                                   SDL_TEXTUREACCESS_STREAMING, width, height);
     if (!s.texture) {
@@ -115,6 +118,15 @@ static int ensure_texture(uint16_t width, uint16_t height) {
     SDL_SetTextureBlendMode(s.texture, SDL_BLENDMODE_NONE);
     s.texture_width = width;
     s.texture_height = height;
+    if(cdi_render_profile_init(s.renderer,s.texture)) {
+        /* An actual native-size offscreen draw keeps hardware qualification
+         * meaningful even for hidden windows. Both measured backends use this
+         * same presentation boundary; no enhanced-size host buffer exists. */
+        s.native_target=SDL_CreateTexture(s.renderer,SDL_PIXELFORMAT_ARGB8888,
+            SDL_TEXTUREACCESS_TARGET,width,height);
+        if(!s.native_target)return 0;
+        SDL_SetTextureBlendMode(s.native_target,SDL_BLENDMODE_NONE);
+    }
     return 1;
 }
 
@@ -125,20 +137,40 @@ static int present_frame(void) {
         MCD212_VIDEO_MAX_WIDTH * MCD212_VIDEO_MAX_HEIGHT, s.shown_content,
         &width, &height, &generation, &content);
     if (!generation || generation == s.shown_generation) return 1;
+    if(count && !ensure_texture(width,height))return 0;
+    cdi_render_profile_frame();
     if (count) {
-        if (!ensure_texture(width, height)) return 0;
+        cdi_render_profile_begin(0);
         if (SDL_UpdateTexture(s.texture, NULL, s.pixels, (int)width * 4) != 0) {
             fprintf(stderr, "[frontend] texture update failed: %s\n", SDL_GetError());
             return 0;
         }
+        if(cdi_render_profile_enabled())SDL_RenderFlush(s.renderer);
+        cdi_render_profile_end(0);
+        cdi_render_profile_upload((uint64_t)width*height*4);
         s.shown_content = content;
     }
     /* Keep field cadence and resize/expose redraws even when the existing
      * texture is unchanged. Only copying/uploading that texture is elided. */
+    SDL_Texture *presented=s.texture;
+    if(s.native_target) {
+        if(SDL_SetRenderTarget(s.renderer,s.native_target))return 0;
+        cdi_render_profile_begin(1);
+        SDL_SetRenderDrawColor(s.renderer,0,0,0,255);SDL_RenderClear(s.renderer);
+        SDL_RenderCopy(s.renderer,s.texture,NULL,NULL);SDL_RenderFlush(s.renderer);
+        cdi_render_profile_end(1);
+        cdi_render_profile_readback(s.renderer,s.pixels,width,height,generation);
+        if(SDL_SetRenderTarget(s.renderer,NULL))return 0;
+        presented=s.native_target;
+    }
+    cdi_render_profile_begin(2);
     SDL_SetRenderDrawColor(s.renderer, 0, 0, 0, 255);
     SDL_RenderClear(s.renderer);
-    SDL_RenderCopy(s.renderer, s.texture, NULL, NULL);
+    SDL_RenderCopy(s.renderer, presented, NULL, NULL);
+    if(cdi_render_profile_enabled())SDL_RenderFlush(s.renderer);
+    cdi_render_profile_end(2);
     SDL_RenderPresent(s.renderer);
+    cdi_render_profile_finish();
     s.shown_generation = generation;
     return 1;
 }
@@ -184,7 +216,8 @@ int cdi_frontend_init(int capture_mouse) {
     }
     s.window = SDL_CreateWindow("cdirecomp — Philips CD-i",
                                 SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-                                768, 576, SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
+                                768, 576, SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI |
+                                (getenv("CDI_WINDOW_HIDDEN")?SDL_WINDOW_HIDDEN:0));
     if (!s.window) {
         fprintf(stderr, "[frontend] window creation failed: %s\n", SDL_GetError());
         cdi_frontend_shutdown();
@@ -267,6 +300,8 @@ int cdi_frontend_pump(void) {
 }
 
 void cdi_frontend_shutdown(void) {
+    cdi_render_profile_shutdown();
+    if(s.native_target)SDL_DestroyTexture(s.native_target);
     cdi_input_set_frontend(0);
     cdi_input_mouse_focus(0);
     apply_mouse_capture();

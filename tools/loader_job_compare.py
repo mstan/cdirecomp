@@ -42,6 +42,7 @@ def run(exe,args,label):
     env=os.environ.copy();env.update(CDI_PACE_SPEED=str(args.pace_speed),SDL_AUDIODRIVER='dummy',
         CDI_PLAYER_CONFIG_PATH=str(args.output/'player.cfg'),TEMP=str(args.output),TMP=str(args.output))
     if args.presentation=='dummy':env.update(SDL_VIDEODRIVER='dummy',SDL_RENDER_DRIVER='software')
+    if args.presentation=='hardware':env.update(SDL_RENDER_DRIVER='opengl',CDI_WINDOW_HIDDEN='1',CDI_GPU_PROFILE='1')
     command=[str(exe.resolve()),str(args.rom.resolve()),'--disc',str(args.disc.resolve()),
         '--fault-hold','--port',str(args.port),'--input-script',SCRIPT]
     if args.presentation=='headless':command.append('--headless')
@@ -80,6 +81,13 @@ def run(exe,args,label):
             state['service_jobs']=request(args.port,{'cmd':'service_jobs'})
             state['streaming_jobs']=request(args.port,{'cmd':'streaming_jobs'})
             state['board_jobs']=request(args.port,{'cmd':'board_jobs'})
+            state['render_state']=request(args.port,{'cmd':'render_state'})
+            if args.presentation=='hardware':
+                render=state['render_state']
+                assert render['enabled'] and render['gpu_timestamps'] and all(render['gpu_counts']),render
+                assert not any(name in render['renderer'].lower() for name in ('llvmpipe','software','swiftshader')),render
+                assert not render['native_mismatches'],render
+                if int(env.get('CDI_GPU_READBACK_STRIDE','60')):assert render['native_readbacks']>0,render
             if args.expect_crc_error:
                 assert state['get_registers']['d1']&0xFFFF==0xE8 and state['get_registers']['sr']&1,state['get_registers']
             frames=[];cursor=1
@@ -117,7 +125,7 @@ def run(exe,args,label):
                 'host_cpu_before':host_before._asdict(),'host_cpu_after':host_after._asdict(),
                 'loader_jobs':state['loader_jobs'],'drawing_jobs':state['drawing_jobs'],'memory_jobs':state['memory_jobs'],
                 'service_jobs':state['service_jobs'],'streaming_jobs':state['streaming_jobs'],
-                'board_jobs':state['board_jobs']}
+                'board_jobs':state['board_jobs'],'render_state':state['render_state']}
             (out/'result.json').write_text(json.dumps(result,indent=2));print(json.dumps(result),flush=True)
             return result,state
         finally:
@@ -130,10 +138,11 @@ def semantic(state,presentation='headless'):
     d.pop('service_jobs',None)
     d.pop('streaming_jobs',None)
     d.pop('board_jobs',None)
+    d.pop('render_state',None)
     for key in ('insns','blocks','interp','irq_first_seq'):d['status'].pop(key,None)
     for key in ('scanout_jobs','fused_jobs','reused_jobs'):d['video_state'].pop(key,None)
     d['native_state'].pop('dispatches',None)
-    if presentation=='dummy':
+    if presentation in ('dummy','hardware'):
         # Host-time SDL queue consumption is not guest transport or PCM output.
         for key in ('queued_frames','dropped_frames'):d['audio_state'].pop(key,None)
     for name in ('native_events','ikat_events'):
@@ -154,7 +163,7 @@ def main():
     p.add_argument('--cpu-core',type=int,help='Matched process-local affinity; does not change other applications')
     p.add_argument('--pace-speed',type=float,default=32,help='Emulated pacing multiplier, identical for both builds')
     p.add_argument('--expect-end-frame',type=int,help='Reject a repeated stop PC reached at the wrong frame')
-    p.add_argument('--presentation',choices=('headless','dummy'),default='headless')
+    p.add_argument('--presentation',choices=('headless','dummy','hardware'),default='headless')
     p.add_argument('--native-job',choices=('loader','drawing','memory','service','streaming','board'),default='loader')
     args=p.parse_args()
     assert args.start_frame>=0,'Start frame must be zero (process creation) or positive'
@@ -178,8 +187,9 @@ def main():
         'settings':{'presentation':args.presentation,'audio':'dummy','pace_speed':args.pace_speed,
                     'rtc_sync_host_on_startup':False,'start_frame':args.start_frame,
                     'actual_pacing':not args.end_frame or args.live_frame_stop,
-                    'actual_frontend':args.presentation=='dummy' and (not args.end_frame or args.live_frame_stop),
+                    'actual_frontend':args.presentation in ('dummy','hardware') and (not args.end_frame or args.live_frame_stop),
                     'frame_stop_control':'tcp_live' if args.live_frame_stop else 'startup_investigation' if args.end_frame else None},
+        'render_environment':{key:os.environ.get(key) for key in ('CDI_GPU_READBACK_STRIDE','CDI_INTERNAL_SCALE')},
         'harness':[identity(x) for x in sorted(harness.iterdir())],
         'source':subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),
         'source_diff':subprocess.check_output(['git','diff'],text=True),

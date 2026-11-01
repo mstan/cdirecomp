@@ -130,6 +130,7 @@ add_executable(CdiRuntime
     src/mcd212.c
     src/mcd212_video.c
     src/cdi_frontend.c
+    src/cdi_render_profile.c
     src/player_config.c
     src/cdi_input.c
     src/cdi_host_time.c

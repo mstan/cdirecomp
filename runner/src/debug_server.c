@@ -29,6 +29,7 @@
 #include "cosim_state.h"
 #include "cdi_media.h"
 #include "cdi_audio.h"
+#include "cdi_render_profile.h"
 #include "cdi_native.h"
 #include "mcd212_video.h"
 #include <stdio.h>
@@ -1323,6 +1324,7 @@ static int handle_line(const char *line, char *out, int outlen) {
     else if (!strcmp(cmd, "module_targets")) resp_module_targets(line, out, outlen);
     else if (!strcmp(cmd, "video_frame"))    resp_video_frame(out, outlen);
     else if (!strcmp(cmd, "audio_state"))    resp_audio_state(out, outlen);
+    else if (!strcmp(cmd, "render_state")) cdi_render_profile_state(out,outlen);
     else if (!strcmp(cmd, "frame_hashes"))   resp_frame_hashes(line, out, outlen);
     else if (!strcmp(cmd, "video_scanline")) resp_video_scanline(line, out, outlen);
     else if (!strcmp(cmd, "video_plane"))    resp_video_plane(line, out, outlen);
