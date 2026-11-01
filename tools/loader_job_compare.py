@@ -164,7 +164,7 @@ def main():
     p.add_argument('--pace-speed',type=float,default=32,help='Emulated pacing multiplier, identical for both builds')
     p.add_argument('--expect-end-frame',type=int,help='Reject a repeated stop PC reached at the wrong frame')
     p.add_argument('--presentation',choices=('headless','dummy','hardware'),default='headless')
-    p.add_argument('--native-job',choices=('loader','drawing','memory','service','streaming','board'),default='loader')
+    p.add_argument('--native-job',choices=('loader','drawing','memory','service','streaming','board','gpu'),default='loader')
     args=p.parse_args()
     assert args.start_frame>=0,'Start frame must be zero (process creation) or positive'
     assert args.pace_speed>0,'Pacing multiplier must be positive'
@@ -202,8 +202,12 @@ def main():
         for name in order:
             result,state=run(getattr(args,name),args,f'{prefix}-{name}');states[name]=state
             if name=='candidate' and not args.reference_control:
-                job,key=({'drawing':('drawing_jobs','jobs'),'memory':('memory_jobs','jobs'),'service':('service_jobs','jobs'),'streaming':('streaming_jobs','jobs'),'board':('board_jobs','jobs')}.get(args.native_job,('loader_jobs','words')))
-                assert state[job].get(key,0)>0,'Native job was not exercised'
+                if args.native_job=='gpu':
+                    gpu=state['render_state']['jobs']
+                    assert gpu.get('available') and not gpu.get('failed') and gpu.get('frames',0)>0,gpu
+                else:
+                    job,key=({'drawing':('drawing_jobs','jobs'),'memory':('memory_jobs','jobs'),'service':('service_jobs','jobs'),'streaming':('streaming_jobs','jobs'),'board':('board_jobs','jobs')}.get(args.native_job,('loader_jobs','words')))
+                    assert state[job].get(key,0)>0,'Native job was not exercised'
             if pair:results.append(result)
         left,right=semantic(states['reference'],args.presentation),semantic(states['candidate'],args.presentation)
         differences=[key for key in left if left[key]!=right[key]]
