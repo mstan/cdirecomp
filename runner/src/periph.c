@@ -6,6 +6,7 @@
  * control, and passive storage for the remaining documented registers.
  */
 #include "cdi_runtime.h"
+#include "cdi_board_jobs.h"
 
 #include <stdint.h>
 #include <string.h>
@@ -147,6 +148,41 @@ void periph_increment_timer(uint32_t cycles) {
     uint32_t ticks = (uint32_t)(accumulated / 96u);
     device.timer_prescale_cycles = (uint32_t)(accumulated % 96u);
     while (ticks--) clock_timer_once();
+}
+
+unsigned periph_quiet_quanta(unsigned maximum) {
+    uint32_t ticks=65536u-load_counter(REG_T0H);
+    uint8_t control=*reg_ptr(REG_TCR);
+    if((control&0x30u) && 65536u-load_counter(REG_T1H)<ticks)
+        ticks=65536u-load_counter(REG_T1H);
+    if((control&0x03u) && 65536u-load_counter(REG_T2H)<ticks)
+        ticks=65536u-load_counter(REG_T2H);
+    uint32_t cycles=ticks*96u-device.timer_prescale_cycles;
+    uint32_t quiet=(cycles-1u)/25u;
+    return quiet<maximum?quiet:maximum;
+}
+void periph_advance_quiet(uint32_t cycles) {
+    uint32_t accumulated=device.timer_prescale_cycles+cycles;
+    uint32_t ticks=accumulated/96u;device.timer_prescale_cycles=accumulated%96u;
+    if(!ticks)return;
+    /* No counter wraps in an admitted prefix. Enabled counters move in lock
+     * step, so equality either holds at every quiet tick or at none. Preserve
+     * the original timer1-then-timer2 status update ordering. */
+    uint16_t timer0=(uint16_t)(load_counter(REG_T0H)+ticks);
+    uint8_t control=*reg_ptr(REG_TCR),*status=reg_ptr(REG_TSR);
+    store_counter(REG_T0H,timer0);
+    if(control&0x30u) {
+        uint16_t timer1=(uint16_t)(load_counter(REG_T1H)+ticks);
+        if((control&0x30u)==0x30u)*status&=(uint8_t)~0x11u;
+        if(timer1==timer0)*status|=0x40u;
+        store_counter(REG_T1H,timer1);
+    }
+    if(control&0x03u) {
+        uint16_t timer2=(uint16_t)(load_counter(REG_T2H)+ticks);
+        if((control&0x03u)==0x03u)*status&=(uint8_t)~0x03u;
+        if(timer2==timer0)*status|=0x08u;
+        store_counter(REG_T2H,timer2);
+    }
 }
 
 void periph_ciap_dma_request(uint16_t control) {

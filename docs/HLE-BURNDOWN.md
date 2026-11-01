@@ -44,27 +44,29 @@ subsystem boundaries or a requirement to adopt every proposed optimization.
 | 6 | **Frequently executed OS-9 service jobs** | Recompiled kernel algorithms and internal dispatch that a complete native operation could replace | **Selected complete process-ID lookup/publication package qualified; independent KEEP, neutral/inconclusive.** Exact success/error/IRQ contracts and all frames through 13000 match. Conservative cached-binding bounds retain original notification callbacks and authoritative guest state. Stacked [engine PR #4](https://github.com/mstan/cdirecomp/pull/4) and [consumer PR #4](https://github.com/mstan/HotelMarioRecomp/pull/4) are open and unmerged. |
 | 7 | **Native execution spans** | Repeated dispatch, interpreter handoffs, instruction bookkeeping and checks between operations with no observable intervening event | **Implemented and qualified.** Reused the existing observed native catalog, then coalesced legal PIC continuations into shared native bodies. SDK `3955bf3`; incremental 3-pair median CPU reduction 23.77% versus the seeded catalog, with exact canonical guest contracts. |
 | 8 | **Complete CD/XA streaming jobs** | Repeated work across sector selection, decoding, buffer ownership, DMA/refill, guest drivers and audio handoff | **Qualified CIAP progression; independent KEEP.** Real seek/filter/refill/DMA/IRQ and PCM contracts match. CPU time is neutral/inconclusive; live cycle concerns are retained below. Whole-board advancement remains candidate 9. |
-| 9 | **Whole-board event advancement** | Calling timer, input transport, CD/audio, RTC, raster and pacing machinery after every instruction | **Open, queued.** The naïve bulk-sum counterexample is a design constraint, not a rejection of a correct native span. |
+| 9 | **Whole-board event advancement** | Repeated timer, input transport, CD/audio, RTC, raster and pacing calls during quiet STOP intervals | **Qualified selected quiet STOP-board job; independent KEEP, neutral/inconclusive.** Original event quanta, per-quantum time and observation boundaries match. Active-CPU advancement stays faithful; the initial negative timing outlier did not reproduce. |
 | 10 | **Frame to host presentation** | Redundant frame copies, texture uploads, conversions and presentation preparation | Copy/upload implementation is consolidated into 2. **Incremental frontend and hardware-driver qualification remain open.** Earlier nominal SDL runs used startup frame stops and actually exercised the unpaced backend. |
 | 11 | **GPU resident jobs and high-resolution rendering** | CPU rendering at enhanced pixel density, expanded frame uploads, duplicate native/enhanced preparation and unbounded scale-dependent intermediates | **New, open and queued; guidance tracked only.** Implement the owner's GPU rendering guide under `beads-ttbl.3`: required 16x at full native speed with headroom on the owner's PC, desired 32x/64x, later lower-end targets. Hardware qualification can satisfy 10 jointly only after both contracts pass. |
 
 ## Current checkpoint
 
-- Current engine branch: `perf/native-streaming-jobs-20261101`; consumer branch:
-  `HotelMarioRecomp/perf/native-streaming-job-20261101`.
-- Latest qualified CIAP progression: runtime `0a57417`, consumer `0297c07`,
-  collector correction `7458363`; independent KEEP with the exact scope and
-  cycle caveats below. Stacked PR handoff is next. Service PRs #4 remain open.
+- Current engine branch: `perf/native-board-jobs-20261101`; consumer branch:
+  `HotelMarioRecomp/perf/native-board-job-20261101`.
+- Latest qualified quiet STOP-board job: runtime `7181cfd`, consumer `da8ff6f`;
+  independent KEEP with the exact scope and negative-sample caveat below.
+  Stacked [engine PR #6](https://github.com/mstan/cdirecomp/pull/6) and
+  [consumer PR #6](https://github.com/mstan/HotelMarioRecomp/pull/6) are open and
+  unmerged, on the open streaming PRs #5.
 - Qualified engine checkpoints: `a83c317` (frame job), `e92baf8` (coarse native
   catalog), `85c869e` (completed-line jobs). Shared core: `3955bf3`.
 - Supported consumer integration: `16353fc` on
   `HotelMarioRecomp/perf/native-jobs-20261028`, owning issue `beads-7t8h`.
 - **Broad burndown remains open.** The owner resumed the remaining set on
-  2026-10-31. Selected jobs for 1/2/3/4/5/6/7/8 are now qualified; their measured
+  2026-10-31. Selected jobs for 1/2/3/4/5/6/7/8/9 are now qualified; their measured
   scopes and historical failed/inconclusive experiments remain below. After
   independent keep/fix/reject review, create stacked PRs for retained work and
-  assign the next candidate. Do not merge without owner approval. **Three areas
-  remain: whole-board 9, frontend/hardware 10 and GPU/high-resolution 11.**
+  assign the next candidate. Do not merge without owner approval. **Two areas
+  remain: frontend/hardware 10 and GPU/high-resolution 11.**
 
 **Frontend scope correction, 2026-11-01:** older nominal SDL runs through
 `scanout_hle_compare.py` or `loader_job_compare.py --end-frame` supplied startup
@@ -937,3 +939,49 @@ no merge is authorized. **Three areas
 remain: whole-board 9, incremental frontend/hardware 10, GPU/high-resolution 11.**
 Listening, combined current-build save/load and final owner merge handoff remain
 outside this qualification. No additional measurements are requested.
+
+### Candidate 9 final evaluated disposition - KEEP, 2026-11-01
+
+Owning issue `beads-ttbl.7`; engine `7181cfd`, consumer `da8ff6f`. The complete
+quiet STOP-board job advances timer, IKAT, qualified CIAP/CD/audio, RTC, raster
+and pacing strictly before the earliest observable event. It retains each
+25-cycle quantum's truncated device time, repeated floating-point additions,
+frontend/input pump and original event-quantum order/overshoot, including event
+logs at the quantum's starting cycle. Observer/media changes materialize prior
+quiet work and retain the original critical quantum. Active-CPU advancement
+stays faithful; `BoardBackend=LLE`, cosimulation, fast-math and excess-precision
+configurations retain the portable original path.
+
+Four production-reference real-disc timelines match timer/IKAT/CIAP/RTC/raster,
+RAM/DMA, exact IRQ and pacing boundaries, drained PCM, observer/media exits,
+reset and quit behavior. The timer arithmetic check and strict Linux HLE0/1
+syntax pass; this is not Linux built-game evidence. Initial `5968ddb` component
+artifacts lacked the main-loop compile hook and are not gameplay qualification.
+Final-wiring build and both evaluation reservations exit 0.
+
+Every warm/control/reversed A/B full contract matches through unpaced gameplay
+frame 13000 and actual live pace-1 SDL dummy frame 1600. At 13000 HLE executes
+371,795 board jobs over 13,667,987 quiet quanta; LLE executes zero board jobs.
+The initial unpaced CPU reductions -9.82%/+0.59% and cycles -9.09%/-0.07%
+include a negative outlier beyond the initial control (-0.16% CPU/-0.96% cycles).
+It remains retained, not dismissed as within that control. The bounded repeat
+uses unchanged binaries/settings: CPU -0.46%/+0.59%, cycles +1.58%/+0.20%,
+with contemporaneous control +1.19% CPU/+1.16% cycles. The slowdown did not
+reproduce; independent review retains the selected job as neutral/inconclusive,
+with no speedup claim.
+
+Actual live CPU reductions -1.90%/+1.60% compare with +2.41% control; cycles
++1.50%/+0.65% compare with -0.63% control. Both sides decode 124 sectors and
+249,984 PCM frames, hash `6b99347f145a0030`, with zero queued/dropped frames.
+These runs use TCP live frame stops, actual pacing/frontend enabled and dummy
+audio/video. Unpaced 13000 runs use startup frame stops with pacing/frontend
+disabled; their decoded PCM matches but the host queue is undrained. No speaker
+listening or hardware-driver qualification is claimed.
+
+Exact binary/sidecar paths, hashes, settings and raw results are recorded in
+`hle-campaign-evidence.json` under
+`G:/Temp/Codex/cdirecomp/board-job-20261101`. All frozen evidence, immutable
+sidecar dependencies and the reusable HLE build/generated cache remain retained.
+Stacked PR publication is next; no merge is authorized. **Two areas remain:
+incremental frontend/hardware 10 and GPU/high-resolution 11.** Combined
+current-build save/load and final owner merge handoff remain separate.
