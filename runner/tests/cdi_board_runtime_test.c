@@ -17,6 +17,7 @@ extern void mcd212_reset(void);
 extern uint64_t g_stop_seq;
 static uint64_t timeline=UINT64_C(0xcbf29ce484222325),pcm=UINT64_C(0xcbf29ce484222325),pace_pending;
 static unsigned pump_count,variant;
+static CdiBoardJobState earlier_jobs;
 static const char *disc;
 static void bytes(uint64_t *hash,const void *data,size_t size){const uint8_t *p=data;while(size--){*hash^=*p++;*hash*=UINT64_C(0x100000001b3);}}
 static void number(uint64_t value){bytes(&timeline,&value,sizeof value);}
@@ -97,12 +98,14 @@ int main(int argc,char **argv) {
             checkpoint();mcd212_tick(13u+(completed/4000u*7u)%64u);
             if(completed==80000){cdic_transport_pause();cdic_set_drive_position(42055,0);}
             if(completed==84000)cdic_transport_resume();
-            if(completed==120000){mcd212_reset();periph_reset();}
+            if(completed==120000){cdi_board_job_state(&earlier_jobs);mcd212_reset();periph_reset();}
             if(completed==160000){write_reg(0x25A6,6);refill(1,sector+12);write_reg(0x25A6,0x40);}
         }
     }
     checkpoint();rtc_snapshot();number(completed);number(pump_count);number(quit);number(pace_pending);
     CdiAudioState audio;cdi_audio_debug_state(&audio);CdiBoardJobState jobs;cdi_board_job_state(&jobs);
+    jobs.jobs+=earlier_jobs.jobs;jobs.quiet_quanta+=earlier_jobs.quiet_quanta;
+    jobs.faithful_quanta+=earlier_jobs.faithful_quanta;jobs.observation_exits+=earlier_jobs.observation_exits;
     FILE *out=fopen(argv[3],"wb");if(!out)return 2;
     fprintf(out,"{\"timeline\":\"%016llx\",\"drained_pcm\":\"%016llx\",\"cycles\":%llu,\"frame\":%llu,\"quanta\":%u,\"pumps\":%u,\"quit\":%d,\"sectors\":%llu,\"pcm_frames\":%llu,\"pcm_hash\":\"%016llx\",\"dropped\":%llu,\"ram\":[",(unsigned long long)timeline,(unsigned long long)pcm,(unsigned long long)g_total_cycles,(unsigned long long)g_frame_count,completed,pump_count,quit,(unsigned long long)audio.sectors,(unsigned long long)audio.sample_frames,(unsigned long long)audio.pcm_fnv1a,(unsigned long long)audio.dropped_frames);
     hash(out,g_ram0,CDI_RAM0_SIZE);fputc(',',out);hash(out,g_ram1,CDI_RAM1_SIZE);

@@ -84,7 +84,7 @@ elseif(CDI_BOARD_BACKEND STREQUAL "LLE")
 else()
     message(FATAL_ERROR "CDI_BOARD_BACKEND must be LLE or HLE")
 endif()
-set_source_files_properties(src/mcd212.c src/main.c PROPERTIES
+set_source_files_properties(src/mcd212.c PROPERTIES
     COMPILE_DEFINITIONS "CDI_BOARD_HLE=$<BOOL:$<TARGET_PROPERTY:CDI_NATIVE_BOARD>>")
 
 # Generated C is dropped in by the recompiler and compiled in here. It
@@ -175,6 +175,8 @@ target_compile_definitions(CdiRuntime PRIVATE $<$<BOOL:${CDI_COSIM_BUILD}>:CDI_C
 set_source_files_properties(src/mcd212_video.c src/main.c PROPERTIES
     COMPILE_DEFINITIONS "CDI_VIDEO_HLE=$<BOOL:$<TARGET_PROPERTY:CDI_NATIVE_SCANOUT>>")
 set_property(TARGET CdiRuntime PROPERTY CDI_NATIVE_SCANOUT ${CDI_VIDEO_HLE})
+set_property(SOURCE src/main.c APPEND PROPERTY COMPILE_DEFINITIONS
+    "CDI_BOARD_HLE=$<BOOL:$<TARGET_PROPERTY:CDI_NATIVE_BOARD>>")
 set_source_files_properties(src/cdi_loader_jobs.c
     "${CMAKE_CURRENT_SOURCE_DIR}/../bios/generated/cdrtos_dispatch.c"
     PROPERTIES COMPILE_DEFINITIONS "CDI_LOADER_HLE=$<BOOL:$<TARGET_PROPERTY:CDI_NATIVE_LOADER>>")

@@ -12,6 +12,7 @@
 #include "cdi_media.h"
 
 #include <stdio.h>
+#include <float.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -326,7 +327,7 @@ void mcd212_tick(uint32_t cycles) {
 
 void cdi_board_job_state(CdiBoardJobState *out){*out=board_jobs;}
 uint32_t cdi_board_idle_quanta(uint32_t maximum,CdiBoardPump pump,int *quit) {
-#if CDI_BOARD_HLE && !defined(CDI_COSIM) && !defined(__FAST_MATH__)
+#if CDI_BOARD_HLE && !defined(CDI_COSIM) && !defined(__FAST_MATH__) && FLT_EVAL_METHOD == 0
     const double quantum_ns=25.0*(1.0e9/15104900.0);
     const uint64_t integer_ns=(uint64_t)quantum_ns;
     if(!g_halted || !debug_board_job_allowed() || recomp_pending_irq_mask()) {

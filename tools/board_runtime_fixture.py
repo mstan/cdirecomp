@@ -26,6 +26,7 @@ def main():
         (a.output/'results.json').write_text(json.dumps(cases,indent=2)+'\n')
         if differences:raise RuntimeError(row)
         assert jobs['jobs']>0 and jobs['quiet_quanta']>0,row
+        if variant in (1,2):assert jobs['observation_exits']>0,row
     summary=dict(status='pass',cases=cases,provenance=provenance,
         production_binary_sha256=hashlib.sha256(runtime.read_bytes()).hexdigest(),
         fixture_binary_sha256=hashlib.sha256(exe.read_bytes()).hexdigest())
