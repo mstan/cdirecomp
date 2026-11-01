@@ -99,7 +99,12 @@
       "engine_pr": "https://github.com/mstan/cdirecomp/pull/4",
       "consumer_pr": "https://github.com/mstan/HotelMarioRecomp/pull/4",
       "required_next": "Stacked PRs #4 open and unmerged; candidate 8 next by explicit assignment. Combined batch gameplay/current-build save-load and owner final merge handoff remain open. No more candidate6 tuning or checks requested.",
-      "remaining_areas": [8, 9, 10, 11]
+      "remaining_areas": [
+        8,
+        9,
+        10,
+        11
+      ]
     },
     {
       "candidate": 8,
@@ -116,7 +121,11 @@
         "https://github.com/mstan/cdirecomp/pull/5",
         "https://github.com/mstan/HotelMarioRecomp/pull/5"
       ],
-      "remaining_areas": [9, 10, 11]
+      "remaining_areas": [
+        9,
+        10,
+        11
+      ]
     },
     {
       "candidate": 9,
@@ -155,16 +164,27 @@
     },
     {
       "candidate": 10,
-      "state": "tracked",
-      "implementation": "copy_upload_implemented_backend_qualified_frontend_claim_withdrawn",
-      "required_next": "Incremental actual frontend and hardware backend qualification with resize/expose and pixel readback. Old nominal SDL startup-stop results are unpaced backend-only. May consolidate with11 only after shared contracts pass."
+      "state": "tested",
+      "implementation": "d81b77f0b78c06c9c06e99db3f17e054b551c191",
+      "required_next": "Independent source/correctness/performance/worth review; no self-acceptance or PR yet. Preserve 64x cadence limitation and unsupported baseline save-state/rollback gap.",
+      "acceptance": "pending_independent_review",
+      "consumer": "4115efc60f0e53407a55affb0a3d3559af6b1dd2",
+      "owner_issue": "beads-ttbl.8",
+      "raw_root": "G:\\Temp\\Codex\\cdirecomp\\gpu-jobs-20261101",
+      "evidence": "docs/hle-campaign-evidence.json#renderer_qualification",
+      "ready_job": null
     },
     {
       "candidate": 11,
-      "state": "tracked",
-      "implementation": "not_started",
+      "state": "tested",
+      "implementation": "d81b77f0b78c06c9c06e99db3f17e054b551c191",
       "owner_issue": "beads-ttbl.3",
-      "required_next": "Implement full owner GPU rendering guide;16x full speed/headroom on owner PC required; no implementation/qualification claimed from guide tracking."
+      "required_next": "Independent source/correctness/performance/worth review; no self-acceptance or PR yet. Preserve 64x cadence limitation and unsupported baseline save-state/rollback gap.",
+      "acceptance": "pending_independent_review",
+      "consumer": "4115efc60f0e53407a55affb0a3d3559af6b1dd2",
+      "raw_root": "G:\\Temp\\Codex\\cdirecomp\\gpu-jobs-20261101",
+      "evidence": "docs/hle-campaign-evidence.json#renderer_qualification",
+      "ready_job": null
     }
   ]
 }

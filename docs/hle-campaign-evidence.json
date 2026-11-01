@@ -3,7 +3,7 @@
   "owner_issue": "beads-oatv",
   "campaign_issue": "beads-2wy8.1",
   "consumer_issue": "beads-7t8h",
-  "status": "in_progress; selected quiet STOP-board candidate9 independently KEEP neutral/inconclusive, original nonreproduced negative outlier retained; stacked PRs #6 open and unmerged; remaining10/11",
+  "status": "in_progress; combined renderer10/11 built/tested, native1x CPU neutral and required16x normal cadence/headroom measured; independent review pending;64x not cadence-qualified; stacked earlier PRs unmerged",
   "frontend_scope_correction": "2026-11-01: old nominal SDL runs via scanout_hle_compare.py or loader_job_compare.py startup --stop-frame disabled both pacing/frontend. Their raw samples establish unpaced backend equality/performance only. Previous frontend/copy/upload/presentation qualification claims are withdrawn; raw history/backend qualification preserved. Old engine/consumer PR1/2 descriptions corrected; candidate10 remains open.",
   "engine_head": "85c869ee808b438905f2c1bc29a46d30f27647f8",
   "core_head": "3955bf3311f55e031836f70b5c1839e95b81f9cf",
@@ -964,7 +964,12 @@
         "lle_sha256": "c1809322456296caed37d56275758a79eff2bad2e012ae1590ebdfa884cc6652",
         "hle_sha256": "d3f6cda88d8f42711be3876e454a09d39c93d9fd6e1f88510fe50b47ecc10a1c"
       },
-      "native_activity": {"jobs": 8532, "errors": 0, "interrupted": 22, "fallbacks": 0},
+      "native_activity": {
+        "jobs": 8532,
+        "errors": 0,
+        "interrupted": 22,
+        "fallbacks": 0
+      },
       "performance": {
         "classification": "neutral/inconclusive; no proven speedup or observed regression",
         "scope": "Hotel Mario USA process creation through scripted gameplay field 13000; selected lookup/publication package only",
@@ -972,35 +977,103 @@
         "end_frame": 13000,
         "pairs": 2,
         "control_pairs": 1,
-        "paired_cpu_reductions_percent": [2.506596306068598, 5.521472392638039],
-        "paired_cycle_reductions_percent": [1.5458602627940299, 3.392852477964592],
-        "AA_cpu_difference_percent": [-7.530864197530862],
-        "AA_cycle_difference_percent": [-5.889824891387119],
+        "paired_cpu_reductions_percent": [
+          2.506596306068598,
+          5.521472392638039
+        ],
+        "paired_cycle_reductions_percent": [
+          1.5458602627940299,
+          3.392852477964592
+        ],
+        "AA_cpu_difference_percent": [
+          -7.530864197530862
+        ],
+        "AA_cycle_difference_percent": [
+          -5.889824891387119
+        ],
         "samples": [
-          {"label": "pair1-reference", "cpu_ms": 11843.75, "process_cycles": 55307916930, "peak_rss_bytes": 216682496},
-          {"label": "pair1-candidate", "cpu_ms": 11546.875, "process_cycles": 54452933820, "peak_rss_bytes": 216702976},
-          {"label": "pair2-candidate", "cpu_ms": 12031.25, "process_cycles": 56662410400, "peak_rss_bytes": 216707072},
-          {"label": "pair2-reference", "cpu_ms": 12734.375, "process_cycles": 58652399800, "peak_rss_bytes": 216678400}
+          {
+            "label": "pair1-reference",
+            "cpu_ms": 11843.75,
+            "process_cycles": 55307916930,
+            "peak_rss_bytes": 216682496
+          },
+          {
+            "label": "pair1-candidate",
+            "cpu_ms": 11546.875,
+            "process_cycles": 54452933820,
+            "peak_rss_bytes": 216702976
+          },
+          {
+            "label": "pair2-candidate",
+            "cpu_ms": 12031.25,
+            "process_cycles": 56662410400,
+            "peak_rss_bytes": 216707072
+          },
+          {
+            "label": "pair2-reference",
+            "cpu_ms": 12734.375,
+            "process_cycles": 58652399800,
+            "peak_rss_bytes": 216678400
+          }
         ],
         "control_samples": [
-          {"label": "pair1-reference", "cpu_ms": 12656.25, "process_cycles": 59546285750},
-          {"label": "pair1-candidate", "cpu_ms": 13609.375, "process_cycles": 63053457710}
+          {
+            "label": "pair1-reference",
+            "cpu_ms": 12656.25,
+            "process_cycles": 59546285750
+          },
+          {
+            "label": "pair1-candidate",
+            "cpu_ms": 13609.375,
+            "process_cycles": 63053457710
+          }
         ],
-        "settings": {"host": "DESKTOP-HN15M1H", "platform": "Windows", "compiler": "MinGW GCC 15.2.0 Release -O3", "cpu_affinity": [15], "presentation": "headless", "audio": "dummy", "pace_speed": 32, "rtc_sync_host_on_startup": false, "other_backends": "scanout/loader/drawing/memory=HLE on both sides; service=LLE excludes lookup and binding bounds"},
+        "settings": {
+          "host": "DESKTOP-HN15M1H",
+          "platform": "Windows",
+          "compiler": "MinGW GCC 15.2.0 Release -O3",
+          "cpu_affinity": [
+            15
+          ],
+          "presentation": "headless",
+          "audio": "dummy",
+          "pace_speed": 32,
+          "rtc_sync_host_on_startup": false,
+          "other_backends": "scanout/loader/drawing/memory=HLE on both sides; service=LLE excludes lookup and binding bounds"
+        },
         "interpretation": "Both positive pairs remain within contemporaneous identical-LLE control variation. No additional tuning or attribution matrix after the second experiment."
       },
       "historical_unresolved_trial": {
         "engine": "42df55ab4d0cb86392f3db1688aed96868179730",
         "consumer": "af1ef6d89d74f7151a6692e6f76b7c4d613412c8",
         "package": "process lookup plus conservative binding-page bitmap",
-        "evidence": ["G:/Temp/Codex/cdirecomp/service-job-20261101/gameplay-control/campaign-evidence.json", "G:/Temp/Codex/cdirecomp/service-job-20261101/gameplay-pairs/campaign-evidence.json"],
-        "paired_cpu_reductions_percent": [-0.7782101167315147, -5.217391304347818],
-        "paired_cycle_reductions_percent": [-1.5481874476081847, -4.262578508861803],
-        "AA_cpu_difference_percent": [-3.653585926928282],
-        "AA_cycle_difference_percent": [-5.341291612070975],
+        "evidence": [
+          "G:/Temp/Codex/cdirecomp/service-job-20261101/gameplay-control/campaign-evidence.json",
+          "G:/Temp/Codex/cdirecomp/service-job-20261101/gameplay-pairs/campaign-evidence.json"
+        ],
+        "paired_cpu_reductions_percent": [
+          -0.7782101167315147,
+          -5.217391304347818
+        ],
+        "paired_cycle_reductions_percent": [
+          -1.5481874476081847,
+          -4.262578508861803
+        ],
+        "AA_cpu_difference_percent": [
+          -3.653585926928282
+        ],
+        "AA_cycle_difference_percent": [
+          -5.341291612070975
+        ],
         "classification": "unresolved/concerning, not neutral accepted; second CPU pair exceeded the one CPU-control difference"
       },
-      "independent_review": {"verdict": "KEEP", "date": "2026-11-01", "reviewer": "parent-arranged independent reviewer", "scope": "selected lookup/publication package and measured Hotel Mario boot/scripted gameplay through field 13000; neutral/inconclusive"},
+      "independent_review": {
+        "verdict": "KEEP",
+        "date": "2026-11-01",
+        "reviewer": "parent-arranged independent reviewer",
+        "scope": "selected lookup/publication package and measured Hotel Mario boot/scripted gameplay through field 13000; neutral/inconclusive"
+      },
       "branch_pr_status": "open_unmerged",
       "engine_pr": "https://github.com/mstan/cdirecomp/pull/4",
       "consumer_pr": "https://github.com/mstan/HotelMarioRecomp/pull/4",
@@ -1040,34 +1113,81 @@
         "G:/Temp/Codex/cdirecomp/streaming-job-20261101/normal-control-live/campaign-evidence.json",
         "G:/Temp/Codex/cdirecomp/streaming-job-20261101/normal-pairs-live/campaign-evidence.json"
       ],
-      "binaries": {"lle_sha256": "e5b4c2476410334bf2a2ecd586c0531ce12d851112ae3735771697c944078303", "hle_sha256": "313316ad7da242ca4041a74037b92538e6b61ff28bfa792374cbe30d0d29fb72"},
+      "binaries": {
+        "lle_sha256": "e5b4c2476410334bf2a2ecd586c0531ce12d851112ae3735771697c944078303",
+        "hle_sha256": "313316ad7da242ca4041a74037b92538e6b61ff28bfa792374cbe30d0d29fb72"
+      },
       "correctness": "Three real-disc production-reference timelines (720000 clock quanta) cover fractional/coarse overshoot, seek/file/channel/filter/pause/reset/refill/eject-remount, IRQ assertion/clear quantum, sampled CIAP/AP pointer, real DMA RAM and drained PCM. All equal, zero drops and drained PCM hash equals full decoded hash. Both existing CIAP selections and strict Linux HLE0/1 syntax pass; no Linux-runtime claim.",
       "unpaced_backend": {
         "scope": "Process creation through scripted gameplay frame13000; startup frame stop, actual_pacing=false, actual_frontend=false",
-        "cpu_reductions_percent": [13.20037986704653, -0.7009345794392496],
-        "cycle_reductions_percent": [13.540342573383102, 0.2699499387050497],
+        "cpu_reductions_percent": [
+          13.20037986704653,
+          -0.7009345794392496
+        ],
+        "cycle_reductions_percent": [
+          13.540342573383102,
+          0.2699499387050497
+        ],
         "AA_cpu_difference_percent": -2.079002079002068,
         "AA_cycle_difference_percent": -1.9162532323646841,
-        "native_activity": {"jobs": 14794, "deferred_quanta": 134286224, "materializations": 149071},
-        "audio": {"sectors": 2259, "frames": 6181056, "pcm_fnv1a": "eef10d6fb4b83854"},
+        "native_activity": {
+          "jobs": 14794,
+          "deferred_quanta": 134286224,
+          "materializations": 149071
+        },
+        "audio": {
+          "sectors": 2259,
+          "frames": 6181056,
+          "pcm_fnv1a": "eef10d6fb4b83854"
+        },
         "classification": "neutral/inconclusive; favorable13% outlier did not repeat; not a proven speedup"
       },
       "live_frontend": {
         "scope": "Process creation through frame1600, pace1, SDL dummy video/software and dummy audio, existing TCP stop_frame after startup; actual_pacing=true, actual_frontend=true",
-        "cpu_reductions_percent": [-2.238805970149249, 1.5873015873015928],
-        "cycle_reductions_percent": [-8.367280313153746, 3.808919735990046],
+        "cpu_reductions_percent": [
+          -2.238805970149249,
+          1.5873015873015928
+        ],
+        "cycle_reductions_percent": [
+          -8.367280313153746,
+          3.808919735990046
+        ],
         "AA_cpu_difference_percent": 14.965986394557829,
         "AA_cycle_difference_percent": 5.920047126448614,
         "initial_live_cpu_reduction_percent": -10.661764705882359,
         "initial_live_cycle_reduction_percent": -13.994154632590238,
-        "native_activity": {"jobs": 647, "deferred_quanta": 5175028, "materializations": 6794},
-        "audio": {"sectors": 124, "frames": 249984, "pcm_fnv1a": "6b99347f145a0030", "queued_frames": 0, "dropped_frames": 0},
+        "native_activity": {
+          "jobs": 647,
+          "deferred_quanta": 5175028,
+          "materializations": 6794
+        },
+        "audio": {
+          "sectors": 124,
+          "frames": 249984,
+          "pcm_fnv1a": "6b99347f145a0030",
+          "queued_frames": 0,
+          "dropped_frames": 0
+        },
         "classification": "CPU neutral/inconclusive with no reproducible CPU regression; cycle cost remains mixed/order-sensitive. Negative8.37% cycle pair exceeds the single5.92% control difference; reversed pair is positive. Preserve initial negative live pair; do not claim all cycle results are within control variation."
       },
-      "settings": {"host": "DESKTOP-HN15M1H", "platform": "Windows", "compiler": "MinGW GCC15.2 Release-O3", "cpu_affinity": [15], "rtc_sync_host_on_startup": false, "other_backends": "scanout/loader/drawing/memory/service=HLE on both sides; only streaming differs"},
+      "settings": {
+        "host": "DESKTOP-HN15M1H",
+        "platform": "Windows",
+        "compiler": "MinGW GCC15.2 Release-O3",
+        "cpu_affinity": [
+          15
+        ],
+        "rtc_sync_host_on_startup": false,
+        "other_backends": "scanout/loader/drawing/memory/service=HLE on both sides; only streaming differs"
+      },
       "contracts": "Every unpaced and actual-live warm/control/A/B full RAM/register/device/every-frame/decoded-PCM contract equal through its exact endpoint; live retained PCM queue drains with zero drops.",
       "historical_nominal_live": "normal-stream is preserved as unpaced backend-only: startup --stop-frame disabled pacing/frontend despite pace1/dummy environment. It provides no frontend/listening claim; its host queue drops do not diagnose the actual frontend. evaluate-prelaunch-failed artifacts started no runtime.",
-      "independent_review": {"verdict": "KEEP", "date": "2026-11-01", "reviewer": "parent-arranged independent reviewer", "scope": "selected CIAP progression; neutral/inconclusive CPU time with explicit live cycle caveats"},
+      "independent_review": {
+        "verdict": "KEEP",
+        "date": "2026-11-01",
+        "reviewer": "parent-arranged independent reviewer",
+        "scope": "selected CIAP progression; neutral/inconclusive CPU time with explicit live cycle caveats"
+      },
       "branch_pr_status": "stacked_PRs_open_unmerged",
       "pull_requests": [
         "https://github.com/mstan/cdirecomp/pull/5",
@@ -1293,21 +1413,24 @@
     {
       "candidate": 10,
       "name": "Frame to host presentation",
-      "status": "open_queued_frontend_and_hardware_qualification",
+      "status": "built_tested_pending_independent_review",
       "job": "Exact content publication skips unchanged frontend copy/upload while retaining field presentation/redraw",
       "evidence": [
-        "frame-package-sdl",
-        "final-combined-sdl"
+        "docs/hle-campaign-evidence.json#renderer_qualification"
       ],
-      "deferred_extension": "Incremental actual frontend and hardware-driver presentation cost",
-      "prerequisite": "A matched actual frontend/hardware profile with resize/expose and pixel readback, retaining normal presentation settings and owner focus. Historical nominal SDL startup-stop runs are unpaced backend-only; frontend qualification claim withdrawn. Actual candidate8 live evidence covers CIAP progression, not the incremental frame-copy/upload optimization.",
-      "hardware_extension_status": "open_queued"
+      "deferred_extension": null,
+      "prerequisite": "Independent keep/fix/reject; owner visual/merge handoff separate.",
+      "hardware_extension_status": "tested_pending_independent_review",
+      "implementation_state": "implemented_built_tested",
+      "implementation": "d81b77f0b78c06c9c06e99db3f17e054b551c191",
+      "consumer": "4115efc60f0e53407a55affb0a3d3559af6b1dd2",
+      "owner_issue": "beads-ttbl.8"
     },
     {
       "candidate": 11,
       "name": "Resident GPU raster jobs and high-resolution output",
-      "status": "open_queued",
-      "implementation_state": "tracked_only",
+      "status": "built_tested_pending_independent_review",
+      "implementation_state": "implemented_built_tested",
       "owner_issue": "beads-ttbl.3",
       "guide": {
         "path": "C:\\Users\\Matthew\\Desktop\\GPU-HIGH-RESOLUTION-RENDERING-GUIDE.md",
@@ -1340,11 +1463,13 @@
         "a385e0b",
         "4261f07"
       ],
-      "prerequisite": "Implement and qualify the complete job; guide addition alone is not completion",
+      "prerequisite": "Independent keep/fix/reject; owner visual/merge handoff separate.",
       "related_candidate": 10,
       "evidence": [
-        "docs/HLE-BURNDOWN.md#candidate-11-gpu-high-resolution-rendering"
-      ]
+        "docs/hle-campaign-evidence.json#renderer_qualification"
+      ],
+      "implementation": "d81b77f0b78c06c9c06e99db3f17e054b551c191",
+      "consumer": "4115efc60f0e53407a55affb0a3d3559af6b1dd2"
     }
   ],
   "boundary_policy": "Current exact instruction-history comparison applies to CPU-preserving frame and AOT changes. A future native OS/memory/drawing replacement may change interior instruction execution; qualify caller-visible input/output, authoritative guest state, time/events/interrupts and errors at the complete job boundary instead of imposing internal LLE algorithms.",
@@ -1362,7 +1487,7 @@
     "report": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\cleanup-report.json",
     "ledger": "G:\\Temp\\Codex\\cdirecomp\\hle-pass-20261027\\resource-ledger.json"
   },
-  "current_serial_candidate": null,
+  "current_serial_candidate": 10,
   "completed_serial_candidate": 9,
   "awaiting_owner_checkin": false,
   "loader_job_evidence": "docs/loader-job-evidence.json",
@@ -1407,7 +1532,364 @@
   "candidate4_owner_issue": "beads-ttbl.4",
   "candidate6_owner_issue": "beads-ttbl.5",
   "candidate8_owner_issue": "beads-ttbl.6",
-  "next_serial_candidate": 10,
-  "remaining_candidates": [10, 11],
-  "candidate9_owner_issue": "beads-ttbl.7"
+  "next_serial_candidate": null,
+  "remaining_candidates": [
+    10,
+    11
+  ],
+  "candidate9_owner_issue": "beads-ttbl.7",
+  "renderer_qualification": {
+    "status": "built_tested_pending_independent_review",
+    "candidates": [
+      10,
+      11
+    ],
+    "owner_issues": {
+      "10": "beads-ttbl.8",
+      "11": "beads-ttbl.3"
+    },
+    "engine_runtime": "d81b77f0b78c06c9c06e99db3f17e054b551c191",
+    "consumer": "4115efc60f0e53407a55affb0a3d3559af6b1dd2",
+    "collector": "d81b77f0b78c06c9c06e99db3f17e054b551c191",
+    "engine_branch": "perf/native-gpu-jobs-20261101",
+    "consumer_branch": "perf/native-gpu-job-20261101",
+    "job": "Owned immutable visible raster rows through resident GPU sources, integer contribution/mix, bounded256x16 tiles, native-grid display resolve and host presentation; same-job portable CPU output. Canonical native CPU pixels/state remain authoritative.",
+    "baseline": {
+      "source": "0247a69d8e57b695c7d8e6755694ba7d2d8a6f6c",
+      "path": "G:\\Temp\\Codex\\cdirecomp\\gpu-jobs-20261101\\baseline-hardware",
+      "scope": "Existing native1x only; no old internal-resolution setting. pairs0 warm/setup hardware timestamps and26 zero-mismatch readbacks/run, not retained A/A performance."
+    },
+    "native1x": {
+      "scope": "Actual hidden hardware frontend/dummy audio, process origin through13000 scripted gameplay, pace4, affinity15; reversed retained A/B2 and identical-LLE A/A1",
+      "performance": "CPU neutral/inconclusive within contemporaneous control; no proven CPU speedup or reproducible regression. Process-cycle reductions observed.",
+      "cpu_reduction_percent": [
+        -0.3928170594837299,
+        -0.7959067652075102
+      ],
+      "cycle_reduction_percent": [
+        3.607045795261743,
+        4.463231016310864
+      ],
+      "control_cpu_reduction_percent": [
+        3.0618139803581745
+      ],
+      "control_cycle_reduction_percent": [
+        0.9541860977608896
+      ],
+      "contracts": "All warm/control/reversed CPU/RAM/device/frame/control/decoded-PCM contracts equal; host render/queued-audio fields excluded.",
+      "raw_pairs": "G:\\Temp\\Codex\\cdirecomp\\gpu-jobs-20261101\\native-1x-pairs-retry",
+      "raw_control": "G:\\Temp\\Codex\\cdirecomp\\gpu-jobs-20261101\\native-1x-control",
+      "native_gpu_readbacks_per_run": 216,
+      "native_mismatches": 0,
+      "HLE_upload_bytes": 503743776,
+      "LLE_upload_bytes": 1611648000,
+      "HLE_real_GPU_jobs": 2360
+    },
+    "normal16": {
+      "scope": "Actual hardware frontend/dummy audio, normal pace1, process origin through13000 scripted gameplay; one setup/qualification pair, not retained performance A/B",
+      "raw": "G:\\Temp\\Codex\\cdirecomp\\gpu-jobs-20261101\\normal-density16-gameplay",
+      "contracts_equal": true,
+      "native_readbacks": 216,
+      "native_mismatches": 0,
+      "observed_cadence": {
+        "from_field": 1000,
+        "from_wall_s": 17.046999999991385,
+        "end_field": 13000,
+        "end_wall_s": 216.875,
+        "fields_per_second": 60.05164441419362
+      },
+      "gpu_sample_counts": [
+        2344,
+        2344,
+        12974
+      ],
+      "gpu_mean_ms_per_pass": [
+        0.45843527645051196,
+        4.847319372013652,
+        0.021022544781871436
+      ],
+      "gpu_max_ms_per_pass": [
+        6.631424,
+        15.36512,
+        2.792448
+      ],
+      "raster_resolve_mean_headroom_fraction": 0.7091608376791809,
+      "headroom_note": "Raster/resolve mean and maximum are per-pass GPU timestamp intervals, not a measured maximum of the entire frame. Native field cadence is independently observed from raw status/wall samples.",
+      "jobs": {
+        "available": 1,
+        "failed": 0,
+        "frames": 2360,
+        "source_uploads": 236130,
+        "source_upload_bytes": 503743776,
+        "draw_calls": 106200,
+        "resets": 2,
+        "requested_scale": 16,
+        "effective_scale": 16,
+        "virtual_width": 12288,
+        "virtual_height": 3840,
+        "output_width": 768,
+        "output_height": 720,
+        "tile_bytes": 4194304,
+        "owned_gpu_bytes": 14042624
+      },
+      "gpu_memory": {
+        "dedicated_bytes": 29257728,
+        "counter_samples": 2,
+        "shared_bytes": 21594112,
+        "source": "Windows GPU Process Memory"
+      },
+      "process_cpu_ms": 26593.75,
+      "process_rss_bytes": 289660928,
+      "audio": {
+        "ok": true,
+        "rate": 37800,
+        "channels": 2,
+        "sectors": 2259,
+        "sample_frames": 6181056,
+        "queued_frames": 43296,
+        "dropped_frames": 0,
+        "pcm_fnv1a": "eef10d6fb4b83854"
+      },
+      "reference_observed_cadence": {
+        "from_field": 1000,
+        "from_wall_s": 17.062000000005355,
+        "end_field": 13000,
+        "end_wall_s": 216.90600000001723,
+        "fields_per_second": 60.04683653249178
+      }
+    },
+    "density_curves": [
+      {
+        "scale": 1,
+        "representative": "warm-candidate; both setup runs retained, not retained performance A/A",
+        "raw": "G:\\Temp\\Codex\\cdirecomp\\gpu-jobs-20261101\\density-1",
+        "cpu_ms": 3281.25,
+        "rss_bytes": 282570752,
+        "upload_bytes": 37874048,
+        "gpu_mean_ms_per_pass": [
+          0.30126586572438163,
+          1.8082465017667844,
+          0.020232782719186784
+        ],
+        "gpu_max_ms_per_pass": [
+          5.331968,
+          7.374848,
+          2.136064
+        ],
+        "dedicated_gpu_bytes": 22781952,
+        "shared_gpu_bytes": 21594112,
+        "wall_s": 27.09399999998277,
+        "tile_bytes": 16384,
+        "effective_scale": 1
+      },
+      {
+        "scale": 2,
+        "representative": "warm-candidate; both setup runs retained, not retained performance A/A",
+        "raw": "G:\\Temp\\Codex\\cdirecomp\\gpu-jobs-20261101\\density-2",
+        "cpu_ms": 3656.25,
+        "rss_bytes": 280793088,
+        "upload_bytes": 37874048,
+        "gpu_mean_ms_per_pass": [
+          0.32187250883392227,
+          2.6442249045936395,
+          0.019000599745870393
+        ],
+        "gpu_max_ms_per_pass": [
+          3.719168,
+          10.898432,
+          1.867776
+        ],
+        "dedicated_gpu_bytes": 36147200,
+        "shared_gpu_bytes": 19496960,
+        "wall_s": 27.062000000005355,
+        "tile_bytes": 65536,
+        "effective_scale": 2
+      },
+      {
+        "scale": 4,
+        "representative": "warm-candidate; both setup runs retained, not retained performance A/A",
+        "raw": "G:\\Temp\\Codex\\cdirecomp\\gpu-jobs-20261101\\density-4",
+        "cpu_ms": 3328.125,
+        "rss_bytes": 280752128,
+        "upload_bytes": 37874048,
+        "gpu_mean_ms_per_pass": [
+          0.32115607067137814,
+          2.6345204240282687,
+          0.020627679796696316
+        ],
+        "gpu_max_ms_per_pass": [
+          3.56352,
+          8.794112,
+          2.618368
+        ],
+        "dedicated_gpu_bytes": 36343808,
+        "shared_gpu_bytes": 19496960,
+        "wall_s": 27.046999999991385,
+        "tile_bytes": 262144,
+        "effective_scale": 4
+      },
+      {
+        "scale": 16,
+        "representative": "warm-candidate; both setup runs retained, not retained performance A/A",
+        "raw": "G:\\Temp\\Codex\\cdirecomp\\gpu-jobs-20261101\\density-16",
+        "cpu_ms": 3843.75,
+        "rss_bytes": 282603520,
+        "upload_bytes": 37874048,
+        "gpu_mean_ms_per_pass": [
+          0.3076776254416961,
+          4.9022932579505305,
+          0.018209504447268106
+        ],
+        "gpu_max_ms_per_pass": [
+          4.212736,
+          14.982144,
+          2.605056
+        ],
+        "dedicated_gpu_bytes": 44470272,
+        "shared_gpu_bytes": 21594112,
+        "wall_s": 27.062000000005355,
+        "tile_bytes": 4194304,
+        "effective_scale": 16
+      },
+      {
+        "scale": 32,
+        "representative": "warm-candidate; both setup runs retained, not retained performance A/A",
+        "raw": "G:\\Temp\\Codex\\cdirecomp\\gpu-jobs-20261101\\density-32",
+        "cpu_ms": 3296.875,
+        "rss_bytes": 280711168,
+        "upload_bytes": 37874048,
+        "gpu_mean_ms_per_pass": [
+          0.23297628268551235,
+          12.215867703180212,
+          0.014058205844980942
+        ],
+        "gpu_max_ms_per_pass": [
+          3.109888,
+          28.210176,
+          0.037888
+        ],
+        "dedicated_gpu_bytes": 69632000,
+        "shared_gpu_bytes": 19496960,
+        "wall_s": 27.062000000005355,
+        "tile_bytes": 16777216,
+        "effective_scale": 32
+      },
+      {
+        "scale": 64,
+        "representative": "warm-candidate; both setup runs retained, not retained performance A/A",
+        "raw": "G:\\Temp\\Codex\\cdirecomp\\gpu-jobs-20261101\\density-64",
+        "cpu_ms": 4078.125,
+        "rss_bytes": 282734592,
+        "upload_bytes": 37874048,
+        "gpu_mean_ms_per_pass": [
+          0.21527519434628975,
+          35.23983468551236,
+          0.013609961880559086
+        ],
+        "gpu_max_ms_per_pass": [
+          2.31936,
+          88.772608,
+          1.298432
+        ],
+        "dedicated_gpu_bytes": 103190528,
+        "shared_gpu_bytes": 21594112,
+        "wall_s": 29.71799999999348,
+        "tile_bytes": 67108864,
+        "effective_scale": 64
+      }
+    ],
+    "hardware": {
+      "renderer": "NVIDIA GeForce RTX 3080 Ti/PCIe/SSE2",
+      "vendor": "NVIDIA Corporation",
+      "GL": "4.6.0 NVIDIA 616.86",
+      "gpu_total_kib": 12582912,
+      "timestamp_source": "GL_TIMESTAMP/ARB_timer_query, source publication/raster+resolve/final presentation",
+      "CPU_note": "Process CPU accounting measures scheduled CPU. Legacy render_state.cpu_ns measures a presentation wall span including waits, not scheduled CPU.",
+      "GPU_memory_note": "Actual dedicated/shared process memory from Windows GPU Process Memory counters; explicit owned-resource bytes also retained. NVX free memory is global, not per process."
+    },
+    "correctness": {
+      "fixture_log": "G:\\Temp\\Codex\\cdirecomp\\gpu-jobs-20261101\\build-postfallback.log",
+      "reference_operations": 52146,
+      "native_GPU_readbacks": 72,
+      "actual_display_pixel_readbacks": 1728,
+      "densities": [
+        1,
+        4,
+        16,
+        32,
+        64
+      ],
+      "native_mismatches": 0,
+      "fixture_binary": "G:\\Temp\\Codex\\cdirecomp\\gpu-jobs-20261101\\raster-test\\raster-fallback.exe",
+      "fixture_binary_sha256": "943b59a9a84ac3929341855baa5d1b58078b802ed16ac6a6519d6ad9ad7f29a4",
+      "coverage": "Real production scanout contribution/mix/cursor/control/geometry/interlaced retention; immutable lifetime after source changes/reset; native GPU and actual display resolve around tile edges and real hidden-window resize.",
+      "production_window_events": "G:\\Temp\\Codex\\cdirecomp\\gpu-jobs-20261101\\window-events16",
+      "canonical_reference": "G:\\Temp\\Codex\\cdirecomp\\gpu-jobs-20261101\\window-events16\\canonical-reference.json",
+      "window_result": "Own real HWND resized784x615 to1569x1231, exposed offscreen with NOACTIVATE; owner foreground preserved; GPU output2304x1200,26 native readbacks/0 mismatch per run, canonical equality with untouched1x reference.",
+      "historical_fixture_log": "G:\\Temp\\Codex\\cdirecomp\\gpu-jobs-20261101\\raster-owned-fbo.log",
+      "historical_fixture_binary_sha256": "c3f951e592a9a19f89d3b05c925dcd12cb1536e2225e3cbaba55231bdc62210b"
+    },
+    "portability": {
+      "CPU_fallback_scope": "Actual Steam Deck/Linux run of same owned-job native CPU renderer/scanout contract;50688 reference operations pass, not a Linux whole-game or Deck GPU performance claim.",
+      "binary_sha256": "240a62f6309c0a3c988144fb7231d072483e7c395d5b777b36ab2641f220ea75",
+      "build_log": "G:\\Temp\\Codex\\cdirecomp\\gpu-jobs-20261101\\portable-linux-build.log",
+      "run_log": "G:\\Temp\\Codex\\cdirecomp\\gpu-jobs-20261101\\portable-deck-ready.log",
+      "Linux_frontend_GPU_selectors": "Strict HLE0/HLE1 syntax passes with actual Linux SDL headers; portable-sram.log"
+    },
+    "native_SRAM": {
+      "scope": "Supported real current-build create/load/save at first CPU STOP; isolated player preferences and identical initialized battery seed. Real HLE16 GPU activity before save.",
+      "summary": "G:\\Temp\\Codex\\cdirecomp\\gpu-jobs-20261101\\native-sram\\summary.json",
+      "LLE1_HLE16_saved_bytes_equal": true,
+      "saved_bytes": 32768,
+      "saved_sha256": "35b14a11bf506741642dbdff97820101b7bc1023e12063bed112a85e9d3f6ca3"
+    },
+    "limitations": [
+      "One Hotel Mario USA bounded boot/early-gameplay workload on RTX3080Ti/Windows; no other-title/whole-campaign/speaker-listening claim.",
+      "Desired32x/64x actually attempted within bounded GPU memory.32x has GPU outliers beyond one native field;64x mean35.24ms and29.718s to1600 in the candidate setup sample, so64x is not native-cadence-qualified. Required16x normal gameplay result is separate.",
+      "Source bitmap detail is preserved through authored integer spans; no additional scene detail is invented.",
+      "Baseline has no save-state/restore/rewind/rollback serializer or debug commands. These unsupported checks are not claimed passed; no serializer project added. Supported native SRAM and reset invalidation are covered.",
+      "Independent keep/fix/reject and owner final visual/merge handoff remain pending."
+    ],
+    "historical": [
+      "Initial padded-instance variant had one 1600-field pair CPU -2.7907% / cycles -5.1268%, not current performance evidence. Its and the first indirect prototype displayed-output claims are withdrawn after the target-attachment alias finding; raw files/binaries preserved.",
+      "Native-1x-pairs original retained collection stalled in nested PowerShell CLIXML endpoint telemetry after the runtime exited. It is incomplete; use native-1x-pairs-retry. Correctness/timing now survive separate telemetry errors, which do not qualify memory headroom."
+    ],
+    "storage": "All frozen/raw evidence, receipts and immutable dependencies retained, including older C register-snapshot inputs. Current mutable C build/generated cache is restored to GPU=HLE after both selector link checks. Use frozen native-postfallback-hle as current final identity. No owner saves/settings/delivery folders changed.",
+    "measured_success_path_runtime": "ce2975f592d87e6db2a7f6c1c594af42ffa3e3d5",
+    "measured_success_path_consumer": "3d7aa12599369bc1724e3960fb8882a5df0163da",
+    "measured_binaries": {
+      "lle": {
+        "path": "G:\\Temp\\Codex\\cdirecomp\\gpu-jobs-20261101\\native-final-lle\\HotelMarioRecomp.exe",
+        "receipt": "G:\\Temp\\Codex\\cdirecomp\\gpu-jobs-20261101\\native-final-lle\\HotelMarioRecomp.exe.build.json",
+        "sha256": "9987c34e1fba314d42a49884589a898885a7fac0dac2ae4ebc861f41c5e75fcd"
+      },
+      "hle": {
+        "path": "G:\\Temp\\Codex\\cdirecomp\\gpu-jobs-20261101\\native-final-hle\\HotelMarioRecomp.exe",
+        "receipt": "G:\\Temp\\Codex\\cdirecomp\\gpu-jobs-20261101\\native-final-hle\\HotelMarioRecomp.exe.build.json",
+        "sha256": "619637f590ed96d6654dc877353b124dd139f863ef7d4832e78a51572fd38521"
+      }
+    },
+    "binaries": {
+      "lle": {
+        "path": "G:\\Temp\\Codex\\cdirecomp\\gpu-jobs-20261101\\native-postfallback-lle\\HotelMarioRecomp.exe",
+        "receipt": "G:\\Temp\\Codex\\cdirecomp\\gpu-jobs-20261101\\native-postfallback-lle\\HotelMarioRecomp.exe.build.json",
+        "sha256": "7f04160cd8d0b1e72e8ff40b22717e62c0eebe98f16a694ce034a1e575ade4bd"
+      },
+      "hle": {
+        "path": "G:\\Temp\\Codex\\cdirecomp\\gpu-jobs-20261101\\native-postfallback-hle\\HotelMarioRecomp.exe",
+        "receipt": "G:\\Temp\\Codex\\cdirecomp\\gpu-jobs-20261101\\native-postfallback-hle\\HotelMarioRecomp.exe.build.json",
+        "sha256": "dba8be23b9d3a4b5056f961ff1af2533c672a37adcf938f0c0d24aee693886c6"
+      }
+    },
+    "fallback_fix_validation": {
+      "scope": "Error/fallback metadata only after ce2975f successful-path evaluation; shader and normal GL command stream unchanged. Independent review must assess reuse of those source-bound measurements.",
+      "current_runtime": "d81b77f0b78c06c9c06e99db3f17e054b551c191",
+      "current_consumer": "4115efc60f0e53407a55affb0a3d3559af6b1dd2",
+      "fixture": "G:\\Temp\\Codex\\cdirecomp\\gpu-jobs-20261101\\build-postfallback.log",
+      "fault": "Actual context-local GL_INVALID_ENUM at requested64 reports effective1/native dimensions/fallbacks1 and exact portable native pixels.",
+      "live_checkpoint": "G:\\Temp\\Codex\\cdirecomp\\gpu-jobs-20261101\\postfallback-check16",
+      "checkpoint": "Normal hardware16x through1600 matches faithful reference;26 native GPU reads/0 mismatch,299 GPU jobs,zero fallbacks.",
+      "selectors": "Current Windows HLE/LLE link and Linux HLE0/HLE1 strict syntax pass; link-selectors-reservation.json/build-postfallback-reservation.json exit0."
+    }
+  }
 }
