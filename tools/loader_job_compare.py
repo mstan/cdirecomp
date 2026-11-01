@@ -226,6 +226,6 @@ def main():
         'results':results,'contracts':contracts,'paired_cpu_savings_percent':savings,
         'paired_process_cycle_savings_percent':cycle_savings,
         'median_process_cycle_savings_percent':statistics.median(cycle_savings) if cycle_savings else None,
-        'median_cpu_savings_percent':statistics.median(savings)}
+             'median_cpu_savings_percent':statistics.median(savings) if savings else None}
     (args.output/'campaign-evidence.json').write_text(json.dumps(summary,indent=2));print(json.dumps(summary,indent=2))
 if __name__=='__main__':main()

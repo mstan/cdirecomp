@@ -8,16 +8,22 @@
 #include "cdi_audio.h"
 #include "mcd212_video.h"
 #include "cdi_render_profile.h"
+#include "cdi_raster_jobs.h"
+#include "cdi_gpu.h"
 
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#ifndef CDI_GPU_HLE
+#define CDI_GPU_HLE 0
+#endif
 
 typedef struct {
     SDL_Window *window;
     SDL_Renderer *renderer;
     SDL_Texture *texture;
     SDL_Texture *native_target;
+    SDL_Texture *gpu_presented;
     SDL_GameController *controller;
     SDL_JoystickID controller_id;
     SDL_AudioDeviceID audio_device;
@@ -25,9 +31,12 @@ typedef struct {
     uint16_t texture_width, texture_height;
     uint64_t shown_generation;
     uint64_t shown_content;
+    uint64_t shown_epoch;
     uint64_t next_event_ms;
     int fullscreen;
     int mouse_captured;
+    unsigned scale;
+    int redraw;
 } Frontend;
 
 static Frontend s;
@@ -127,19 +136,51 @@ static int ensure_texture(uint16_t width, uint16_t height) {
         if(!s.native_target)return 0;
         SDL_SetTextureBlendMode(s.native_target,SDL_BLENDMODE_NONE);
     }
+#if CDI_GPU_HLE
+    cdi_gpu_init(s.renderer,s.texture);
+#endif
     return 1;
 }
 
 static int present_frame(void) {
     uint16_t width, height;
     uint64_t generation, content;
-    uint32_t count = mcd212_video_copy_changed_frame(s.pixels,
+#if CDI_GPU_HLE
+    if(s.shown_epoch!=cdi_raster_epoch()) {
+        s.redraw=1;s.shown_content=0;s.gpu_presented=NULL;s.shown_epoch=cdi_raster_epoch();
+    }
+#endif
+    uint32_t count = mcd212_video_copy_changed_frame(NULL,
         MCD212_VIDEO_MAX_WIDTH * MCD212_VIDEO_MAX_HEIGHT, s.shown_content,
         &width, &height, &generation, &content);
-    if (!generation || generation == s.shown_generation) return 1;
-    if(count && !ensure_texture(width,height))return 0;
+    if (!generation || (generation == s.shown_generation && !s.redraw)) return 1;
+    if(!ensure_texture(width,height))return 0;
     cdi_render_profile_frame();
-    if (count) {
+    SDL_Texture *presented=NULL;
+    int portable_dirty=count || s.redraw;
+#if CDI_GPU_HLE
+    const CdiRasterFrame *frame=cdi_raster_acquire();
+    if(frame && frame->generation==generation && frame->width==width && frame->height==height) {
+        if(count || s.redraw || !s.gpu_presented || cdi_render_profile_wants_readback(generation)) {
+            const uint32_t *check=NULL;
+            if(cdi_render_profile_wants_readback(generation)) {
+                mcd212_video_copy_frame(s.pixels,MCD212_VIDEO_MAX_WIDTH*MCD212_VIDEO_MAX_HEIGHT,NULL,NULL,NULL);check=s.pixels;
+            }
+            s.gpu_presented=cdi_gpu_render(frame,s.scale,check);
+            if(!s.gpu_presented)portable_dirty=1;
+        }
+        presented=s.gpu_presented;
+        if(!presented && portable_dirty) {
+            if(!cdi_raster_native(frame,s.pixels,MCD212_VIDEO_MAX_WIDTH*MCD212_VIDEO_MAX_HEIGHT)){cdi_raster_release(frame);return 0;}
+        }
+    } else if(portable_dirty) {
+        mcd212_video_copy_frame(s.pixels,MCD212_VIDEO_MAX_WIDTH*MCD212_VIDEO_MAX_HEIGHT,NULL,NULL,NULL);
+    }
+    cdi_raster_release(frame);
+#else
+    if(portable_dirty)mcd212_video_copy_frame(s.pixels,MCD212_VIDEO_MAX_WIDTH*MCD212_VIDEO_MAX_HEIGHT,NULL,NULL,NULL);
+#endif
+    if (!presented && portable_dirty) {
         cdi_render_profile_begin(0);
         if (SDL_UpdateTexture(s.texture, NULL, s.pixels, (int)width * 4) != 0) {
             fprintf(stderr, "[frontend] texture update failed: %s\n", SDL_GetError());
@@ -148,12 +189,12 @@ static int present_frame(void) {
         if(cdi_render_profile_enabled())SDL_RenderFlush(s.renderer);
         cdi_render_profile_end(0);
         cdi_render_profile_upload((uint64_t)width*height*4);
-        s.shown_content = content;
     }
+    s.shown_content = content;
     /* Keep field cadence and resize/expose redraws even when the existing
      * texture is unchanged. Only copying/uploading that texture is elided. */
-    SDL_Texture *presented=s.texture;
-    if(s.native_target) {
+    if(!presented)presented=s.texture;
+    if(presented==s.texture && s.native_target) {
         if(SDL_SetRenderTarget(s.renderer,s.native_target))return 0;
         cdi_render_profile_begin(1);
         SDL_SetRenderDrawColor(s.renderer,0,0,0,255);SDL_RenderClear(s.renderer);
@@ -172,6 +213,7 @@ static int present_frame(void) {
     SDL_RenderPresent(s.renderer);
     cdi_render_profile_finish();
     s.shown_generation = generation;
+    s.redraw=0;
     return 1;
 }
 
@@ -193,6 +235,9 @@ static void pump_audio(void) {
 int cdi_frontend_init(int capture_mouse) {
     SDL_SetMainReady();
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "linear");
+#if CDI_GPU_HLE
+    if(!getenv("SDL_RENDER_DRIVER"))SDL_SetHint(SDL_HINT_RENDER_DRIVER,"opengl");
+#endif
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER | SDL_INIT_EVENTS) != 0) {
         fprintf(stderr, "[frontend] SDL initialization failed: %s\n", SDL_GetError());
         return 0;
@@ -241,6 +286,15 @@ int cdi_frontend_init(int capture_mouse) {
         return 0;
     }
     s.controller_id = -1;
+    s.scale=1;
+    if(getenv("CDI_INTERNAL_SCALE")) {
+        unsigned value=(unsigned)strtoul(getenv("CDI_INTERNAL_SCALE"),NULL,10);
+        if(value && value<=64 && !(value&(value-1u)))s.scale=value;
+    }
+    s.redraw=1;
+#if CDI_GPU_HLE
+    mcd212_video_capture_raster(1);
+#endif
     SDL_EventState(SDL_DROPFILE, SDL_ENABLE);
     open_first_controller();
     cdi_input_mouse_configure(capture_mouse);
@@ -261,6 +315,12 @@ int cdi_frontend_pump(void) {
         s.next_event_ms = now + 4;
         while (SDL_PollEvent(&event)) {
             if (event.type == SDL_QUIT) return 0;
+            if(event.type==SDL_RENDER_DEVICE_RESET || event.type==SDL_RENDER_TARGETS_RESET) {
+                if(event.type==SDL_RENDER_DEVICE_RESET)cdi_render_profile_context_lost();
+                cdi_gpu_reset(event.type==SDL_RENDER_DEVICE_RESET);s.gpu_presented=NULL;s.redraw=1;s.shown_content=0;
+                if(s.texture){SDL_DestroyTexture(s.texture);s.texture=NULL;}
+            }
+            if(event.type==SDL_WINDOWEVENT && (event.window.event==SDL_WINDOWEVENT_EXPOSED || event.window.event==SDL_WINDOWEVENT_SIZE_CHANGED || event.window.event==SDL_WINDOWEVENT_RESTORED))s.redraw=1;
             if (event.type == SDL_WINDOWEVENT &&
                 (event.window.event == SDL_WINDOWEVENT_FOCUS_GAINED ||
                  event.window.event == SDL_WINDOWEVENT_FOCUS_LOST)) {
@@ -277,6 +337,10 @@ int cdi_frontend_pump(void) {
                     button, event.type == SDL_MOUSEBUTTONDOWN);
             } else if (event.type == SDL_KEYDOWN && !event.key.repeat) {
                 if (event.key.keysym.scancode == SDL_SCANCODE_ESCAPE) return 0;
+                if(event.key.keysym.scancode==SDL_SCANCODE_F8) {
+                    s.scale=s.scale==64?1:s.scale*2;s.redraw=1;
+                    fprintf(stderr,"[frontend] internal density %ux (F8 cycles1/2/4/8/16/32/64)\n",s.scale);
+                }
                 if (event.key.keysym.scancode == SDL_SCANCODE_F11 ||
                     (event.key.keysym.scancode == SDL_SCANCODE_RETURN &&
                      (event.key.keysym.mod & KMOD_ALT)))
@@ -300,6 +364,8 @@ int cdi_frontend_pump(void) {
 }
 
 void cdi_frontend_shutdown(void) {
+    cdi_gpu_reset(0);
+    mcd212_video_capture_raster(0);
     cdi_render_profile_shutdown();
     if(s.native_target)SDL_DestroyTexture(s.native_target);
     cdi_input_set_frontend(0);

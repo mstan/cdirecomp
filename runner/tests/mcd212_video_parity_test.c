@@ -3,10 +3,21 @@
  * Randomized legal controls supplement the hardware-derived pixel fixtures. */
 #include "mcd212_video.h"
 #include "cdi_runtime.h"
+#include "cdi_raster_jobs.h"
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef CDI_RASTER_GPU_TEST
+#define SDL_MAIN_HANDLED
+#include <SDL.h>
+#include "cdi_gpu.h"
+#include "cdi_render_profile.h"
+static SDL_Window *gpu_window;
+static SDL_Renderer *gpu_renderer;
+static SDL_Texture *gpu_activation;
+static unsigned gpu_cases;
+#endif
 
 void lle_mcd212_video_reset(void);
 void lle_mcd212_video_control(int, uint32_t);
@@ -33,6 +44,9 @@ static uint8_t verdict[2][MCD212_VIDEO_MAX_WIDTH];
 static uint32_t random_state = 0x21268070u;
 static unsigned case_id, line_id, jobs, fused, reused;
 static uint64_t previous_fused, previous_reused;
+static uint32_t raster_pixels[MCD212_VIDEO_MAX_WIDTH*MCD212_VIDEO_MAX_HEIGHT];
+static const CdiRasterFrame *retained;
+static uint32_t retained_pixels[MCD212_VIDEO_MAX_WIDTH*MCD212_VIDEO_MAX_HEIGHT];
 
 static uint32_t random_word(void) {
     random_state ^= random_state << 13;
@@ -86,6 +100,24 @@ static void compare_frame(void) {
     CHECK(count == lle_mcd212_video_copy_frame(pixels[1], sizeof pixels[1] / 4, &w[1], &h[1], &gen[1]));
     CHECK(w[0] == w[1] && h[0] == h[1] && gen[0] == gen[1]);
     CHECK(!memcmp(pixels[0], pixels[1], count * sizeof(uint32_t)));
+    const CdiRasterFrame *frame=cdi_raster_acquire();
+    CHECK(frame && frame->generation==gen[0] && frame->width==w[0] && frame->height==h[0]);
+    CHECK(cdi_raster_native(frame,raster_pixels,MCD212_VIDEO_MAX_WIDTH*MCD212_VIDEO_MAX_HEIGHT));
+    CHECK(!memcmp(raster_pixels,pixels[1],count*sizeof(uint32_t)));
+#ifdef CDI_RASTER_GPU_TEST
+    if(case_id<12) {
+        static const unsigned scales[]={1,4,16,32,64};
+        cdi_render_profile_frame();
+        CHECK(cdi_gpu_render(frame,scales[gpu_cases%5],pixels[1])!=NULL);
+        cdi_render_profile_finish();gpu_cases++;
+    }
+#endif
+    if(retained) {
+        CHECK(cdi_raster_native(retained,raster_pixels,MCD212_VIDEO_MAX_WIDTH*MCD212_VIDEO_MAX_HEIGHT));
+        CHECK(!memcmp(raster_pixels,retained_pixels,(size_t)retained->width*retained->height*4));
+        cdi_raster_release(retained);
+    }
+    retained=frame;memcpy(retained_pixels,pixels[0],count*sizeof(uint32_t));
     CHECK(mcd212_video_frame_hash(NULL, NULL, NULL) == lle_mcd212_video_frame_hash(NULL, NULL, NULL));
     uint64_t next_content[2];
     uint32_t sent = mcd212_video_copy_changed_frame(delivered[0], sizeof delivered[0] / 4,
@@ -103,6 +135,13 @@ static void compare_frame(void) {
 }
 
 int main(void) {
+#ifdef CDI_RASTER_GPU_TEST
+    SDL_SetMainReady();CHECK(!SDL_Init(SDL_INIT_VIDEO));
+    gpu_window=SDL_CreateWindow("CD-i raster contract",0,0,768,576,SDL_WINDOW_HIDDEN);
+    CHECK(gpu_window);gpu_renderer=SDL_CreateRenderer(gpu_window,-1,SDL_RENDERER_ACCELERATED|SDL_RENDERER_TARGETTEXTURE);
+    CHECK(gpu_renderer);gpu_activation=SDL_CreateTexture(gpu_renderer,SDL_PIXELFORMAT_ARGB8888,SDL_TEXTUREACCESS_STREAMING,768,560);
+    CHECK(gpu_activation);CHECK(cdi_render_profile_init(gpu_renderer,gpu_activation));CHECK(cdi_gpu_init(gpu_renderer,gpu_activation));
+#endif
     const unsigned coding_a[] = {0, 1, 3, 4, 5, 11};
     const unsigned coding_b[] = {0, 1, 3, 5, 11};
     const unsigned widths[] = {1, 3, 160, 180, 360, 384};
@@ -111,6 +150,7 @@ int main(void) {
         unsigned interlaced = case_id & 1;
         mcd212_video_reset();
         lle_mcd212_video_reset();
+        mcd212_video_capture_raster(1);
         previous_fused = 0;
         previous_reused = 0;
         memset(content, 0, sizeof content);
@@ -204,6 +244,18 @@ int main(void) {
     }
     CHECK(fused != 0);
     CHECK(reused != 0);
+    mcd212_video_reset();
+    CHECK(cdi_raster_native(retained,raster_pixels,MCD212_VIDEO_MAX_WIDTH*MCD212_VIDEO_MAX_HEIGHT));
+    CHECK(!memcmp(raster_pixels,retained_pixels,(size_t)retained->width*retained->height*4));
+    cdi_raster_release(retained);
+#ifdef CDI_RASTER_GPU_TEST
+    char state[4096];cdi_render_profile_state(state,sizeof state);puts(state);
+    CHECK(strstr(state,"\"native_mismatches\":0"));
+    const char *reads=strstr(state,"\"native_readbacks\":");unsigned long long observed=0;
+    CHECK(reads && sscanf(reads,"\"native_readbacks\":%llu",&observed)==1 && observed==gpu_cases);
+    printf("hardware raster contract: PASS %u readbacks at1/4/16/32/64x\n",gpu_cases);
+    cdi_render_profile_shutdown();cdi_gpu_reset(0);SDL_DestroyTexture(gpu_activation);SDL_DestroyRenderer(gpu_renderer);SDL_DestroyWindow(gpu_window);SDL_Quit();
+#endif
     printf("scanout contract: PASS %u jobs, %u direct-source observations, %u reused jobs\n", jobs, fused, reused);
     return 0;
 }

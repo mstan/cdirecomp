@@ -1,5 +1,6 @@
 #include "cdi_render_profile.h"
 #include "mcd212_video.h"
+#include "cdi_gpu.h"
 #include <SDL.h>
 #include <SDL_opengl.h>
 #include <stdio.h>
@@ -63,6 +64,7 @@ int cdi_render_profile_init(SDL_Renderer *renderer,SDL_Texture *activation) {
     return 1;
 }
 int cdi_render_profile_enabled(void){return profile.enabled;}
+int cdi_render_profile_wants_readback(uint64_t generation){return profile.enabled && profile.read_stride && generation%profile.read_stride==0;}
 void cdi_render_profile_frame(void) {
     if(!profile.enabled)return;
     profile.frames++;profile.cpu_start=SDL_GetPerformanceCounter();
@@ -108,8 +110,19 @@ void cdi_render_profile_state(char *out,int capacity) {
         (unsigned long long)profile.max_ns[0],(unsigned long long)profile.max_ns[1],(unsigned long long)profile.max_ns[2],
         (unsigned long long)profile.missed,(unsigned long long)profile.reads,(unsigned long long)profile.mismatches,
         (unsigned long long)profile.read_generation,(unsigned long long)profile.cpu_hash,(unsigned long long)profile.gpu_hash,profile.gpu_total_kib,profile.gpu_free_kib);
+    size_t length=strlen(out);
+    if(length && out[length-1]=='}' && length+16u<(size_t)capacity) {
+        out[--length]=0;snprintf(out+length,(size_t)capacity-length,",\"jobs\":");length=strlen(out);
+        cdi_gpu_state(out+length,capacity-(int)length);length=strlen(out);
+        if(length+1u<(size_t)capacity){out[length]='}';out[length+1]=0;}
+    }
 }
 void cdi_render_profile_shutdown(void) {
     if(profile.gpu)profile.destroy(SLOTS*PASSES*2,&profile.queries[0][0][0]);
     free(profile.pixels);memset(&profile,0,sizeof profile);
+}
+void cdi_render_profile_context_lost(void) {
+    /* Query names belonged to the discarded context; don't delete names in
+     * its replacement. The next texture activation initializes fresh queries. */
+    profile.gpu=0;cdi_render_profile_shutdown();
 }
