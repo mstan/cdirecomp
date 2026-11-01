@@ -41,12 +41,12 @@ def gpu_memory(pid):
     """One endpoint sample of actual WDDM process allocations, outside timing."""
     if os.name!='nt':return None
     script=r"""$s=@((Get-Counter '\GPU Process Memory(*)\Dedicated Usage','\GPU Process Memory(*)\Shared Usage' -ErrorAction SilentlyContinue).CounterSamples | Where-Object {$_.InstanceName -like 'pid_PID_*'});
-if($s.Count -lt 2 -or @($s | Where-Object {$_.Status -ne 0}).Count){throw 'Missing valid process GPU memory counters'}
+if($s.Count -lt 2 -or @($s | Where-Object {$_.Status -gt 1}).Count){throw 'Missing valid process GPU memory counters'}
 @{source='Windows GPU Process Memory';dedicated_bytes=[int64](($s | Where-Object {$_.Path -like '*\Dedicated Usage'} | Measure-Object CookedValue -Sum).Sum);shared_bytes=[int64](($s | Where-Object {$_.Path -like '*\Shared Usage'} | Measure-Object CookedValue -Sum).Sum);counter_samples=$s.Count} | ConvertTo-Json -Compress
 """.replace('PID',str(int(pid)))
     encoded=base64.b64encode(script.encode('utf-16le')).decode()
     output=subprocess.check_output(['C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe',
-        '-NoProfile','-EncodedCommand',encoded],text=True,timeout=20,
+        '-NoProfile','-OutputFormat','Text','-EncodedCommand',encoded],text=True,stderr=subprocess.PIPE,timeout=20,
         creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
     return json.loads(output)
 
@@ -68,7 +68,8 @@ def run(exe,args,label):
             process=psutil.Process(proc.pid)
             cycles=CycleCounter(proc.pid)
             if args.cpu_core is not None:process.cpu_affinity([args.cpu_core])
-            while time.monotonic()-started<120:
+            collection_limit=max(120,(args.end_frame or 0)/(50*args.pace_speed)+30)
+            while time.monotonic()-started<collection_limit:
                 if proc.poll() is not None:raise RuntimeError(f'{label}: runtime exited')
                 try:s=request(args.port,{'cmd':'status'},timeout=1)
                 except OSError:time.sleep(.02);continue
@@ -86,7 +87,13 @@ def run(exe,args,label):
             assert s['held'] and (s['frame']==args.end_frame if args.end_frame else s['pc']==args.stop_pc),s
             if args.expect_end_frame is not None:assert s['frame']==args.expect_end_frame,s
             host_after=psutil.cpu_times()
-            gpu_memory_sample=gpu_memory(proc.pid) if args.presentation=='hardware' else None
+            gpu_memory_sample=None
+            if args.presentation=='hardware':
+                try:gpu_memory_sample=gpu_memory(proc.pid)
+                except (subprocess.SubprocessError,ValueError) as error:
+                    # Retain timing/correctness even if this separate resource
+                    # sample fails; an error does not qualify memory headroom.
+                    gpu_memory_sample={'error':str(error),'source':'Windows GPU Process Memory'}
             state={k:request(args.port,{'cmd':k}) for k in ('status','get_registers','ciap_state',
                 'video_frame','video_state','audio_state','native_state','native_events','ikat_events')}
             state['loader_jobs']=request(args.port,{'cmd':'loader_jobs'})
