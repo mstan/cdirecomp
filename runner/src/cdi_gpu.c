@@ -54,7 +54,8 @@ static struct {
     GLint region_location,limit;
     uint64_t rows[MCD212_VIDEO_MAX_HEIGHT],epoch,frames,uploads,upload_bytes,draws,resets;
     unsigned requested,effective,width,height,output_w,output_h,tile_w,tile_h,check_w,check_h;
-    int checked,available,failed;
+    uint64_t fallbacks;
+    int checked,available,failed,fallback_active;
 } gpu;
 static const char *vertex_source=
     "#version 330 core\n"
@@ -166,13 +167,21 @@ static GLuint framebuffer(SDL_Texture *target,GLuint *owned) {
     gl.FramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_TEXTURE_2D,(GLuint)texture,0);
     return gl.CheckFramebufferStatus(GL_FRAMEBUFFER)==GL_FRAMEBUFFER_COMPLETE?*owned:0;
 }
+void cdi_gpu_native_fallback(unsigned width,unsigned height,unsigned requested) {
+    if(!gpu.fallback_active || gpu.requested!=requested)
+        fprintf(stderr,"[gpu] portable native job fallback requested=%u effective=1 native=%ux%u\n",requested,width,height);
+    if(!gpu.fallback_active)gpu.fallbacks++;
+    gpu.fallback_active=1;gpu.requested=requested;gpu.effective=1;gpu.width=width;gpu.height=height;
+}
+static SDL_Texture *native_fallback(const CdiRasterFrame *frame,unsigned requested) {
+    cdi_gpu_native_fallback(frame->width,frame->height,requested);return NULL;
+}
 SDL_Texture *cdi_gpu_render(const CdiRasterFrame *frame,unsigned requested,const uint32_t *native_check) {
     if(!frame)return NULL;
     if(!gpu.available || gpu.failed || SDL_GL_GetCurrentContext()!=gpu.context) {
-        if(gpu.requested!=requested)fprintf(stderr,"[gpu] portable native job fallback requested=%u effective=1 native=%ux%u\n",requested,frame->width,frame->height);
-        gpu.requested=requested;gpu.effective=1;gpu.width=frame->width;gpu.height=frame->height;return NULL;
+        return native_fallback(frame,requested);
     }
-    if(!requested || requested>64)return NULL;
+    if(!requested || requested>64)return native_fallback(frame,requested);
     unsigned scale=requested;while(scale>1 && 256u*scale>(unsigned)gpu.limit)scale/=2;
     int output_w=0,output_h=0;SDL_GetRendererOutputSize(gpu.renderer,&output_w,&output_h);
     if(scale==1){output_w=frame->width;output_h=frame->height;}
@@ -186,19 +195,19 @@ SDL_Texture *cdi_gpu_render(const CdiRasterFrame *frame,unsigned requested,const
         if(multiple_y>(unsigned)gpu.limit/frame->height)multiple_y=(unsigned)gpu.limit/frame->height;
         output_w=(int)(multiple_x*frame->width);output_h=(int)(multiple_y*frame->height);
     }
-    if(output_w<1 || output_h<1 || output_w>gpu.limit || output_h>gpu.limit)return NULL;
+    if(output_w<1 || output_h<1 || output_w>gpu.limit || output_h>gpu.limit)return native_fallback(frame,requested);
     if(!target(&gpu.output,(unsigned)output_w,(unsigned)output_h,&gpu.output_w,&gpu.output_h) ||
-       !target(&gpu.tile,256u*scale,16u*scale,&gpu.tile_w,&gpu.tile_h))return NULL;
-    if(native_check && !target(&gpu.check,frame->width,frame->height,&gpu.check_w,&gpu.check_h))return NULL;
+       !target(&gpu.tile,256u*scale,16u*scale,&gpu.tile_w,&gpu.tile_h))return native_fallback(frame,requested);
+    if(native_check && !target(&gpu.check,frame->width,frame->height,&gpu.check_w,&gpu.check_h))return native_fallback(frame,requested);
     if(gpu.requested!=requested || gpu.effective!=scale || gpu.width!=frame->width || gpu.height!=frame->height) {
         fprintf(stderr,"[gpu] density requested=%u effective=%u virtual=%ux%u output=%ux%u tile=%ux%u\n",requested,scale,frame->width*scale,frame->height*scale,gpu.output_w,gpu.output_h,gpu.tile_w,gpu.tile_h);
     }
     gpu.requested=requested;gpu.effective=scale;gpu.width=frame->width;gpu.height=frame->height;
-    if(SDL_RenderFlush(gpu.renderer))return NULL;
+    if(SDL_RenderFlush(gpu.renderer))return native_fallback(frame,requested);
     SDL_Texture *old_target=SDL_GetRenderTarget(gpu.renderer);
     GlState previous;save_state(&previous);
     GLuint output=framebuffer(gpu.output,&gpu.output_fbo),check=native_check?framebuffer(gpu.check,&gpu.check_fbo):0,tile=framebuffer(gpu.tile,&gpu.tile_fbo);
-    if(!output || !tile || (native_check && !check)){SDL_SetRenderTarget(gpu.renderer,old_target);restore_state(&previous);return NULL;}
+    if(!output || !tile || (native_check && !check)){SDL_SetRenderTarget(gpu.renderer,old_target);restore_state(&previous);return native_fallback(frame,requested);}
     if(gpu.epoch!=frame->epoch){memset(gpu.rows,0,sizeof gpu.rows);gpu.epoch=frame->epoch;gpu.resets++;}
     cdi_render_profile_begin(0);gl.ActiveTexture(GL_TEXTURE0);gl.BindTexture(GL_TEXTURE_2D,gpu.source);
     gl.BindBuffer(GL_DRAW_INDIRECT_BUFFER,gpu.commands);
@@ -247,12 +256,16 @@ SDL_Texture *cdi_gpu_render(const CdiRasterFrame *frame,unsigned requested,const
         cdi_render_profile_readback(gpu.renderer,native_check,frame->width,frame->height,frame->generation);
     }
     SDL_SetRenderTarget(gpu.renderer,old_target);restore_state(&previous);
-    if(gpu.failed)return NULL;
+    if(gpu.failed)return native_fallback(frame,requested);
+    gpu.fallback_active=0;
     gpu.frames++;return gpu.output;
 }
 void cdi_gpu_state(char *out,int capacity) {
     uint64_t tile=(uint64_t)gpu.tile_w*gpu.tile_h*4u,output=(uint64_t)gpu.output_w*gpu.output_h*4u;
-    snprintf(out,capacity,"{\"available\":%d,\"failed\":%d,\"frames\":%llu,\"source_uploads\":%llu,\"source_upload_bytes\":%llu,\"draw_calls\":%llu,\"resets\":%llu,\"requested_scale\":%u,\"effective_scale\":%u,\"virtual_width\":%u,\"virtual_height\":%u,\"output_width\":%u,\"output_height\":%u,\"tile_bytes\":%llu,\"owned_gpu_bytes\":%llu}",gpu.available,gpu.failed,(unsigned long long)gpu.frames,(unsigned long long)gpu.uploads,(unsigned long long)gpu.upload_bytes,(unsigned long long)gpu.draws,(unsigned long long)gpu.resets,gpu.requested,gpu.effective,gpu.width*gpu.effective,gpu.height*gpu.effective,gpu.output_w,gpu.output_h,(unsigned long long)tile,(unsigned long long)(tile+output+(gpu.commands?MCD212_VIDEO_MAX_HEIGHT*16u:0)+(gpu.source?(MCD212_VIDEO_MAX_WIDTH+1u)*MCD212_VIDEO_MAX_HEIGHT*16u:0)+(gpu.check?(uint64_t)gpu.check_w*gpu.check_h*4u:0)));
+    snprintf(out,capacity,"{\"available\":%d,\"failed\":%d,\"frames\":%llu,\"source_uploads\":%llu,\"source_upload_bytes\":%llu,\"draw_calls\":%llu,\"resets\":%llu,\"requested_scale\":%u,\"effective_scale\":%u,\"virtual_width\":%u,\"virtual_height\":%u,\"output_width\":%u,\"output_height\":%u,\"tile_bytes\":%llu,\"owned_gpu_bytes\":%llu}",gpu.available,gpu.failed,(unsigned long long)gpu.frames,(unsigned long long)gpu.uploads,(unsigned long long)gpu.upload_bytes,(unsigned long long)gpu.draws,(unsigned long long)gpu.resets,gpu.requested,gpu.effective,gpu.width*gpu.effective,gpu.height*gpu.effective,gpu.fallback_active?gpu.width:gpu.output_w,gpu.fallback_active?gpu.height:gpu.output_h,(unsigned long long)tile,(unsigned long long)(tile+output+(gpu.commands?MCD212_VIDEO_MAX_HEIGHT*16u:0)+(gpu.source?(MCD212_VIDEO_MAX_WIDTH+1u)*MCD212_VIDEO_MAX_HEIGHT*16u:0)+(gpu.check?(uint64_t)gpu.check_w*gpu.check_h*4u:0)));
+    size_t length=strlen(out);
+    if(length && out[length-1]=='}' && length+96u<(size_t)capacity)
+        snprintf(out+length-1u,(size_t)capacity-length+1u,",\"fallback_active\":%d,\"fallbacks\":%llu}",gpu.fallback_active,(unsigned long long)gpu.fallbacks);
 }
 void cdi_gpu_reset(int lost) {
     if(!lost && gl.DeleteTextures && SDL_GL_GetCurrentContext()==gpu.context) {
@@ -267,6 +280,7 @@ void cdi_gpu_reset(int lost) {
 }
 #else
 int cdi_gpu_init(SDL_Renderer *renderer,SDL_Texture *activation){(void)renderer;(void)activation;return 0;}
+void cdi_gpu_native_fallback(unsigned width,unsigned height,unsigned requested){(void)width;(void)height;(void)requested;}
 SDL_Texture *cdi_gpu_render(const CdiRasterFrame *frame,unsigned scale,const uint32_t *check){(void)frame;(void)scale;(void)check;return NULL;}
 void cdi_gpu_state(char *out,int capacity){snprintf(out,capacity,"{\"available\":0,\"frames\":0,\"effective_scale\":1,\"tile_bytes\":0}");}
 void cdi_gpu_reset(int lost){(void)lost;}

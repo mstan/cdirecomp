@@ -177,6 +177,7 @@ static int present_frame(void) {
         mcd212_video_copy_frame(s.pixels,MCD212_VIDEO_MAX_WIDTH*MCD212_VIDEO_MAX_HEIGHT,NULL,NULL,NULL);
     }
     cdi_raster_release(frame);
+    if(!presented)cdi_gpu_native_fallback(width,height,s.scale);
 #else
     if(portable_dirty)mcd212_video_copy_frame(s.pixels,MCD212_VIDEO_MAX_WIDTH*MCD212_VIDEO_MAX_HEIGHT,NULL,NULL,NULL);
 #endif

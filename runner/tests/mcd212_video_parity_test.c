@@ -11,6 +11,7 @@
 #ifdef CDI_RASTER_GPU_TEST
 #define SDL_MAIN_HANDLED
 #include <SDL.h>
+#include <SDL_opengl.h>
 #include "cdi_gpu.h"
 #include "cdi_render_profile.h"
 static SDL_Window *gpu_window;
@@ -275,15 +276,25 @@ int main(void) {
     mcd212_video_reset();
     CHECK(cdi_raster_native(retained,raster_pixels,MCD212_VIDEO_MAX_WIDTH*MCD212_VIDEO_MAX_HEIGHT));
     CHECK(!memcmp(raster_pixels,retained_pixels,(size_t)retained->width*retained->height*4));
-    cdi_raster_release(retained);
 #ifdef CDI_RASTER_GPU_TEST
     char state[4096];cdi_render_profile_state(state,sizeof state);puts(state);
     CHECK(strstr(state,"\"native_mismatches\":0"));
     const char *reads=strstr(state,"\"native_readbacks\":");unsigned long long observed=0;
     CHECK(reads && sscanf(reads,"\"native_readbacks\":%llu",&observed)==1 && observed==gpu_cases);
     printf("hardware raster contract: PASS %u readbacks at1/4/16/32/64x\n",gpu_cases);
+    /* A real context-local GL failure must use the same native job and report
+     * actual density1, including when a higher-density output was cached. */
+    typedef void (APIENTRY *EnableFn)(GLenum);
+    EnableFn enable=(EnableFn)SDL_GL_GetProcAddress("glEnable");CHECK(enable);enable(0xffffffffu);
+    CHECK(!cdi_gpu_render(retained,64,NULL));
+    CHECK(cdi_raster_native(retained,raster_pixels,MCD212_VIDEO_MAX_WIDTH*MCD212_VIDEO_MAX_HEIGHT));
+    CHECK(!memcmp(raster_pixels,retained_pixels,(size_t)retained->width*retained->height*4));
+    cdi_gpu_state(state,sizeof state);puts(state);
+    CHECK(strstr(state,"\"fallback_active\":1") && strstr(state,"\"effective_scale\":1,") && strstr(state,"\"requested_scale\":64,"));
+    puts("hardware fault to portable native job: PASS");
     cdi_render_profile_shutdown();cdi_gpu_reset(0);SDL_DestroyTexture(gpu_activation);SDL_DestroyRenderer(gpu_renderer);SDL_DestroyWindow(gpu_window);SDL_Quit();
 #endif
+    cdi_raster_release(retained);
     printf("scanout contract: PASS %u jobs, %u direct-source observations, %u reused jobs\n", jobs, fused, reused);
     return 0;
 }

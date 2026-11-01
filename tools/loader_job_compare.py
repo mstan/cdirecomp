@@ -149,6 +149,7 @@ def run(exe,args,label):
                 assert render['enabled'] and render['gpu_timestamps'] and all(render['gpu_counts']),render
                 assert not any(name in render['renderer'].lower() for name in ('llvmpipe','software','swiftshader')),render
                 assert not render['native_mismatches'],render
+                assert not render.get('jobs',{}).get('fallbacks',0),render
                 if int(env.get('CDI_GPU_READBACK_STRIDE','60')):assert render['native_readbacks']>0,render
                 if args.window_events:
                     gpu=render['jobs'];assert window_event and (gpu['output_width']>window_event['before']['output_width'] or gpu['output_height']>window_event['before']['output_height']),gpu
