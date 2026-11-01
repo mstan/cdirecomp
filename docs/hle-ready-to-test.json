@@ -54,7 +54,11 @@
         "workspace_gib": 1
       },
       "compatible_target": "Windows with the frozen executable, assets, Python3.12+psutil and MinGW nm; local paths currently prepared",
-      "required_next": "Stacked PR handoff by reviewer, then candidate 6; no further tests requested.",
+      "required_next": "Stacked PRs open and unmerged; candidate 6 is next. Combined batch gameplay/current-build save-load and owner final merge handoff remain pending.",
+      "pull_requests": [
+        "https://github.com/mstan/cdirecomp/pull/3",
+        "https://github.com/mstan/HotelMarioRecomp/pull/3"
+      ],
       "owner_issue": "beads-ttbl.4",
       "consumer": "5846224dc25a799294dc2724568e2663349efed8",
       "evaluated_scope": "Hotel Mario USA normal-paced boot, process creation through caller continuation 0x445204 at field 731; per-byte ownership/invalidation bookkeeping retained.",

@@ -822,6 +822,10 @@ Raw root: `G:/Temp/Codex/cdirecomp/memory-job-20261031`; valid results:
 `boot-normal-reservation.json` (exit 0). The current C: cache remains HLE;
 passing binaries, fixtures and all immutable inputs are retained for next 6.
 
-No candidate 4 PR has been created or merged. The reviewer takes the stacked
-PR handoff and next candidate 6. **Five areas remain: 6, 8, 9, hardware 10 and 11.**
+Stacked [engine PR #3](https://github.com/mstan/cdirecomp/pull/3) targets
+`perf/native-drawing-jobs-20261028` (creation head `ccc48dad`);
+[Hotel Mario PR #3](https://github.com/mstan/HotelMarioRecomp/pull/3) targets
+`perf/native-drawing-job-20261028` (head `5846224`). Both are open and unmerged.
+Combined batch gameplay/current-build save-load and the owner's final visual/play
+merge handoff remain pending. **Five areas remain: 6, 8, 9, hardware 10 and 11.**
 The broad burndown/campaign remain open; no additional measurement is requested.

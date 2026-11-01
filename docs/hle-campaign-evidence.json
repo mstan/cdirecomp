@@ -911,7 +911,13 @@
         "reviewer": "parent-arranged independent reviewer",
         "note": "No source blocker; process-origin normal-paced reversed A/B and identical-build control resolve performance qualification. No additional measurements requested."
       },
-      "branch_pr_status": "handoff_pending_no_PR_created",
+      "branch_pr_status": "stacked_PRs_open_unmerged",
+      "pull_requests": [
+        "https://github.com/mstan/cdirecomp/pull/3",
+        "https://github.com/mstan/HotelMarioRecomp/pull/3"
+      ],
+      "publication_engine_head": "ccc48dad0edb9664a12e78043fcc6e7658121cdc",
+      "merge_handoff": "Combined batch gameplay/current-build save-load and owner final visual/play approval remain pending.",
       "bulk_bookkeeping_rewrite": false
     },
     {
