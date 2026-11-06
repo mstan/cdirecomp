@@ -221,6 +221,16 @@ git-ignored and never committed, packaged, or required. See `PROVENANCE.md` and
 
 ## License
 
+For this project's code covered by the [PolyForm Noncommercial License](LICENSE),
+[PERMISSIONS.md](PERMISSIONS.md) grants standing permission for voluntary
+donations, sponsorships, and advertising revenue, including support for broader
+development initiatives. Payment must not buy access to the software, games
+built with it, or their updates, features, or game content, including early access.
+
+Matthew Stanley has authority from the relevant copyright holders to grant
+these permissions for the project's PolyForm-covered code. Third-party
+components and code explicitly licensed under other terms retain those terms.
+
 [PolyForm Noncommercial License 1.0.0](LICENSE) — © 2026 Matthew Stan. This
 license covers the cdirecomp source only. It grants no rights to any Philips,
 Nintendo, or other third-party intellectual property; you must supply your own
