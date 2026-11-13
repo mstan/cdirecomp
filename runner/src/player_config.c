@@ -175,7 +175,7 @@ int cdi_player_config_save(const char *path, const CdiPlayerConfig *config) {
     fprintf(file,
             "# cdirecomp player preferences (persistent, not per-title)\n"
             "[input]\n"
-            "capture_mouse = %s\n\n"
+            "capture_mouse = %s\n"
             "enable_mouse = %s\n\n"
             "[rtc]\n"
             "sync_host_on_startup = %s\n\n",

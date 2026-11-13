@@ -45,7 +45,7 @@ int main(int argc,char **argv) {
     mcd212_video_reset();
     mcd212_video_control(0, 0xCD000000u | (50u << 12) | 100u);
     mcd212_video_control(0, 0xCE800000u | 8u);
-    mcd212_video_begin_frame(768,240,0);
+    mcd212_video_begin_frame(384,240,0);
     mcd212_video_end_frame();
     cdi_frontend_configure(&config);
     CHECK(cdi_frontend_init(config.capture_mouse));
