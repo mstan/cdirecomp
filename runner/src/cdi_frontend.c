@@ -281,7 +281,7 @@ int cdi_frontend_init(int capture_mouse) {
         fprintf(stderr, "[frontend] audio subsystem unavailable: %s\n",
                 SDL_GetError());
     }
-    s.window = SDL_CreateWindow("cdirecomp â€” Philips CD-i",
+    s.window = SDL_CreateWindow(CDI_PRODUCT_NAME,
                                 SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
                                 options.window_width, options.window_width * (options.fit_to_screen ? 9 : 12) / 16, SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI |
                                 (getenv("CDI_WINDOW_HIDDEN")?SDL_WINDOW_HIDDEN:0));
@@ -386,7 +386,7 @@ int cdi_frontend_pump(void) {
                 open_first_controller();
             } else if (event.type == SDL_DROPFILE) {
                 if (cdi_media_mount(event.drop.file))
-                    SDL_SetWindowTitle(s.window, "cdirecomp â€” Philips CD-i â€” disc inserted");
+                    SDL_SetWindowTitle(s.window, CDI_PRODUCT_NAME);
                 SDL_free(event.drop.file);
             }
         }
