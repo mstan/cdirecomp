@@ -1,5 +1,6 @@
 #include "cdi_sha256.h"
 #include <string.h>
+#include <stdio.h>
 
 static uint32_t ror(uint32_t x, unsigned n) { return (x >> n) | (x << (32-n)); }
 static uint32_t be32(const uint8_t *p) {
@@ -45,4 +46,35 @@ void cdi_sha256(const uint8_t *data, size_t size, uint8_t digest[32]) {
     if (end==128) block(h,tail+64);
     for (unsigned i=0;i<8;i++) for (unsigned j=0;j<4;j++)
         digest[i*4+j]=(uint8_t)(h[i]>>(24-j*8));
+}
+
+int cdi_sha256_file(const char *path, uint8_t digest[32]) {
+    FILE *file=fopen(path,"rb");
+    if(!file)return 0;
+    uint32_t h[8]={0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,
+                   0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19};
+    uint8_t buffer[16384],tail[128]={0};
+    uint64_t total=0;
+    size_t size;
+    do {
+        size=fread(buffer,1,sizeof buffer,file);
+        total+=size;
+        size_t complete=size & ~(size_t)63;
+        for(size_t i=0;i<complete;i+=64)block(h,buffer+i);
+        if(size<sizeof buffer) {
+            size_t remaining=size-complete;
+            memcpy(tail,buffer+complete,remaining);
+            tail[remaining]=0x80;
+            size_t end=remaining<56 ? 64 : 128;
+            uint64_t bits=total*8;
+            for(unsigned i=0;i<8;i++)tail[end-1-i]=(uint8_t)(bits>>(i*8));
+            block(h,tail);
+            if(end==128)block(h,tail+64);
+        }
+    }while(size==sizeof buffer);
+    int ok=!ferror(file);
+    fclose(file);
+    if(!ok)return 0;
+    for(unsigned i=0;i<8;i++)for(unsigned j=0;j<4;j++)digest[i*4+j]=(uint8_t)(h[i]>>(24-j*8));
+    return 1;
 }

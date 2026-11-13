@@ -1,13 +1,12 @@
 /*
- * main_cdi.c — CdiRecomp entry point.
+ * main_cdi.c â€” CdiRecomp entry point.
  *
  * Usage: CdiRecomp <disc.cue|disc.bin> [--game <game.toml>]
  *                  [--emit --out <directory> [--module <name>]]
  * Inventories bounded filesystem modules and emits position-independent C.
  * The real CD-RTOS loader remains responsible for loading and linking them.
  *
- * NOTE: main_genesis.c sits next to this file as the unmodified upstream
- * reference for how the frontend is normally driven; it is not compiled.
+ * The generic flat-ROM test driver lives in tests/frontend_fixture.c.
  */
 #define _CRT_SECURE_NO_WARNINGS
 #include <stdio.h>
@@ -18,7 +17,7 @@
 #include "disc_parser.h"
 #include "module_emit.h"
 #include "game_config.h"
-/* Frontend headers — present so the shared 68000 pipeline links and is ready
+/* Frontend headers â€” present so the shared 68000 pipeline links and is ready
  * to be driven once module->flat-image mapping exists. */
 #include "rom_parser.h"
 #include "function_finder.h"
@@ -47,7 +46,7 @@ static void usage(FILE *stream) {
         "                  [--subr-exports named-offset32] [--module-seeds <file>]]\n"
         "\n"
         "Subroutine export layouts are explicit; named-offset32 is the verified\n"
-        "Hotel Mario private layout. Module seeds contain image SHA-256 + offsets.\n"
+        "explicit named-offset32 layout. Module seeds contain image SHA-256 + offsets.\n"
         "Emission always rejects unsupported instructions and module falloff.\n");
 }
 

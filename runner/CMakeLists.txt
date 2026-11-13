@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.16)
+cmake_minimum_required(VERSION 3.20)
 project(CdiRuntime C)
 
 set(CMAKE_C_STANDARD 11)
@@ -99,37 +99,47 @@ endif()
 set_source_files_properties(src/cdi_frontend.c src/cdi_gpu.c PROPERTIES
     COMPILE_DEFINITIONS "CDI_GPU_HLE=$<BOOL:$<TARGET_PROPERTY:CDI_NATIVE_GPU>>")
 
-# Generated C is dropped in by the recompiler and compiled in here. It
-# #includes cdi_runtime.h + game_extras.h from runner/include.
-#   - bios/generated/*.c     : the recompiled CD-RTOS system ROM (Phase 1, boots).
-#   - hotelmario/generated/*.c : the recompiled game (Phase 3, empty until then).
-# OS-first: the BIOS is what we boot to the player shell before any game work.
-file(GLOB BIOS_GEN_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/../bios/generated/*.c")
-set(CDI_GAME_GENERATED_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../hotelmario/generated" CACHE PATH "Directory of generated native OS-9 modules")
-file(GLOB GAME_GEN_SRCS "${CDI_GAME_GENERATED_DIR}/*.c")
-if(EXISTS "${CDI_GAME_GENERATED_DIR}/module_manifest.c")
-    if(NOT EXISTS "${CDI_GAME_GENERATED_DIR}/module_sources.cmake")
-        message(FATAL_ERROR "Regenerate native modules: module_sources.cmake is missing")
+find_package(SDL2 CONFIG REQUIRED)
+# Component parity tests select a backend even when no player is built.
+set_source_files_properties(src/mcd212_video.c PROPERTIES
+    COMPILE_DEFINITIONS "CDI_VIDEO_HLE=$<BOOL:$<TARGET_PROPERTY:CDI_NATIVE_SCANOUT>>")
+include("${CMAKE_CURRENT_SOURCE_DIR}/../cmake/CdiProvenance.cmake")
+option(CDI_BUILD_RUNTIME "Build a native player with generated BIOS sources" ON)
+if(NOT DEFINED CDI_RUNTIME_TARGET)
+    set(CDI_RUNTIME_TARGET CdiRuntime)
+endif()
+if(NOT DEFINED CDI_BIOS_GENERATED_DIR)
+    set(CDI_BIOS_GENERATED_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated/bios" CACHE PATH
+        "Directory containing generated CD-RTOS sources and bios_identity.h")
+endif()
+if(NOT DEFINED CDI_GAME_GENERATED_DIR)
+    set(CDI_GAME_GENERATED_DIR "" CACHE PATH "Optional generated native OS-9 modules")
+endif()
+
+if(CDI_BUILD_RUNTIME)
+if(NOT EXISTS "${CDI_BIOS_GENERATED_DIR}/cdrtos_full.c" OR
+   NOT EXISTS "${CDI_BIOS_GENERATED_DIR}/cdrtos_dispatch.c" OR
+   NOT EXISTS "${CDI_BIOS_GENERATED_DIR}/bios_identity.h")
+    message(FATAL_ERROR "Generate the BIOS first with CdiRecompBios <rom> --emit --out <directory>, then set CDI_BIOS_GENERATED_DIR")
+endif()
+set(BIOS_GEN_SRCS "${CDI_BIOS_GENERATED_DIR}/cdrtos_full.c"
+                  "${CDI_BIOS_GENERATED_DIR}/cdrtos_dispatch.c")
+set(GAME_GEN_SRCS "")
+if(CDI_GAME_GENERATED_DIR)
+    if(NOT EXISTS "${CDI_GAME_GENERATED_DIR}/module_manifest.c" OR
+       NOT EXISTS "${CDI_GAME_GENERATED_DIR}/module_sources.cmake")
+        message(FATAL_ERROR "Regenerate native modules: module manifest/source list is missing")
     endif()
     include("${CDI_GAME_GENERATED_DIR}/module_sources.cmake")
-    set(GAME_GEN_SRCS "")
     foreach(MODULE_SOURCE IN LISTS CDI_NATIVE_MODULE_FILES)
         list(APPEND GAME_GEN_SRCS "${CDI_GAME_GENERATED_DIR}/${MODULE_SOURCE}")
     endforeach()
 endif()
 
-# GCC's -O3 expansion of the ~450k-line generated ROM can exhaust the MinGW
-# assembler even on otherwise roomy developer machines. -O2 keeps the runtime
-# optimized while making clean Release builds deterministic and materially
-# smaller at the compiler/assembler boundary.
-if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
-    set_source_files_properties(
-        "${CMAKE_CURRENT_SOURCE_DIR}/../bios/generated/cdrtos_full.c"
-        PROPERTIES COMPILE_OPTIONS "-O2"
-    )
+if(NOT TARGET ${CDI_RUNTIME_TARGET})
+    add_executable(${CDI_RUNTIME_TARGET})
 endif()
-
-add_executable(CdiRuntime
+target_sources(${CDI_RUNTIME_TARGET} PRIVATE
     src/main.c
     src/cdi_bus.c
     src/cdi_native.c
@@ -161,117 +171,108 @@ add_executable(CdiRuntime
     # Clean-room hybrid interpreter (MC-CDI-011) reuses the recompiler's own
     # decoder for parity-by-construction with the static C emitter.
     "${CMAKE_CURRENT_SOURCE_DIR}/../external/m68k-recomp-core/common/m68k_decoder.c"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../recompiler/src/rom_parser.c"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../recompiler/src/disc_parser.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../common/m68k_image.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../common/disc_parser.c"
     ${BIOS_GEN_SRCS}
     ${GAME_GEN_SRCS}
 )
 
-target_include_directories(CdiRuntime PRIVATE
+# GCC's -O3 expansion of the ~450k-line generated ROM can exhaust the MinGW
+# assembler even on otherwise roomy developer machines. -O2 keeps the runtime
+# optimized while making clean Release builds deterministic and materially
+# smaller at the compiler/assembler boundary.
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    set_source_files_properties(
+        "${CDI_BIOS_GENERATED_DIR}/cdrtos_full.c"
+        TARGET_DIRECTORY ${CDI_RUNTIME_TARGET} PROPERTIES COMPILE_OPTIONS "-O2"
+    )
+endif()
+
+target_include_directories(${CDI_RUNTIME_TARGET} PRIVATE
     include
     ../common
     "${CMAKE_CURRENT_SOURCE_DIR}/../external/m68k-recomp-core/common"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../recompiler/src"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../bios/generated"
+    "${CDI_BIOS_GENERATED_DIR}"
     "${CDI_GAME_GENERATED_DIR}"
 )
 
-set_target_properties(CdiRuntime PROPERTIES
+set_target_properties(${CDI_RUNTIME_TARGET} PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
 )
 
 if(MSVC)
-    target_compile_options(CdiRuntime PRIVATE /W3 /WX-)
+    target_compile_options(${CDI_RUNTIME_TARGET} PRIVATE /W3 /WX-)
 endif()
 
-target_compile_definitions(CdiRuntime PRIVATE $<$<BOOL:${CDI_COSIM_BUILD}>:CDI_COSIM=1>)
+target_compile_definitions(${CDI_RUNTIME_TARGET} PRIVATE $<$<BOOL:${CDI_COSIM_BUILD}>:CDI_COSIM=1>)
 # Restrict the selection macro to the implementation and startup identity.
 # Switching backends must not rebuild the generated CPU/game translation units.
-set_source_files_properties(src/mcd212_video.c src/main.c PROPERTIES
+get_target_property(CDI_RUNTIME_SOURCE_DIR ${CDI_RUNTIME_TARGET} SOURCE_DIR)
+set_source_files_properties(src/mcd212_video.c src/main.c
+    TARGET_DIRECTORY ${CDI_RUNTIME_TARGET} PROPERTIES
     COMPILE_DEFINITIONS "CDI_VIDEO_HLE=$<BOOL:$<TARGET_PROPERTY:CDI_NATIVE_SCANOUT>>")
-set_property(TARGET CdiRuntime PROPERTY CDI_NATIVE_SCANOUT ${CDI_VIDEO_HLE})
-set_property(SOURCE src/main.c APPEND PROPERTY COMPILE_DEFINITIONS
+set_property(TARGET ${CDI_RUNTIME_TARGET} PROPERTY CDI_NATIVE_SCANOUT ${CDI_VIDEO_HLE})
+set_property(SOURCE src/main.c DIRECTORY "${CDI_RUNTIME_SOURCE_DIR}" APPEND PROPERTY COMPILE_DEFINITIONS
     "CDI_BOARD_HLE=$<BOOL:$<TARGET_PROPERTY:CDI_NATIVE_BOARD>>")
 set_source_files_properties(src/cdi_loader_jobs.c
-    "${CMAKE_CURRENT_SOURCE_DIR}/../bios/generated/cdrtos_dispatch.c"
+    "${CDI_BIOS_GENERATED_DIR}/cdrtos_dispatch.c"
+    TARGET_DIRECTORY ${CDI_RUNTIME_TARGET}
     PROPERTIES COMPILE_DEFINITIONS "CDI_LOADER_HLE=$<BOOL:$<TARGET_PROPERTY:CDI_NATIVE_LOADER>>")
-set_property(TARGET CdiRuntime PROPERTY CDI_NATIVE_LOADER ${CDI_LOADER_HLE})
-set_source_files_properties(src/cdi_drawing_jobs.c PROPERTIES
+set_property(TARGET ${CDI_RUNTIME_TARGET} PROPERTY CDI_NATIVE_LOADER ${CDI_LOADER_HLE})
+set_source_files_properties(src/cdi_drawing_jobs.c
+    TARGET_DIRECTORY ${CDI_RUNTIME_TARGET} PROPERTIES
     COMPILE_DEFINITIONS "CDI_DRAWING_HLE=$<BOOL:$<TARGET_PROPERTY:CDI_NATIVE_DRAWING>>")
-set_property(SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/../bios/generated/cdrtos_dispatch.c"
-    APPEND PROPERTY COMPILE_DEFINITIONS "CDI_DRAWING_HLE=$<BOOL:$<TARGET_PROPERTY:CDI_NATIVE_DRAWING>>")
-set_property(TARGET CdiRuntime PROPERTY CDI_NATIVE_DRAWING ${CDI_DRAWING_HLE})
-set_source_files_properties(src/cdi_memory_jobs.c PROPERTIES
+set_property(SOURCE "${CDI_BIOS_GENERATED_DIR}/cdrtos_dispatch.c"
+    DIRECTORY "${CDI_RUNTIME_SOURCE_DIR}" APPEND PROPERTY COMPILE_DEFINITIONS "CDI_DRAWING_HLE=$<BOOL:$<TARGET_PROPERTY:CDI_NATIVE_DRAWING>>")
+set_property(TARGET ${CDI_RUNTIME_TARGET} PROPERTY CDI_NATIVE_DRAWING ${CDI_DRAWING_HLE})
+set_source_files_properties(src/cdi_memory_jobs.c
+    TARGET_DIRECTORY ${CDI_RUNTIME_TARGET} PROPERTIES
     COMPILE_DEFINITIONS "CDI_MEMORY_HLE=$<BOOL:$<TARGET_PROPERTY:CDI_NATIVE_MEMORY>>")
-set_property(SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/../bios/generated/cdrtos_dispatch.c"
-    APPEND PROPERTY COMPILE_DEFINITIONS "CDI_MEMORY_HLE=$<BOOL:$<TARGET_PROPERTY:CDI_NATIVE_MEMORY>>")
-set_property(TARGET CdiRuntime PROPERTY CDI_NATIVE_MEMORY ${CDI_MEMORY_HLE})
-set_source_files_properties(src/cdi_service_jobs.c src/cdi_native.c PROPERTIES
+set_property(SOURCE "${CDI_BIOS_GENERATED_DIR}/cdrtos_dispatch.c"
+    DIRECTORY "${CDI_RUNTIME_SOURCE_DIR}" APPEND PROPERTY COMPILE_DEFINITIONS "CDI_MEMORY_HLE=$<BOOL:$<TARGET_PROPERTY:CDI_NATIVE_MEMORY>>")
+set_property(TARGET ${CDI_RUNTIME_TARGET} PROPERTY CDI_NATIVE_MEMORY ${CDI_MEMORY_HLE})
+set_source_files_properties(src/cdi_service_jobs.c src/cdi_native.c
+    TARGET_DIRECTORY ${CDI_RUNTIME_TARGET} PROPERTIES
     COMPILE_DEFINITIONS "CDI_SERVICE_HLE=$<BOOL:$<TARGET_PROPERTY:CDI_NATIVE_SERVICE>>")
-set_property(SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/../bios/generated/cdrtos_dispatch.c"
-    APPEND PROPERTY COMPILE_DEFINITIONS "CDI_SERVICE_HLE=$<BOOL:$<TARGET_PROPERTY:CDI_NATIVE_SERVICE>>")
-set_property(TARGET CdiRuntime PROPERTY CDI_NATIVE_SERVICE ${CDI_SERVICE_HLE})
-set_property(TARGET CdiRuntime PROPERTY CDI_NATIVE_STREAMING ${CDI_STREAMING_HLE})
-set_property(TARGET CdiRuntime PROPERTY CDI_NATIVE_BOARD ${CDI_BOARD_HLE})
-set_property(TARGET CdiRuntime PROPERTY CDI_NATIVE_GPU ${CDI_GPU_HLE})
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../bios/generated/bios_identity.h")
-    target_compile_definitions(CdiRuntime PRIVATE CDI_BIOS_IDENTITY_BUILD=1)
+set_property(SOURCE "${CDI_BIOS_GENERATED_DIR}/cdrtos_dispatch.c"
+    DIRECTORY "${CDI_RUNTIME_SOURCE_DIR}" APPEND PROPERTY COMPILE_DEFINITIONS "CDI_SERVICE_HLE=$<BOOL:$<TARGET_PROPERTY:CDI_NATIVE_SERVICE>>")
+set_property(TARGET ${CDI_RUNTIME_TARGET} PROPERTY CDI_NATIVE_SERVICE ${CDI_SERVICE_HLE})
+set_property(TARGET ${CDI_RUNTIME_TARGET} PROPERTY CDI_NATIVE_STREAMING ${CDI_STREAMING_HLE})
+set_property(TARGET ${CDI_RUNTIME_TARGET} PROPERTY CDI_NATIVE_BOARD ${CDI_BOARD_HLE})
+set_property(TARGET ${CDI_RUNTIME_TARGET} PROPERTY CDI_NATIVE_GPU ${CDI_GPU_HLE})
+if(EXISTS "${CDI_BIOS_GENERATED_DIR}/bios_identity.h")
+    target_compile_definitions(${CDI_RUNTIME_TARGET} PRIVATE CDI_BIOS_IDENTITY_BUILD=1)
 endif()
 if(EXISTS "${CDI_GAME_GENERATED_DIR}/module_manifest.c")
-    target_compile_definitions(CdiRuntime PRIVATE CDI_NATIVE_MODULES=1)
+    target_compile_definitions(${CDI_RUNTIME_TARGET} PRIVATE CDI_NATIVE_MODULES=1)
 endif()
 
-find_package(SDL2 CONFIG REQUIRED)
-target_link_libraries(CdiRuntime PRIVATE SDL2::SDL2)
+target_link_libraries(${CDI_RUNTIME_TARGET} PRIVATE SDL2::SDL2)
 
-# Keep local acceptance evidence bound to the inputs actually linked. This
-# sidecar contains hashes/paths only and is excluded from runtime archives.
-get_target_property(PROVENANCE_SOURCES CdiRuntime SOURCES)
-set(PROVENANCE_FILES "")
-foreach(SOURCE IN LISTS PROVENANCE_SOURCES)
-    get_filename_component(INPUT "${SOURCE}" ABSOLUTE BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
-    list(APPEND PROVENANCE_FILES "${INPUT}")
-endforeach()
-file(GLOB_RECURSE PROVENANCE_HEADERS CONFIGURE_DEPENDS
-    "${CMAKE_CURRENT_SOURCE_DIR}/include/*.h"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../common/*.h"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../external/m68k-recomp-core/common/*.h"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../recompiler/src/*.h"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../bios/generated/*.h"
-    "${CDI_GAME_GENERATED_DIR}/*.h")
-list(APPEND PROVENANCE_FILES ${PROVENANCE_HEADERS}
-    "${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../tools/build_provenance.cmake"
-    "${CMAKE_SOURCE_DIR}/CMakeLists.txt")
-if(EXISTS "${CDI_GAME_GENERATED_DIR}/module_sources.cmake")
-    list(APPEND PROVENANCE_FILES "${CDI_GAME_GENERATED_DIR}/module_sources.cmake")
-endif()
-set(PROVENANCE_INPUTS "${CMAKE_CURRENT_BINARY_DIR}/runtime-provenance-inputs.cmake")
-file(GENERATE OUTPUT "${PROVENANCE_INPUTS}" CONTENT
-    "set(PROVENANCE_FILES [==[${PROVENANCE_FILES}]==])\nset(PROVENANCE_COMPILER [==[${CMAKE_C_COMPILER};${CMAKE_C_COMPILER_ID};${CMAKE_C_COMPILER_VERSION}]==])\nset(PROVENANCE_OPTIONS [==[${CMAKE_BUILD_TYPE};${CMAKE_C_FLAGS};${CMAKE_C_FLAGS_RELEASE};scanout=${CDI_VIDEO_BACKEND};loader=${CDI_LOADER_BACKEND};drawing=${CDI_DRAWING_BACKEND};memory=${CDI_MEMORY_BACKEND};service=${CDI_SERVICE_BACKEND};streaming=${CDI_STREAMING_BACKEND};board=${CDI_BOARD_BACKEND};gpu=${CDI_GPU_BACKEND};$<TARGET_PROPERTY:CdiRuntime,COMPILE_DEFINITIONS>;$<TARGET_PROPERTY:CdiRuntime,COMPILE_OPTIONS>]==])\n")
-set_property(TARGET CdiRuntime APPEND PROPERTY LINK_DEPENDS
-    "${CMAKE_CURRENT_SOURCE_DIR}/../tools/build_provenance.cmake"
-    "${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt")
-add_custom_command(TARGET CdiRuntime POST_BUILD
-    COMMAND "${CMAKE_COMMAND}" "-DPROVENANCE_INPUTS=${PROVENANCE_INPUTS}"
-            "-DRUNTIME=$<TARGET_FILE:CdiRuntime>" -P
-            "${CMAKE_CURRENT_SOURCE_DIR}/../tools/build_provenance.cmake"
-    COMMENT "Recording linked runtime input hashes")
-if(WIN32)
-    add_custom_command(TARGET CdiRuntime POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                $<TARGET_FILE:SDL2::SDL2> $<TARGET_FILE_DIR:CdiRuntime>
-        COMMENT "Copying SDL2 runtime beside CdiRuntime")
-endif()
+set_target_properties(${CDI_RUNTIME_TARGET} PROPERTIES
+    CDI_ENGINE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}"
+    CDI_BIOS_DIR "${CDI_BIOS_GENERATED_DIR}"
+    CDI_MODULE_DIR "${CDI_GAME_GENERATED_DIR}"
+    CDI_BACKEND_IDENTITY "scanout=${CDI_VIDEO_BACKEND};loader=${CDI_LOADER_BACKEND};drawing=${CDI_DRAWING_BACKEND};memory=${CDI_MEMORY_BACKEND};service=${CDI_SERVICE_BACKEND};streaming=${CDI_STREAMING_BACKEND};board=${CDI_BOARD_BACKEND};gpu=${CDI_GPU_BACKEND}")
+set_source_files_properties(src/cdic.c TARGET_DIRECTORY ${CDI_RUNTIME_TARGET} PROPERTIES
+    COMPILE_DEFINITIONS "CDI_STREAMING_HLE=$<BOOL:$<TARGET_PROPERTY:CDI_NATIVE_STREAMING>>")
+set_source_files_properties(src/mcd212.c TARGET_DIRECTORY ${CDI_RUNTIME_TARGET} PROPERTIES
+    COMPILE_DEFINITIONS "CDI_BOARD_HLE=$<BOOL:$<TARGET_PROPERTY:CDI_NATIVE_BOARD>>")
+set_source_files_properties(src/cdi_frontend.c src/cdi_gpu.c TARGET_DIRECTORY ${CDI_RUNTIME_TARGET} PROPERTIES
+    COMPILE_DEFINITIONS "CDI_GPU_HLE=$<BOOL:$<TARGET_PROPERTY:CDI_NATIVE_GPU>>")
 
 # Debug server (debug_server.c): winsock on Windows, pthreads elsewhere.
 if(WIN32)
-    target_link_libraries(CdiRuntime PRIVATE ws2_32)
+    target_link_libraries(${CDI_RUNTIME_TARGET} PRIVATE ws2_32)
 else()
     find_package(Threads REQUIRED)
-    target_link_libraries(CdiRuntime PRIVATE Threads::Threads)
+    target_link_libraries(${CDI_RUNTIME_TARGET} PRIVATE Threads::Threads)
 endif()
+
+if(NOT CDI_DEFER_PROVENANCE)
+    cdirecomp_finalize_player(${CDI_RUNTIME_TARGET})
+endif()
+endif() # CDI_BUILD_RUNTIME
 
 include(CTest)
 if(BUILD_TESTING)

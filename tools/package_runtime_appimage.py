@@ -171,7 +171,7 @@ def fetch_tool(name: str, directory: Path) -> Path:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--product", choices=("cdirecomp", "hotelmario"), default="cdirecomp")
+    parser.add_argument("--product", default="CdiRuntime")
     parser.add_argument("--version", required=True)
     parser.add_argument("--runtime", type=Path, required=True)
     parser.add_argument("--apprun", type=Path, required=True)
@@ -179,13 +179,18 @@ def main() -> int:
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--notices", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--assets", type=Path)
+    parser.add_argument("--asset-manifest", type=Path)
+    parser.add_argument("--licenses", type=Path)
     parser.add_argument("--tools-dir", type=Path,
                         default=Path.home() / ".cache/recomp-appimage-tools")
     args = parser.parse_args()
     version = args.version.removeprefix("v")
     if not re.fullmatch(r"\d+\.\d+\.\d+", version):
         parser.error("version must use MAJOR.MINOR.PATCH")
-    product = "HotelMarioRecomp" if args.product == "hotelmario" else "CdiRuntime"
+    product = args.product
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+", product):
+        parser.error("product must be a plain file name")
     runtime = args.runtime.resolve(strict=True)
     if runtime.name != product:
         parser.error(f"runtime must be the native {product} target")
@@ -194,7 +199,7 @@ def main() -> int:
             parser.error(f"missing runtime resource: {path}")
     if args.out.exists():
         parser.error(f"output exists; select a fresh path: {args.out}")
-    audit_build_graph(runtime)
+    audit_build_graph(runtime, product)
     provenance = verify(runtime)
     audit_elf(runtime)
     directory = Path(tempfile.mkdtemp(prefix=f"appimage-{version}-", dir=runtime.parent))
@@ -208,6 +213,16 @@ def main() -> int:
     for source, name in ((args.readme, "README.md"), (args.config, "player.cfg.example"),
                          (args.notices, "THIRD-PARTY-NOTICES.md")):
         shutil.copy2(source, payload / name)
+    from package_runtime_release import collect_assets, collect_licenses
+    resources = {}
+    if args.assets:
+        resources.update(collect_assets(args.assets, args.asset_manifest))
+    if args.licenses:
+        resources.update(collect_licenses(args.licenses))
+    for name, source in resources.items():
+        destination = appdir / "usr/bin" / name
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
     (appdir / f"{product}.desktop").write_text(
         "[Desktop Entry]\nType=Application\n"
         f"Name={product}\nComment=CD-i LLE development preview\n"
@@ -243,6 +258,7 @@ def main() -> int:
     library_notices = collect_library_notices(appdir, runtime)
     dependency_notices = {item["system_notice"].removeprefix("/")
                           for item in library_notices.values()}
+    dependency_notices.update("usr/bin/" + name for name in resources)
     staged = audit_appdir(appdir, product, dependency_notices)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     output = args.out.resolve()

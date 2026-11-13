@@ -29,6 +29,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
+#ifdef _WIN32
+#include <direct.h>
+#define make_directory(p) _mkdir(p)
+#else
+#include <sys/stat.h>
+#define make_directory(p) mkdir(p, 0777)
+#endif
 
 /* CD-i system ROM is permanently mapped here (reset PC of the CDI 490/220 ROMs
  * is $004004B8 = base + $4B8). At reset the hardware aliases ROM to $000000 so
@@ -94,15 +102,17 @@ static bool fmgr_glue_implementation(const GenesisRom *rom,
 }
 
 int main(int argc, char *argv[]) {
-    if (argc < 2) {
-        fprintf(stderr, "Usage: CdiRecompBios <bios.rom> [--emit] [--game <cfg>] "
-                        "[--seeds <file>] [--dump-functions <file>]\n");
-        return 1;
+    if (argc < 2 || !strcmp(argv[1], "--help") || !strcmp(argv[1], "-h")) {
+        FILE *stream = argc < 2 ? stderr : stdout;
+        fprintf(stream, "Usage: CdiRecompBios <bios.rom> [--emit --out <directory>] "
+                        "[--game <cfg>] [--seeds <file>] [--dump-functions <file>]\n");
+        return argc < 2 ? 1 : 0;
     }
     const char *rom_path = argv[1];
     const char *game_path = NULL;
     const char *seeds_path = NULL;   /* flat hex list of extra discovery seeds */
     const char *dump_functions_path = NULL;
+    const char *output_dir = NULL;
     bool emit = false;
     for (int i = 2; i < argc; i++) {
         if      (!strcmp(argv[i], "--emit"))                  emit = true;
@@ -110,6 +120,28 @@ int main(int argc, char *argv[]) {
         else if (!strcmp(argv[i], "--seeds") && i + 1 < argc) seeds_path = argv[++i];
         else if (!strcmp(argv[i], "--dump-functions") && i + 1 < argc)
             dump_functions_path = argv[++i];
+        else if (!strcmp(argv[i], "--out") && i + 1 < argc) output_dir = argv[++i];
+        else {
+            fprintf(stderr, "[bios] unknown/incomplete option: %s\n", argv[i]);
+            return 1;
+        }
+    }
+    if (emit && (!output_dir || !*output_dir)) {
+        fprintf(stderr, "[bios] --emit requires --out <directory>\n");
+        return 1;
+    }
+    char out_full[4096], out_disp[4096], out_identity[4096];
+    if (emit) {
+        if (snprintf(out_full, sizeof out_full, "%s/cdrtos_full.c", output_dir) >= (int)sizeof out_full ||
+            snprintf(out_disp, sizeof out_disp, "%s/cdrtos_dispatch.c", output_dir) >= (int)sizeof out_disp ||
+            snprintf(out_identity, sizeof out_identity, "%s/bios_identity.h", output_dir) >= (int)sizeof out_identity) {
+            fprintf(stderr, "[bios] output path is too long\n");
+            return 1;
+        }
+        if (make_directory(output_dir) && errno != EEXIST) {
+            fprintf(stderr, "[bios] cannot create output directory %s: %s\n", output_dir, strerror(errno));
+            return 1;
+        }
     }
 
     /* ---- load ---- */
@@ -318,8 +350,6 @@ int main(int argc, char *argv[]) {
     AnnotationTable at = {0};
     if (dump_functions_path)
         codegen_set_dump_functions_path(dump_functions_path);
-    const char *out_full = "bios/generated/cdrtos_full.c";
-    const char *out_disp = "bios/generated/cdrtos_dispatch.c";
     bool ok = codegen_emit(&rom, &funcs, out_full, out_disp, &at, &cfg, false);
 
     codegen_diag_print_summary(stderr);
@@ -328,7 +358,7 @@ int main(int argc, char *argv[]) {
            ok ? "ok" : "FAILED", diag);
     printf("[CdiRecompBios] output: %s , %s\n", out_full, out_disp);
 
-    FILE *identity = fopen("bios/generated/bios_identity.h", "w");
+    FILE *identity = fopen(out_identity, "w");
     if (!identity) ok = false;
     else {
         if (!ok || diag) fprintf(identity, "#error BIOS generation failed; regenerate before building\n");

@@ -1,12 +1,12 @@
 /*
- * main.c — CdiRuntime entry point.
+ * main.c â€” CdiRuntime entry point.
  *
  * OS-first boot: link the recompiled CD-RTOS system ROM (bios/generated/*.c),
  * load the ROM image into the bus, seed the SCC68070 reset state from the
  * reset vector, and drive execution from the reset entry through the generated
  * dispatch. The runtime fails loud on the first unmodelled device/region (per
  * the no-stub discipline), so a boot run reports exactly how far the recompiled
- * OS got and what hardware it touched next — the first divergence to model.
+ * OS got and what hardware it touched next â€” the first divergence to model.
  */
 #define _CRT_SECURE_NO_WARNINGS
 #include "cdi_runtime.h"
@@ -17,6 +17,9 @@
 #include "cdi_media.h"
 #include "cdi_host_time.h"
 #include "player_config.h"
+#ifdef RECOMP_LAUNCHER
+#include "cdi_launcher.h"
+#endif
 #include "cdi_sha256.h"
 #ifdef CDI_BIOS_IDENTITY_BUILD
 #include "bios_identity.h"
@@ -32,6 +35,9 @@
 
 #ifndef CDI_PRODUCT_NAME
 #define CDI_PRODUCT_NAME "CdiRuntime"
+#endif
+#ifndef CDI_PRODUCT_VERSION
+#define CDI_PRODUCT_VERSION "development"
 #endif
 
 /* IKAT command $88 asserts the SCC68070 RESET input. It can arrive from deep
@@ -68,20 +74,22 @@ int main(int argc, char *argv[]) {
     /* Unbuffer stdout/stderr: a fail-loud fprintf followed by cdi_fault_hold()
      * (which blocks) or abort() would otherwise lose its message when output is
      * redirected to a file/pipe (fully buffered, never flushed). The runtime is
-     * a debug tool — immediate, ordered diagnostics matter more than throughput. */
+     * a debug tool â€” immediate, ordered diagnostics matter more than throughput. */
     setvbuf(stdout, NULL, _IONBF, 0);
     setvbuf(stderr, NULL, _IONBF, 0);
 
     const char *rom_path = NULL;
     const char *disc_path = NULL;
-    int port = 4380;   /* native; optional development oracle on +1 — see TCP.md */
+    int port = 4380;   /* native; optional development oracle on +1 â€” see TCP.md */
     int hold = 0;      /* keep the rings queryable after the run ends */
     int exit_on_stop = 0; /* diagnostic one-shot; normal runtime keeps devices live */
     int headless = 0;  /* deterministic tools and unattended environments */
     int player_quit = 0;
-    /* MC-CDI-016 (COSIM-SPEC.md §5): parsed unconditionally (even when built
+    int show_launcher = 0;
+    char selected_bios[512], selected_disc[512];
+    /* MC-CDI-016 (COSIM-SPEC.md Â§5): parsed unconditionally (even when built
      * with CDI_COSIM off) so the flag always correctly consumes its argument
-     * — otherwise the spec string would fall through to the `argv[i][0] !=
+     * â€” otherwise the spec string would fall through to the `argv[i][0] !=
      * '-'` branch below and get mistaken for rom_path. */
     const char *cosim_inject_spec = NULL;
     const char *cosim_session = "";
@@ -92,10 +100,20 @@ int main(int argc, char *argv[]) {
     int player_preferences_active;
 
     for (int i = 1; i < argc; i++) {
+        if (!strcmp(argv[i], "--help") || !strcmp(argv[i], "-h")) {
+            printf("Usage: %s <player.rom> --disc <game.cue> [--launcher|--no-launcher] [--headless] [--port N] [--stop-frame N]\n",argv[0]);
+            return 0;
+        }
+        if (!strcmp(argv[i], "--version")) {
+            printf("%s %s\n",CDI_PRODUCT_NAME,CDI_PRODUCT_VERSION);
+            return 0;
+        }
         if (!strcmp(argv[i], "--port") && i + 1 < argc) port = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--hold")) hold = 1;
         else if (!strcmp(argv[i], "--exit-on-stop")) exit_on_stop = 1;
         else if (!strcmp(argv[i], "--headless")) headless = 1;
+        else if (!strcmp(argv[i], "--launcher")) show_launcher = 1;
+        else if (!strcmp(argv[i], "--no-launcher")) show_launcher = -1;
         else if (!strcmp(argv[i], "--disc") && i + 1 < argc) disc_path = argv[++i];
         else if (!strcmp(argv[i], "--fault-hold")) g_hold_on_fault = 1;
         else if (!strcmp(argv[i], "--stop-seq") && i + 1 < argc) g_stop_seq = strtoull(argv[++i], NULL, 0);
@@ -105,39 +123,6 @@ int main(int argc, char *argv[]) {
         else if (!strcmp(argv[i], "--input-script") && i + 1 < argc) input_script_spec = argv[++i];
         else if (argv[i][0] != '-') rom_path = argv[i];
     }
-
-    printf("%s — Philips CD-i (SCC68070) static-recomp runtime\n",
-           CDI_PRODUCT_NAME);
-#if CDI_VIDEO_HLE
-    printf("[video] native span HLE scanout\n");
-#else
-    printf("[video] reference LLE scanout\n");
-#endif
-    if (!rom_path) {
-        fprintf(stderr, "usage: CdiRuntime <cdrtos.rom> [--disc image.cue] [--port N] [--hold] [--headless] [--exit-on-stop] [--stop-seq N] [--stop-frame N]\n"
-                        "                  [--cosim-inject <seq>:<ram|reg>:<idx>:<xorhex>]\n"
-                        "                  [--input-script <frame:mask,...>]\n"
-                        "  boots the recompiled CD-RTOS system ROM.\n"
-                        "  --hold: keep the process (and the debug rings) alive after\n"
-                        "          the run for post-mortem TCP inspection.\n"
-                        "  --exit-on-stop: diagnostic one-shot; exit at the first STOP\n"
-                        "          instead of advancing devices until an interrupt.\n"
-                        "  --headless: disable the SDL display and physical input frontend.\n"
-                        "  --disc: insert a single-track Mode-2 CUE/BIN image at power-on.\n"
-                        "  --cosim-inject: MC-CDI-016 fault injection (see COSIM-SPEC.md\n"
-                        "          §5); also settable via env CDI_COSIM_INJECT.\n"
-                        "  --input-script: deterministic dev input transitions applied\n"
-                        "          immediately after each named completed frame.\n");
-        return 1;
-    }
-#ifdef CDI_REQUIRE_DISC
-    if (!disc_path) {
-        fprintf(stderr,
-                "[cdi] %s requires both a CD-i BIOS and --disc <Hotel Mario.cue>\n",
-                CDI_PRODUCT_NAME);
-        return 1;
-    }
-#endif
 
     cdi_player_config_defaults(&player_config);
     player_preferences_active = !headless && !g_stop_seq && !g_stop_frame &&
@@ -175,6 +160,55 @@ int main(int argc, char *argv[]) {
             return 1;
         }
     }
+
+#ifdef RECOMP_LAUNCHER
+    if (player_preferences_active && (show_launcher < 0 || (!show_launcher && player_config.skip_launcher)) &&
+        player_config.bios_path[0] && player_config.disc_path[0]) {
+        if (!rom_path) rom_path=player_config.bios_path;
+        if (!disc_path) disc_path=player_config.disc_path;
+    }
+    if (player_preferences_active && show_launcher >= 0 && (!rom_path || show_launcher)) {
+        int result = cdi_launcher_run(rom_path,disc_path,selected_bios,sizeof selected_bios,
+                                     selected_disc,sizeof selected_disc,&player_config,player_config_path);
+        if(result)return result==1 ? 0 : 1;
+        rom_path=selected_bios;
+        disc_path=selected_disc;
+    }
+#endif
+    cdi_frontend_configure(&player_config);
+
+    printf("%s â€” Philips CD-i (SCC68070) static-recomp runtime\n",
+           CDI_PRODUCT_NAME);
+#if CDI_VIDEO_HLE
+    printf("[video] native span HLE scanout\n");
+#else
+    printf("[video] reference LLE scanout\n");
+#endif
+    if (!rom_path) {
+        fprintf(stderr, "usage: CdiRuntime <cdrtos.rom> [--disc image.cue] [--port N] [--hold] [--headless] [--exit-on-stop] [--stop-seq N] [--stop-frame N]\n"
+                        "                  [--cosim-inject <seq>:<ram|reg>:<idx>:<xorhex>]\n"
+                        "                  [--input-script <frame:mask,...>]\n"
+                        "  boots the recompiled CD-RTOS system ROM.\n"
+                        "  --hold: keep the process (and the debug rings) alive after\n"
+                        "          the run for post-mortem TCP inspection.\n"
+                        "  --exit-on-stop: diagnostic one-shot; exit at the first STOP\n"
+                        "          instead of advancing devices until an interrupt.\n"
+                        "  --headless: disable the SDL display and physical input frontend.\n"
+                        "  --disc: insert a single-track Mode-2 CUE/BIN image at power-on.\n"
+                        "  --cosim-inject: MC-CDI-016 fault injection (see COSIM-SPEC.md\n"
+                        "          Â§5); also settable via env CDI_COSIM_INJECT.\n"
+                        "  --input-script: deterministic dev input transitions applied\n"
+                        "          immediately after each named completed frame.\n");
+        return 1;
+    }
+#ifdef CDI_REQUIRE_DISC
+    if (!disc_path) {
+        fprintf(stderr,
+                "[cdi] %s requires both a CD-i BIOS and --disc <game.cue>\n",
+                CDI_PRODUCT_NAME);
+        return 1;
+    }
+#endif
 
     /* ---- load the system ROM ---- */
     FILE *f = fopen(rom_path, "rb");
@@ -253,7 +287,7 @@ int main(int argc, char *argv[]) {
     }
     cdi_input_reset();
     mcd212_reset();                 /* VDSC registers + canonical buffers */
-    g_cpu.A[7] = reset_ssp;         /* supervisor stack pointer (S=1 → A7 aliases SSP) */
+    g_cpu.A[7] = reset_ssp;         /* supervisor stack pointer (S=1 â†’ A7 aliases SSP) */
     g_cpu.SSP  = reset_ssp;         /* SSP shadow (used when a user->super swap restores A7) */
     g_cpu.PC   = reset_pc;
     g_cpu.SR   = 0x2700;            /* 68000 reset: S=1, IPL=7, T=0 */
@@ -291,16 +325,16 @@ int main(int argc, char *argv[]) {
     /* ---- drive execution from the reset entry ----
      * recomp_call_addr looks the entry up in the generated dispatch table and
      * runs it. With no device model yet this will fail loud at the first MMIO
-     * touch (or log a dispatch miss); that abort/log IS the result we want —
+     * touch (or log a dispatch miss); that abort/log IS the result we want â€”
      * the first thing the recompiled OS needs from the hardware. */
     printf("[cdi] entering recompiled CD-RTOS at $%08X ...\n", reset_pc);
     fflush(stdout);
 
     /* ---- top-level trampoline (MC-CDI-012) ----
      * The flat-call model returns control up the C stack on RTS, but the OS-9
-     * boot does NOT bottom out at the reset entry — it transitions to the shell
+     * boot does NOT bottom out at the reset entry â€” it transitions to the shell
      * via the dispatcher. Ways control reaches the loop body:
-     *   (a) g_redirect_pending — a JSR site detected a rewritten return (the
+     *   (a) g_redirect_pending â€” a JSR site detected a rewritten return (the
      *       dispatcher resuming a different process) and unwound every C frame
      *       uncleared; re-dispatch at C-depth ~0 so the new context isn't nested
      *       inside the abandoned one. Also seeds the very first dispatch (the
@@ -309,10 +343,10 @@ int main(int argc, char *argv[]) {
      *       holding a return address. That happens when a function was entered
      *       WITHOUT a mirroring C JSR (via the exception/dispatcher path), so no
      *       JSR site popped [A7]. The bare C `return` lands here while the guest
-     *       wants to resume at [A7]. Pop it and dispatch — exactly what the guest
+     *       wants to resume at [A7]. Pop it and dispatch â€” exactly what the guest
      *       RTS does. (This is the $406354 RTS -> $4040F0 wall.) A skip-RTS that
      *       set g_rte_pending also bubbles here; depth 0 is where that skip
-     *       resolves — its return target is [A7] (g_cpu.PC is the RTS's own stale
+     *       resolves â€” its return target is [A7] (g_cpu.PC is the RTS's own stale
      *       address), so follow [A7] and clear the flag before dispatching, or
      *       the fresh callee's first JSR site would wrongly see a return pending.
      * STOP enters a device-advance wait and resumes here on an eligible IRQ;
@@ -325,7 +359,7 @@ int main(int argc, char *argv[]) {
      * handler. The handler lives in RAM (the recompiler never saw it), so
      * dispatching g_cpu.PC routes through the hybrid interpreter, which runs the
      * handler, its RTE, and the resume in one shot before handing back to
-     * recompiled code — no g_rte_pending plumbing needed here. (Variables read
+     * recompiled code â€” no g_rte_pending plumbing needed here. (Variables read
      * after the longjmp are volatile per the setjmp/longjmp clobber rule.) */
     {
         volatile uint64_t last_insn = (uint64_t)-1;
@@ -344,7 +378,7 @@ int main(int argc, char *argv[]) {
 
         /* IRQ delivery landing pad (MC-CDI-007). recomp_take_irq() (called from
          * the per-instruction entry safepoint) builds the autovector frame,
-         * points g_cpu.PC at the OS-9 handler, and longjmps here — abandoning the
+         * points g_cpu.PC at the OS-9 handler, and longjmps here â€” abandoning the
          * recompiled DA-poll loop's C frame so the ISR does NOT run nested inside
          * it. Dispatch the handler at depth 0 like any other redirect; its RTE
          * pops the stacked resume PC and the loop follows [A7] back into the poll,
@@ -420,13 +454,13 @@ int main(int argc, char *argv[]) {
                 continue;
             } else if (g_rte_resume) {
                 /* A recompiled RTE/RTR unwound to here: the instruction already popped
-                 * SR/PC/format and g_cpu.PC holds the resume PC. Resume there —
+                 * SR/PC/format and g_cpu.PC holds the resume PC. Resume there â€”
                  * NOT at [A7] (that's the post-frame stack, not the return). */
                 g_rte_resume = 0;
                 target = g_cpu.PC & 0xFFFFFFu;
             } else {
                 /* (skip-)RTS or dispatcher resume: follow the guest return on
-                 * [A7]. A7 climbing above the boot SSP is NOT "guest done" — it
+                 * [A7]. A7 climbing above the boot SSP is NOT "guest done" â€” it
                  * is the OS-9 dispatcher switching to another task's (higher)
                  * stack (MOVE.L Dn,A7; push; RTS at $40637E/$406384). The OS
                  * never returns to nothing; only STOP (g_halted) or the
@@ -440,7 +474,7 @@ int main(int argc, char *argv[]) {
             if (g_native_insn_count == last_insn) {
                 if (++stuck > 100000u) {
                     fprintf(stderr, "[cdi] top-level trampoline made no progress over "
-                            "%u dispatches (last target $%06X) — aborting.\n", stuck, target);
+                            "%u dispatches (last target $%06X) â€” aborting.\n", stuck, target);
                     debug_dump_fault_trail("trampoline no-progress");
                     break;
                 }
@@ -460,15 +494,15 @@ int main(int argc, char *argv[]) {
         printf("[cdi] player requested shutdown after %llu instructions.\n",
                (unsigned long long)g_native_insn_count);
     else if (g_halted)
-        printf("[cdi] CPU halted (STOP) after %llu instructions — shell idle reached. "
+        printf("[cdi] CPU halted (STOP) after %llu instructions â€” shell idle reached. "
                "PC=$%08X SR=$%04X (--exit-on-stop).\n",
                (unsigned long long)g_native_insn_count, g_cpu.PC, g_cpu.SR);
     else
         printf("[cdi] top-level returned after %llu instructions "
-               "(A7=$%08X) — investigate.\n",
+               "(A7=$%08X) â€” investigate.\n",
                (unsigned long long)g_native_insn_count, g_cpu.A[7]);
     if (g_miss_count_any)
-        printf("[cdi] %u dispatch miss(es); last at $%08X — RULE 0a: resolve "
+        printf("[cdi] %u dispatch miss(es); last at $%08X â€” RULE 0a: resolve "
                "before other debugging.\n", g_miss_count_any, g_miss_last_addr);
 
     if (hold) {

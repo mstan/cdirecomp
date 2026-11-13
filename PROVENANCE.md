@@ -8,7 +8,7 @@ black-box validation tools.
 
 | Component | Independent implementation basis | Project evidence |
 |---|---|---|
-| 68000 decode, code generation, and interpreter | Author-owned `segagenesisrecomp` frontend ancestry; Motorola 68000 architecture and SCC68070 timing/exception documentation | `recompiler/PROVENANCE.txt`, `runner/tests/m68k_arith_test.c`, generated-code differential tests |
+| 68000 decode, code generation, and interpreter | Author-owned `segagenesisrecomp` frontend ancestry; Motorola 68000 architecture and SCC68070 timing/exception documentation | `external/m68k-recomp-core/PROVENANCE.md`, `runner/tests/m68k_arith_test.c`, generated-code differential tests |
 | SCC68070 exception frames, timers, interrupt controller, and UART | SCC68070 User Manual, especially exception processing and sections 2.13.1–2.13.12 | `runner/tests/periph_test.c`, BIOS boot and co-simulation gates |
 | DS1216 phantom clock/NVRAM | Analog Devices DS1216 data sheet: serial key, register layout, oscillator, BCD calendar, and SRAM pass-through | `runner/tests/cdi_nvram_test.c` |
 | MCD212 timing, control programs, and video | Philips CD-i Full Functional Specification / Green Book register and image-coding descriptions | `runner/tests/mcd212_video_test.c`, frame hashes, BIOS boot |

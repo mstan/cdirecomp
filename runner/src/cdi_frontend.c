@@ -35,11 +35,23 @@ typedef struct {
     uint64_t next_event_ms;
     int fullscreen;
     int mouse_captured;
+    uint32_t mouse_buttons;
+    float mouse_x_fraction, mouse_y_fraction;
     unsigned scale;
     int redraw;
 } Frontend;
 
+#ifndef CDI_PRODUCT_NAME
+#define CDI_PRODUCT_NAME "Philips CD-i"
+#endif
+
 static Frontend s;
+static CdiPlayerConfig options;
+static int options_ready;
+void cdi_frontend_configure(const CdiPlayerConfig *config) {
+    options = *config;
+    options_ready = 1;
+}
 
 static void close_controller(void) {
     if (s.controller) SDL_GameControllerClose(s.controller);
@@ -48,16 +60,21 @@ static void close_controller(void) {
 }
 
 static void open_first_controller(void) {
-    if (s.controller) return;
-    for (int i = 0; i < SDL_NumJoysticks(); i++) {
-        if (!SDL_IsGameController(i)) continue;
-        s.controller = SDL_GameControllerOpen(i);
-        if (s.controller) {
-            SDL_Joystick *joy = SDL_GameControllerGetJoystick(s.controller);
-            s.controller_id = SDL_JoystickInstanceID(joy);
-            return;
+    if(s.controller || options.input_source!=2)return;
+    int selected=-1,candidates=0,exact=0;
+    for(int i=0;i<SDL_NumJoysticks();i++) {
+        if(!SDL_IsGameController(i))continue;
+        char guid[40];
+        SDL_JoystickGetGUIDString(SDL_JoystickGetDeviceGUID(i),guid,sizeof guid);
+        if(options.gamepad_guid[0] && strcmp(guid,options.gamepad_guid))continue;
+        if(options.gamepad_instance && (uint32_t)SDL_JoystickGetDeviceInstanceID(i)+1u==options.gamepad_instance) {
+            selected=i;exact=1;break;
         }
+        selected=i;candidates++;
     }
+    if(selected<0 || (!exact && candidates!=1))return;
+    s.controller=SDL_GameControllerOpen(selected);
+    if(s.controller)s.controller_id=SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(s.controller));
 }
 
 static void set_fullscreen(int enabled) {
@@ -88,28 +105,28 @@ static int apply_mouse_capture(void) {
 static uint32_t input_mask(void) {
     const Uint8 *key = SDL_GetKeyboardState(NULL);
     uint32_t mask = 0;
-    if (key[SDL_SCANCODE_LEFT]  || key[SDL_SCANCODE_A]) mask |= CDI_INPUT_LEFT;
-    if (key[SDL_SCANCODE_UP]    || key[SDL_SCANCODE_W]) mask |= CDI_INPUT_UP;
-    if (key[SDL_SCANCODE_RIGHT] || key[SDL_SCANCODE_D]) mask |= CDI_INPUT_RIGHT;
-    if (key[SDL_SCANCODE_DOWN]  || key[SDL_SCANCODE_S]) mask |= CDI_INPUT_DOWN;
-    if (key[SDL_SCANCODE_RETURN] || key[SDL_SCANCODE_SPACE] ||
-        key[SDL_SCANCODE_Z]) mask |= CDI_INPUT_BTN1;
-    if (key[SDL_SCANCODE_BACKSPACE] || key[SDL_SCANCODE_X]) mask |= CDI_INPUT_BTN2;
-
-    if (s.controller) {
-        if (SDL_GameControllerGetButton(s.controller, SDL_CONTROLLER_BUTTON_DPAD_LEFT))
-            mask |= CDI_INPUT_LEFT;
-        if (SDL_GameControllerGetButton(s.controller, SDL_CONTROLLER_BUTTON_DPAD_UP))
-            mask |= CDI_INPUT_UP;
-        if (SDL_GameControllerGetButton(s.controller, SDL_CONTROLLER_BUTTON_DPAD_RIGHT))
-            mask |= CDI_INPUT_RIGHT;
-        if (SDL_GameControllerGetButton(s.controller, SDL_CONTROLLER_BUTTON_DPAD_DOWN))
-            mask |= CDI_INPUT_DOWN;
-        if (SDL_GameControllerGetButton(s.controller, SDL_CONTROLLER_BUTTON_A))
-            mask |= CDI_INPUT_BTN1;
-        if (SDL_GameControllerGetButton(s.controller, SDL_CONTROLLER_BUTTON_B))
-            mask |= CDI_INPUT_BTN2;
+    if (options.input_source == 1) {
+        const int defaults[6]={80,82,79,81,29,27};
+        const int extras[6]={SDL_SCANCODE_A,SDL_SCANCODE_W,SDL_SCANCODE_D,SDL_SCANCODE_S,SDL_SCANCODE_RETURN,SDL_SCANCODE_BACKSPACE};
+        for (int i=0;i<6;i++) {
+            int code=options.key_bind[i];
+            if ((code>0 && code<SDL_NUM_SCANCODES && key[code]) ||
+                (code==defaults[i] && (key[extras[i]] || (i==4 && key[SDL_SCANCODE_SPACE])))) mask |= 1u<<i;
+        }
     }
+    if (s.controller && options.input_source == 2) {
+        for (int i=0;i<6;i++) {
+            int binding=options.pad_bind[i],pressed=0;
+            if (binding>0 && binding<100 && binding-1<SDL_CONTROLLER_BUTTON_MAX)
+                pressed=SDL_GameControllerGetButton(s.controller,(SDL_GameControllerButton)(binding-1));
+            else if(binding>=100 && binding<1000 && (binding-100)/2<SDL_CONTROLLER_AXIS_MAX) {
+                int axis=SDL_GameControllerGetAxis(s.controller,(SDL_GameControllerAxis)((binding-100)/2));
+                pressed=((binding-100)&1) ? axis>16000 : axis < -16000;
+            }
+            if(pressed)mask |= 1u<<i;
+        }
+    }
+    if(options.input_source==1 && cdi_input_mouse_active())mask |= s.mouse_buttons;
     return mask;
 }
 
@@ -227,6 +244,9 @@ static void pump_audio(void) {
                     (sizeof(int16_t) * CDI_AUDIO_OUTPUT_CHANNELS);
     if (queued_frames >= CDI_AUDIO_OUTPUT_RATE / 4u) return;
     frames = cdi_audio_read_frames(pcm, 2048);
+    int volume=options.enable_audio ? options.volume : 0;
+    if(volume!=100)for(uint32_t i=0;i<frames*CDI_AUDIO_OUTPUT_CHANNELS;i++)
+        pcm[i]=(int16_t)((int32_t)pcm[i]*volume/100);
     if (frames && SDL_QueueAudio(s.audio_device, pcm,
                                 frames * sizeof(int16_t) *
                                 CDI_AUDIO_OUTPUT_CHANNELS) != 0)
@@ -234,8 +254,9 @@ static void pump_audio(void) {
 }
 
 int cdi_frontend_init(int capture_mouse) {
+    if(!options_ready)cdi_player_config_defaults(&options);
     SDL_SetMainReady();
-    SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "linear");
+    SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, options.linear_filter ? "linear" : "nearest");
 #if CDI_GPU_HLE
     if(!getenv("SDL_RENDER_DRIVER"))SDL_SetHint(SDL_HINT_RENDER_DRIVER,"opengl");
 #endif
@@ -260,9 +281,9 @@ int cdi_frontend_init(int capture_mouse) {
         fprintf(stderr, "[frontend] audio subsystem unavailable: %s\n",
                 SDL_GetError());
     }
-    s.window = SDL_CreateWindow("cdirecomp — Philips CD-i",
+    s.window = SDL_CreateWindow("cdirecomp â€” Philips CD-i",
                                 SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-                                768, 576, SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI |
+                                options.window_width, options.window_width * (options.fit_to_screen ? 9 : 12) / 16, SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI |
                                 (getenv("CDI_WINDOW_HIDDEN")?SDL_WINDOW_HIDDEN:0));
     if (!s.window) {
         fprintf(stderr, "[frontend] window creation failed: %s\n", SDL_GetError());
@@ -277,7 +298,7 @@ int cdi_frontend_init(int capture_mouse) {
         cdi_frontend_shutdown();
         return 0;
     }
-    SDL_RenderSetLogicalSize(s.renderer, 768, 576);
+    if(!options.fit_to_screen)SDL_RenderSetLogicalSize(s.renderer, 768, 576);
     SDL_RenderSetIntegerScale(s.renderer, SDL_FALSE);
     s.pixels = (uint32_t *)malloc((size_t)MCD212_VIDEO_MAX_WIDTH *
                                   MCD212_VIDEO_MAX_HEIGHT * sizeof(uint32_t));
@@ -287,6 +308,7 @@ int cdi_frontend_init(int capture_mouse) {
         return 0;
     }
     s.controller_id = -1;
+    if(options.fullscreen)set_fullscreen(1);
     s.scale=1;
     if(getenv("CDI_INTERNAL_SCALE")) {
         unsigned value=(unsigned)strtoul(getenv("CDI_INTERNAL_SCALE"),NULL,10);
@@ -298,7 +320,7 @@ int cdi_frontend_init(int capture_mouse) {
 #endif
     SDL_EventState(SDL_DROPFILE, SDL_ENABLE);
     open_first_controller();
-    cdi_input_mouse_configure(capture_mouse);
+    cdi_input_mouse_configure(capture_mouse && options.input_source==1);
     cdi_input_mouse_focus(
         (SDL_GetWindowFlags(s.window) & SDL_WINDOW_INPUT_FOCUS) != 0);
     if (!apply_mouse_capture()) {
@@ -325,17 +347,27 @@ int cdi_frontend_pump(void) {
             if (event.type == SDL_WINDOWEVENT &&
                 (event.window.event == SDL_WINDOWEVENT_FOCUS_GAINED ||
                  event.window.event == SDL_WINDOWEVENT_FOCUS_LOST)) {
+                if(event.window.event==SDL_WINDOWEVENT_FOCUS_LOST)s.mouse_buttons=0;
                 cdi_input_mouse_focus(
                     event.window.event == SDL_WINDOWEVENT_FOCUS_GAINED);
                 if (!apply_mouse_capture()) return 0;
             } else if (event.type == SDL_MOUSEMOTION) {
-                cdi_input_mouse_motion(event.motion.xrel, event.motion.yrel);
+                float scale=options.mouse_sensitivity/0.06f;
+                s.mouse_x_fraction+=event.motion.xrel*scale*(options.mouse_invert_x?-1.f:1.f);
+                s.mouse_y_fraction+=event.motion.yrel*scale*(options.mouse_invert_y?-1.f:1.f);
+                int dx=(int)s.mouse_x_fraction,dy=(int)s.mouse_y_fraction;
+                s.mouse_x_fraction-=dx;s.mouse_y_fraction-=dy;
+                cdi_input_mouse_motion(dx,dy);
             } else if (event.type == SDL_MOUSEBUTTONDOWN ||
                        event.type == SDL_MOUSEBUTTONUP) {
-                int button = event.button.button == SDL_BUTTON_LEFT ? 1 :
-                             event.button.button == SDL_BUTTON_RIGHT ? 2 : 0;
-                cdi_input_mouse_button(
-                    button, event.type == SDL_MOUSEBUTTONDOWN);
+                int button=event.button.button==SDL_BUTTON_LEFT ? 0 :
+                           event.button.button==SDL_BUTTON_RIGHT ? 1 :
+                           event.button.button==SDL_BUTTON_MIDDLE ? 2 : -1;
+                if(button>=0 && options.mouse_bind[button]>=0 && options.mouse_bind[button]<6) {
+                    uint32_t mask=1u<<options.mouse_bind[button];
+                    if(event.type==SDL_MOUSEBUTTONDOWN)s.mouse_buttons |= mask;
+                    else s.mouse_buttons &= ~mask;
+                }
             } else if (event.type == SDL_KEYDOWN && !event.key.repeat) {
                 if (event.key.keysym.scancode == SDL_SCANCODE_ESCAPE) return 0;
                 if(event.key.keysym.scancode==SDL_SCANCODE_F8) {
@@ -354,7 +386,7 @@ int cdi_frontend_pump(void) {
                 open_first_controller();
             } else if (event.type == SDL_DROPFILE) {
                 if (cdi_media_mount(event.drop.file))
-                    SDL_SetWindowTitle(s.window, "cdirecomp — Philips CD-i — disc inserted");
+                    SDL_SetWindowTitle(s.window, "cdirecomp â€” Philips CD-i â€” disc inserted");
                 SDL_free(event.drop.file);
             }
         }

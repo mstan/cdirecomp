@@ -11,7 +11,7 @@
  * prefix (genesis_stop_until_interrupt, genesis_reset_devices,
  * genesis_log_dispatch_miss). They are implemented in the runner under those
  * names for now; neutralising them to platform-agnostic names is part of the
- * shared-m68k-module extraction (TODO.md MC-CDI-009).
+ * shared frontend ABI; the instruction implementation lives in m68k-recomp-core.
  */
 #pragma once
 #include <stdint.h>

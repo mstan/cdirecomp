@@ -8,3 +8,13 @@ capture_mouse = false
 # Sample host-local civil time once before the first guest instruction.
 # Guest writes and emulated-cycle advancement remain authoritative afterward.
 sync_host_on_startup = false
+
+[display]
+fit_to_screen = true
+window_width = 1024
+fullscreen = 0
+linear_filter = false
+
+[audio]
+volume = 100
+enabled = true

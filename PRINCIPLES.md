@@ -27,7 +27,7 @@ than those; CD-i just adds an OS layer.
   subsystem boundaries do not constrain that replacement. Match observable
   inputs, outputs, guest state, events, errors and native-save effects against
   LLE, and qualify actual built-game performance per affected game. Production
-  HLE need not execute LLE alongside it. See `docs/HLE-BURNDOWN.md`.
+  HLE need not execute LLE alongside it. See `docs/VALIDATION.md`.
 - Fabricated syscall results and drifting C-side shadow kernel state remain
   prohibited. An HLE replacement is an implementation of the complete contract,
   rather than a plausible-success stub. Keep authoritative state in guest RAM.
