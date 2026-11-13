@@ -40,11 +40,10 @@ int main(void) {
     CHECK(cdi_input_mouse_active());
     cdi_input_mouse_motion(300, -300);
     cdi_input_mouse_button(1, 1);
-    CHECK(cdi_input_get() == (CDI_INPUT_LEFT | CDI_INPUT_BTN1));
+    CHECK(cdi_input_get() == CDI_INPUT_LEFT);
     cdi_input_acknowledge_mouse_buttons();
     cdi_input_mouse_button(2, 1);
-    CHECK(cdi_input_get() ==
-          (CDI_INPUT_LEFT | CDI_INPUT_BTN1 | CDI_INPUT_BTN2));
+    CHECK(cdi_input_get() == CDI_INPUT_LEFT);
     cdi_input_acknowledge_mouse_buttons();
 
     cdi_input_take_relative(&x, &y, -128, 127, -128, 127);
@@ -57,6 +56,12 @@ int main(void) {
     CHECK(x == 46 && y == -44);
     cdi_input_pending_relative(&x, &y);
     CHECK(x == 0 && y == 0);
+
+    /* Movement reaches its destination before the queued click edges. */
+    CHECK(cdi_input_get() == (CDI_INPUT_LEFT | CDI_INPUT_BTN1));
+    cdi_input_acknowledge_mouse_buttons();
+    CHECK(cdi_input_get() == (CDI_INPUT_LEFT | CDI_INPUT_BTN1 | CDI_INPUT_BTN2));
+    cdi_input_acknowledge_mouse_buttons();
 
     cdi_input_mouse_button(1, 0);
     CHECK(cdi_input_get() == (CDI_INPUT_LEFT | CDI_INPUT_BTN2));
@@ -78,6 +83,12 @@ int main(void) {
     cdi_input_mouse_button(1, 0);
     CHECK(cdi_input_get() == CDI_INPUT_BTN1);
     cdi_input_acknowledge_mouse_buttons();
+    CHECK(cdi_input_get() == 0);
+    cdi_input_acknowledge_mouse_buttons();
+    cdi_input_mouse_button_mask(CDI_INPUT_RIGHT, 1);
+    CHECK(cdi_input_get() == CDI_INPUT_RIGHT);
+    cdi_input_acknowledge_mouse_buttons();
+    cdi_input_mouse_focus(0);
     CHECK(cdi_input_get() == 0);
     cdi_input_acknowledge_mouse_buttons();
     if (failures) return 1;

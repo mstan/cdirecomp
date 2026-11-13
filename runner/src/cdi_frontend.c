@@ -35,7 +35,7 @@ typedef struct {
     uint64_t next_event_ms;
     int fullscreen;
     int mouse_captured;
-    uint32_t mouse_buttons;
+    int capture_mouse;
     float mouse_x_fraction, mouse_y_fraction;
     unsigned scale;
     int redraw;
@@ -83,7 +83,7 @@ static void set_fullscreen(int enabled) {
 }
 
 static int apply_mouse_capture(void) {
-    int wanted = cdi_input_mouse_active();
+    int wanted = s.capture_mouse && cdi_input_mouse_active();
     if (wanted == s.mouse_captured) return 1;
     if (wanted) {
         if (SDL_SetRelativeMouseMode(SDL_TRUE) != 0) {
@@ -126,8 +126,34 @@ static uint32_t input_mask(void) {
             if(pressed)mask |= 1u<<i;
         }
     }
-    if(options.input_source==1 && cdi_input_mouse_active())mask |= s.mouse_buttons;
     return mask;
+}
+
+static void mouse_motion(int x, int y, int dx, int dy) {
+    if (!cdi_input_mouse_active()) return;
+    Mcd212VideoCursorState cursor;
+    mcd212_video_debug_cursor(&cursor);
+    if (!s.capture_mouse && cursor.enabled && s.texture_width && s.texture_height) {
+        int width, height, pending_x, pending_y;
+        SDL_RenderGetLogicalSize(s.renderer, &width, &height);
+        /* SDL has already transformed events when a logical size is set. */
+        if (!width || !height) SDL_GetWindowSize(s.window, &width, &height);
+        if (width <= 0 || height <= 0 || x < 0 || y < 0 || x >= width || y >= height) return;
+        int target_x = (int)((int64_t)x * s.texture_width / width);
+        int target_y = (int)((int64_t)y * s.texture_height / height);
+        if (options.mouse_invert_x) target_x = s.texture_width - 1 - target_x;
+        if (options.mouse_invert_y) target_y = s.texture_height - 1 - target_y;
+        cdi_input_pending_relative(&pending_x, &pending_y);
+        cdi_input_mouse_motion(target_x - cursor.x - pending_x,
+                               target_y - cursor.y - pending_y);
+    } else {
+        float scale = options.mouse_sensitivity / 0.06f;
+        s.mouse_x_fraction += dx * scale * (options.mouse_invert_x ? -1.f : 1.f);
+        s.mouse_y_fraction += dy * scale * (options.mouse_invert_y ? -1.f : 1.f);
+        dx = (int)s.mouse_x_fraction; dy = (int)s.mouse_y_fraction;
+        s.mouse_x_fraction -= dx; s.mouse_y_fraction -= dy;
+        cdi_input_mouse_motion(dx, dy);
+    }
 }
 
 static int ensure_texture(uint16_t width, uint16_t height) {
@@ -256,6 +282,7 @@ static void pump_audio(void) {
 int cdi_frontend_init(int capture_mouse) {
     if(!options_ready)cdi_player_config_defaults(&options);
     SDL_SetMainReady();
+    SDL_SetHint(SDL_HINT_MOUSE_FOCUS_CLICKTHROUGH, "1");
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, options.linear_filter ? "linear" : "nearest");
 #if CDI_GPU_HLE
     if(!getenv("SDL_RENDER_DRIVER"))SDL_SetHint(SDL_HINT_RENDER_DRIVER,"opengl");
@@ -320,7 +347,8 @@ int cdi_frontend_init(int capture_mouse) {
 #endif
     SDL_EventState(SDL_DROPFILE, SDL_ENABLE);
     open_first_controller();
-    cdi_input_mouse_configure(capture_mouse && options.input_source==1);
+    s.capture_mouse = capture_mouse;
+    cdi_input_mouse_configure(options.enable_mouse && options.input_source==1);
     cdi_input_mouse_focus(
         (SDL_GetWindowFlags(s.window) & SDL_WINDOW_INPUT_FOCUS) != 0);
     if (!apply_mouse_capture()) {
@@ -338,6 +366,15 @@ int cdi_frontend_pump(void) {
         s.next_event_ms = now + 4;
         while (SDL_PollEvent(&event)) {
             if (event.type == SDL_QUIT) return 0;
+            /* SDL stays initialized across the launcher handoff. Its destroyed
+             * window must not change this player's focus or controls. */
+            Uint32 window_id = SDL_GetWindowID(s.window);
+            if ((event.type == SDL_WINDOWEVENT && event.window.windowID != window_id) ||
+                (event.type == SDL_MOUSEMOTION && event.motion.windowID != window_id) ||
+                ((event.type == SDL_MOUSEBUTTONDOWN || event.type == SDL_MOUSEBUTTONUP) &&
+                    event.button.windowID != window_id) ||
+                ((event.type == SDL_KEYDOWN || event.type == SDL_KEYUP) &&
+                    event.key.windowID != window_id)) continue;
             if(event.type==SDL_RENDER_DEVICE_RESET || event.type==SDL_RENDER_TARGETS_RESET) {
                 if(event.type==SDL_RENDER_DEVICE_RESET)cdi_render_profile_context_lost();
                 cdi_gpu_reset(event.type==SDL_RENDER_DEVICE_RESET);s.gpu_presented=NULL;s.redraw=1;s.shown_content=0;
@@ -347,17 +384,11 @@ int cdi_frontend_pump(void) {
             if (event.type == SDL_WINDOWEVENT &&
                 (event.window.event == SDL_WINDOWEVENT_FOCUS_GAINED ||
                  event.window.event == SDL_WINDOWEVENT_FOCUS_LOST)) {
-                if(event.window.event==SDL_WINDOWEVENT_FOCUS_LOST)s.mouse_buttons=0;
                 cdi_input_mouse_focus(
                     event.window.event == SDL_WINDOWEVENT_FOCUS_GAINED);
                 if (!apply_mouse_capture()) return 0;
             } else if (event.type == SDL_MOUSEMOTION) {
-                float scale=options.mouse_sensitivity/0.06f;
-                s.mouse_x_fraction+=event.motion.xrel*scale*(options.mouse_invert_x?-1.f:1.f);
-                s.mouse_y_fraction+=event.motion.yrel*scale*(options.mouse_invert_y?-1.f:1.f);
-                int dx=(int)s.mouse_x_fraction,dy=(int)s.mouse_y_fraction;
-                s.mouse_x_fraction-=dx;s.mouse_y_fraction-=dy;
-                cdi_input_mouse_motion(dx,dy);
+                mouse_motion(event.motion.x, event.motion.y, event.motion.xrel, event.motion.yrel);
             } else if (event.type == SDL_MOUSEBUTTONDOWN ||
                        event.type == SDL_MOUSEBUTTONUP) {
                 int button=event.button.button==SDL_BUTTON_LEFT ? 0 :
@@ -365,8 +396,8 @@ int cdi_frontend_pump(void) {
                            event.button.button==SDL_BUTTON_MIDDLE ? 2 : -1;
                 if(button>=0 && options.mouse_bind[button]>=0 && options.mouse_bind[button]<6) {
                     uint32_t mask=1u<<options.mouse_bind[button];
-                    if(event.type==SDL_MOUSEBUTTONDOWN)s.mouse_buttons |= mask;
-                    else s.mouse_buttons &= ~mask;
+                    if(event.type==SDL_MOUSEBUTTONDOWN) mouse_motion(event.button.x,event.button.y,0,0);
+                    cdi_input_mouse_button_mask(mask,event.type==SDL_MOUSEBUTTONDOWN);
                 }
             } else if (event.type == SDL_KEYDOWN && !event.key.repeat) {
                 if (event.key.keysym.scancode == SDL_SCANCODE_ESCAPE) return 0;

@@ -5,6 +5,7 @@
 
 typedef struct CdiPlayerConfig {
     int capture_mouse;
+    int enable_mouse;
     int sync_host_on_startup;
     int fit_to_screen;
     int window_width;

@@ -25,12 +25,14 @@ int main(void) {
     loaded.sync_host_on_startup = 1;
     CHECK(cdi_player_config_load(path, &loaded) == 0);
     CHECK(loaded.capture_mouse == 0);
+    CHECK(loaded.enable_mouse == 1);
     CHECK(loaded.sync_host_on_startup == 0);
     CHECK(loaded.fit_to_screen == 1);
     CHECK(loaded.volume == 100);
     CHECK(loaded.skip_launcher == 0);
 
     written.capture_mouse = 1;
+    written.enable_mouse = 0;
     written.sync_host_on_startup = 1;
     written.fit_to_screen = 0;
     written.volume = 37;
@@ -42,6 +44,7 @@ int main(void) {
     CHECK(cdi_player_config_save(path, &written));
     CHECK(cdi_player_config_load(path, &loaded) == 1);
     CHECK(loaded.capture_mouse == 1);
+    CHECK(loaded.enable_mouse == 0);
     CHECK(loaded.sync_host_on_startup == 1);
     CHECK(loaded.fit_to_screen == 0);
     CHECK(loaded.volume == 37);

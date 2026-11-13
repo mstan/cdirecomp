@@ -34,6 +34,7 @@ static int parse_bool(const char *text, int *value) {
 void cdi_player_config_defaults(CdiPlayerConfig *config) {
     memset(config, 0, sizeof *config);
     config->capture_mouse = 0;
+    config->enable_mouse = 1;
     config->sync_host_on_startup = 0;
     config->fit_to_screen = 1;
     config->window_width = 1024;
@@ -98,6 +99,8 @@ int cdi_player_config_load(const char *path, CdiPlayerConfig *config) {
 
         if (!strcmp(section, "input") && !strcmp(key, "capture_mouse")) {
             if (!parse_bool(value, &config->capture_mouse)) goto malformed;
+        } else if (!strcmp(section, "input") && !strcmp(key, "enable_mouse")) {
+            if (!parse_bool(value, &config->enable_mouse)) goto malformed;
         } else if (!strcmp(section, "rtc") &&
                    !strcmp(key, "sync_host_on_startup")) {
             if (!parse_bool(value, &config->sync_host_on_startup)) goto malformed;
@@ -173,9 +176,11 @@ int cdi_player_config_save(const char *path, const CdiPlayerConfig *config) {
             "# cdirecomp player preferences (persistent, not per-title)\n"
             "[input]\n"
             "capture_mouse = %s\n\n"
+            "enable_mouse = %s\n\n"
             "[rtc]\n"
             "sync_host_on_startup = %s\n\n",
             config->capture_mouse ? "true" : "false",
+            config->enable_mouse ? "true" : "false",
             config->sync_host_on_startup ? "true" : "false");
     fprintf(file, "[display]\nfit_to_screen = %s\nwindow_width = %d\nfullscreen = %d\nlinear_filter = %s\n\n"
                   "[audio]\nvolume = %d\nenabled = %s\n\n"
