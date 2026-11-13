@@ -10,6 +10,7 @@ static atomic_uint frontend_input;
 enum { MOUSE_BUTTON_QUEUE_CAPACITY = 256 };
 
 static atomic_uint mouse_physical_buttons;
+static atomic_uint mouse_report_buttons;
 static uint32_t mouse_button_queue[MOUSE_BUTTON_QUEUE_CAPACITY];
 static atomic_uint mouse_button_read;
 static atomic_uint mouse_button_write;
@@ -52,6 +53,7 @@ void cdi_input_reset(void) {
     atomic_store_explicit(&base_input, 0, memory_order_relaxed);
     atomic_store_explicit(&frontend_input, 0, memory_order_relaxed);
     atomic_store_explicit(&mouse_physical_buttons, 0, memory_order_relaxed);
+    atomic_store_explicit(&mouse_report_buttons, 0, memory_order_relaxed);
     atomic_store_explicit(&mouse_button_read, 0, memory_order_relaxed);
     atomic_store_explicit(&mouse_button_write, 0, memory_order_relaxed);
     atomic_store_explicit(&relative_x, 0, memory_order_relaxed);
@@ -73,8 +75,11 @@ uint32_t cdi_input_get(void) {
     result |= atomic_load_explicit(&frontend_input,memory_order_acquire);
     unsigned read = atomic_load_explicit(&mouse_button_read, memory_order_acquire);
     unsigned write = atomic_load_explicit(&mouse_button_write, memory_order_acquire);
-    if (read != write)
+    if (read != write && !atomic_load_explicit(&relative_x, memory_order_acquire) &&
+                         !atomic_load_explicit(&relative_y, memory_order_acquire))
         result |= mouse_button_queue[read % MOUSE_BUTTON_QUEUE_CAPACITY];
+    else if (read != write)
+        result |= atomic_load_explicit(&mouse_report_buttons, memory_order_acquire);
     else
         result |= atomic_load_explicit(&mouse_physical_buttons,
                                        memory_order_acquire);
@@ -109,10 +114,12 @@ int cdi_input_mouse_active(void) {
 }
 
 static void release_mouse_state(void) {
-    if (atomic_load_explicit(&mouse_physical_buttons, memory_order_acquire)) {
-        cdi_input_mouse_button(1, 0);
-        cdi_input_mouse_button(2, 0);
-    }
+    /* Discard unreported clicks on focus loss. The next IKAT sample sees
+     * zero and releases any buttons already reported to the guest. */
+    atomic_store_explicit(&mouse_physical_buttons, 0, memory_order_release);
+    atomic_store_explicit(&mouse_report_buttons, 0, memory_order_release);
+    atomic_store_explicit(&mouse_button_read,
+        atomic_load_explicit(&mouse_button_write, memory_order_acquire), memory_order_release);
     cdi_input_clear_relative();
 }
 
@@ -133,10 +140,15 @@ void cdi_input_mouse_motion(int x, int y) {
 void cdi_input_mouse_button(int button, int pressed) {
     uint32_t bit = button == 1 ? CDI_INPUT_BTN1 :
                    button == 2 ? CDI_INPUT_BTN2 : 0;
+    cdi_input_mouse_button_mask(bit, pressed);
+}
+
+void cdi_input_mouse_button_mask(uint32_t bit, int pressed) {
     uint32_t before;
     uint32_t after;
     unsigned read;
     unsigned write;
+    bit &= allowed_input;
     if (!bit) return;
     if (pressed && !cdi_input_mouse_active()) return;
     before = atomic_load_explicit(&mouse_physical_buttons, memory_order_acquire);
@@ -158,6 +170,10 @@ void cdi_input_mouse_button(int button, int pressed) {
 void cdi_input_acknowledge_mouse_buttons(void) {
     unsigned read = atomic_load_explicit(&mouse_button_read, memory_order_relaxed);
     unsigned write = atomic_load_explicit(&mouse_button_write, memory_order_acquire);
-    if (read != write)
+    if (read != write && !atomic_load_explicit(&relative_x, memory_order_acquire) &&
+                         !atomic_load_explicit(&relative_y, memory_order_acquire)) {
+        atomic_store_explicit(&mouse_report_buttons,
+            mouse_button_queue[read % MOUSE_BUTTON_QUEUE_CAPACITY], memory_order_release);
         atomic_store_explicit(&mouse_button_read, read + 1, memory_order_release);
+    }
 }

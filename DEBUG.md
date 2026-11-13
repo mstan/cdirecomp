@@ -1,58 +1,14 @@
-# DEBUG LOOP (execution contract)
+# Debugging contract
 
-All inspection goes through the TCP debug server and the always-on ring
-buffers (see TCP.md). No printf debugging; no arm-trace-then-run; no
-pause/step to "sync" native and oracle. Free-run, then query the rings.
+Use the native TCP server and always-on rings; see TCP.md. Optional external emulators are black-box behavioral comparators. Hardware specifications, the original guest binary and author-owned source are the implementation authorities.
 
-## RULE 0 — Tool validation (first use)
+1. Identify the actual engine/core/game commits, generated inputs, configuration and executable.
+2. Check native dispatch misses before investigating downstream behavior.
+3. Align native and reference runs by a guest event, instruction sequence or completed field rather than host wall time.
+4. Compare state and walk backwards to the first divergence. Trace the writer or executed edge that introduced it.
+5. Classify the defect: shared instruction semantics, discovery/emission, runtime/timing, memory/OS state, device behavior or game metadata.
+6. Fix the source or generator input, regenerate and exercise the affected behavior. Never patch generated guest C.
 
-On first use of any tool (Ghidra, the disc parser, the decoder, a TCP command),
-cross-check its output against another source and confirm structure + content.
-Unvalidated tool output invalidates all reasoning built on it.
+Relevant CD-i boundaries include exception/TRAP return PCs, OS-9 module relocation, MCD212 control/scanout, CIAP sectors/XA and IKAT input. Record expected/actual state and the first differing instruction/event in private issue evidence.
 
-## RULE 0a — Dispatch-miss check (every run, before anything else)
-
-`call_by_address` logs a dispatch miss when no generated function exists at a
-target. A miss means an entire subroutine was skipped — a silent game-breaking
-bug. Resolve all misses (discover the function, fix the finder/loader) before
-debugging anything else.
-
-## THE LOOP
-
-1. **Sync** — define what "the same point in execution" means across native and
-   oracle. Not wall-frame number alone; use a hardware/OS event (VSYNC count,
-   OS-9 call count, sector-read count).
-2. **Dump state** from the ring buffer on both sides.
-3. **Diff** — find the bytes/registers that differ.
-4. **First divergence** — walk the ring backwards to the FIRST frame/block where
-   they diverge. Later differences are consequences.
-5. **Trace the writer / executed edge** — for a state bug, find the instruction
-   that wrote the wrong value; for a control-flow bug, the edge that was taken.
-6. **Classify** — discovery/codegen, runtime/timing, memory/bus, OS-9 HLE,
-   device (MCD212/CDIC/SLAVE), or game metadata.
-7. **Fix the generator/runtime** — never the generated C, never a one-off cfg
-   hint. Fix the class.
-8. **Regenerate → build → run → measure → commit** with concrete numbers.
-
-If any step is skipped → STOP and restart.
-
-## CD-i first-divergence ladder
-
-Because CD-i boots through CD-RTOS, expect the earliest divergences here, in
-order:
-
-1. **OS-9 loader / `TRAP #0` HLE** — wrong relocation, wrong service result,
-   wrong errno in D1. Trace the exact OS-9 call (cdrtos.c logs name + regs).
-2. **Memory model / MMU** — module loaded at the wrong base, or an MMU mapping
-   not modelled. The bus aborts with the exact address.
-3. **Device programming** — MCD212 register the game writes before video comes
-   up; CDIC sector request; SLAVE input poll. Each device aborts loud with the
-   register touched.
-4. **Timing / interrupts** — display-line IRQ pacing, CDIC data-ready IRQ.
-
-## When documenting a finding, state at minimum
-
-target behavior · oracle used (CeDImu TCP / Ghidra / disc) · sync point · diff
-(subsystem, address, expected, actual) · first divergence (frame/block index,
-not an eyeball) · writer (module + PC + call path) · classification · minimal
-generator/runtime fix · re-test plan. Missing a section → STOP.
+Use isolated disposable profiles and saves in automated work; mute speaker output while retaining audio emulation. Observe/input through TCP without moving or activating desktop windows. Never open native save-file dialogs during QA. Native saves and settings must survive cleanup; older save-state compatibility is not required.

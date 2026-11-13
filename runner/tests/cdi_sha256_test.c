@@ -21,5 +21,19 @@ int main(void) {
     memset(million,'a',1000000);
     failures+=check(million,1000000,
         "cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0");
+    const char *path="sha256-test-input.tmp";
+    const size_t sizes[]={0,3,55,56,63,64,16383,16384,16385,1000000};
+    for(unsigned i=0;i<sizeof sizes/sizeof sizes[0];i++) {
+        FILE *file=fopen(path,"wb");
+        if(!file){free(million);return 1;}
+        if(fwrite(million,1,sizes[i],file)!=sizes[i])failures++;
+        fclose(file);
+        uint8_t expected[32],actual[32];
+        cdi_sha256(million,sizes[i],expected);
+        if(!cdi_sha256_file(path,actual) || memcmp(expected,actual,32))failures++;
+    }
+    remove(path);
+    uint8_t absent[32];
+    if(cdi_sha256_file(path,absent))failures++;
     free(million);return failures?1:0;
 }

@@ -51,5 +51,25 @@ int main(void) {
     slave_increment_time(1.0);
     CHECK(remaining()==4);
     response(0xb0,0x0e);
+    /* A complete window click must follow a large pointer move through the
+     * real bounded 25-ms packets, then preserve separate press/release edges. */
+    cdi_input_reset();
+    cdi_input_mouse_configure(1);
+    cdi_input_mouse_focus(1);
+    cdi_input_mouse_motion(300,100);
+    cdi_input_mouse_button(1,1);
+    cdi_input_mouse_button(1,0);
+    int moved_x=0,moved_y=0;
+    for(int report=0;report<5;report++) {
+        slave_increment_time(25000000.0);
+        uint8_t header=slave_read(CDI_SLAVE_BASE+9,1);
+        uint8_t x=slave_read(CDI_SLAVE_BASE+9,1);
+        uint8_t y=slave_read(CDI_SLAVE_BASE+9,1);
+        CHECK(slave_read(CDI_SLAVE_BASE+9,1)==0);
+        moved_x+=(int8_t)((x&63u)|((header&3u)<<6));
+        moved_y+=(int8_t)((y&63u)|((header&12u)<<4));
+        CHECK(!!(header&0x20u)==(report==3));
+        if(report>=3)CHECK(moved_x==300 && moved_y==100);
+    }
     return failures?1:0;
 }

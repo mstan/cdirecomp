@@ -10,10 +10,10 @@
  *
  * Design (mirrors psxrecomp's "interpreter parallels the codegen" insight,
  * minus the JIT Genesis doesn't need):
- *   - It REUSES the recompiler's own decoder (recompiler/src/m68k_decoder.c),
+ *   - It REUSES the recompiler's own decoder (external/m68k-recomp-core/common/m68k_decoder.c),
  *     so operand/EA/immediate parsing is parity-by-construction with the
  *     static C emitter.
- *   - Its per-mnemonic semantics MIRROR recompiler/src/code_generator.c
+ *   - Its per-mnemonic semantics MIRROR external/m68k-recomp-core/profiles/scc68070/code_generator.c
  *     exactly (same flag formulas, same EA math, same size masking).
  *   - It operates on the SAME runtime ABI the generated C uses: the global
  *     g_cpu (M68KState) and the m68k_read/write{8,16,32} bus.

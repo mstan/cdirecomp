@@ -1,0 +1,20 @@
+# Consumer entry point. Generated BIOS/modules are always supplied by the game.
+set(CDIRECOMP_SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/..")
+function(cdirecomp_add_game target)
+    cmake_parse_arguments(GAME "" "NAME;BIOS_DIR;MODULE_DIR" "" ${ARGN})
+    if(NOT GAME_NAME OR NOT GAME_BIOS_DIR OR NOT GAME_MODULE_DIR)
+        message(FATAL_ERROR "cdirecomp_add_game requires NAME, BIOS_DIR and MODULE_DIR")
+    endif()
+    find_package(SDL2 CONFIG REQUIRED)
+    add_executable(${target})
+    set(CDI_BUILD_RUNTIME ON)
+    set(CDI_DEFER_PROVENANCE ON)
+    set(CDI_RUNTIME_TARGET "${target}")
+    set(CDI_BIOS_GENERATED_DIR "${GAME_BIOS_DIR}")
+    set(CDI_GAME_GENERATED_DIR "${GAME_MODULE_DIR}")
+    add_subdirectory("${CDIRECOMP_SOURCE_DIR}/runner" "${CMAKE_CURRENT_BINARY_DIR}/cdirecomp-runtime")
+    set_target_properties(${target} PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+    target_compile_definitions(${target} PRIVATE
+        CDI_REQUIRE_DISC=1 CDI_PRODUCT_NAME="${GAME_NAME}")
+endfunction()

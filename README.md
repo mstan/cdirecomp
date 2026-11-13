@@ -1,223 +1,44 @@
-# cdirecomp — a Philips CD-i static recompiler
+# cdirecomp
 
-> ### ⚠️ Very early development
-> This project boots the real Philips CD-i **system ROM** as native code and can
-> run the early stages of *Hotel Mario* through the real OS-9 drivers.
-> Normal-speed input has cleared **Hotel 1 Stages 1–3**, reaching Stage 4.
-> Full campaigns, bosses, the ending and correct save restoration remain
-> unverified. Expect rough edges, missing
-> features, incomplete hardware coverage, and breaking changes. This is a
-> research project shared in the open, not a finished product — and it is a
-> static recompiler, **not an emulator**.
+A Philips CD-i static recompiler and native runtime. It translates SCC68070 / 68000-family machine code into portable C and executes the real recompiled CD-RTOS / OS-9 system ROM with CD-i hardware models.
 
-**cdirecomp** is a **static recompiler** for the **Philips CD-i**. It lifts the
-console's **Motorola 68000-family** machine code (CPU: **SCC68070**) into
-portable **C**, then links that generated C against a hand-written runtime that
-re-creates the rest of the machine — the **MCD212** video decoder, the
-**CDIC / CIAP** CD + XA-audio path, and the **SLAVE / IKAT** input controller —
-and runs the console's **CD-RTOS / OS-9** operating system on top.
-
-It shares the two-tier structure and spirit of the sibling projects
-[`nesrecomp`](https://github.com/mstan), `snesrecomp`, `segagenesisrecomp`, and
-`psxrecomp`.
+This is development software. Hotel Mario is the first standalone game consumer; complete campaigns and correct game-save restoration remain unverified.
 
 <p align="center">
-  <img src="docs/media/shell-play-cdi.png" width="47%" alt="CD-i player shell with Play CD-I button">
-  &nbsp;
-  <img src="docs/media/rtc-time-date.png" width="47%" alt="CD-i Time and Date settings screen">
-</p>
-<p align="center">
-  <img src="docs/media/philips-bumper.png" width="47%" alt="Philips Interactive Media bumper">
-  &nbsp;
-  <img src="docs/media/hotel-mario-title.png" width="47%" alt="Hotel Mario title card running through cdirecomp">
-</p>
-<p align="center">
-  <sub>Real CD-RTOS player shell · Time/Date settings · the Philips Interactive Media
-  bumper · and <i>Hotel Mario</i> reaching its title card through the real
-  recompiled system ROM.</sub>
+  <img src="docs/media/shell-play-cdi.png" width="47%" alt="Native CD-i player shell">
+  <img src="docs/media/rtc-time-date.png" width="47%" alt="CD-i clock settings">
 </p>
 
-## Philosophy: faithful reference, static execution and native jobs
+## Engine and game projects
 
-The guiding inspiration for cdirecomp is to be **LLE (low-level emulation) and
-static / native-first**:
+This repository owns the CD-i compiler, machine runtime, generated-code ABI, component tests and reusable developer tools. The shared instruction frontend is pinned in `external/m68k-recomp-core`.
 
-- **Faithful LLE reference and qualified native HLE.** The whole **CD-RTOS
-  system ROM is recompiled and executed** as native C. Current OS-9 calls
-  dispatch into that kernel, with authoritative state in guest RAM. Complete
-  native jobs can replace expensive work across existing subsystem boundaries
-  when they satisfy the LLE contract and pass built-game performance checks.
-  Fabricated OS results and shadow kernel state remain prohibited.
-- **Static, not interpreted.** The 68000 code is translated **ahead of time to
-  C** and compiled to a native binary. A clean-room interpreter is kept only as
-  the correctness floor for RAM-resident / not-yet-statically-promoted code.
+[HotelMarioRecomp](https://github.com/mstan/HotelMarioRecomp) owns its game manifest, observed module-entry catalog, launcher, generated BIOS/modules, builds and releases. Game projects pin this engine as a root submodule. No game, BIOS, disc image or generated guest code is distributed here.
 
-### Why CD-i is unusual
+## Build and test the engine
 
-The Genesis runs a bare-metal 68000 cartridge; **CD-i does not.** A CD-i title
-is a Green Book **Mode-2 CD** whose data track holds a CD-i/ISO-9660 file
-system. The program is a set of **OS-9/68000 relocatable modules** (sync word
-`0x4AFC`) that **CD-RTOS** — a real-time OS based on Microware OS-9/68K — loads
-and relocates into RAM at run time, reaching the system through `TRAP #0`
-system calls. So cdirecomp recompiles and executes the whole player **system
-ROM first**, then lets the game boot on top of it.
+Requirements: Git, CMake 3.20+, Ninja, a C11 compiler, Python 3.11+, and SDL2 development files.
 
-## Current status
-
-What works today:
-
-- **Boots the real CD-RTOS system ROM** (user-supplied) to its interactive
-  **player shell** — navigation, the Time/Date and storage settings UIs, media
-  insert/eject, and persistence — running as native recompiled code.
-- **Hotel Mario boot and early gameplay.** From the shell you can *Play CD-I* a
-  user-supplied *Hotel Mario (USA)* disc; CD-RTOS loads the title, the Philips
-  Interactive Media bumper plays with decoded XA audio, and the game reaches its
-  **title card** and one-player gameplay. Intro background changes now follow
-  the disc's file-wide trigger events. Windowed input and buffered XA playback
-  reach gameplay through the real OS-9 drivers. Normal-speed controller input
-  cleared Hotel 1 Stages 1–3 on the indexed LLE build. A separate seeded
-  two-player build reached Stage 3 for Mario and Stage 5 for Luigi. These are
-  partial playthrough observations using ordinary game input.
-- **Owner playtest feedback (2026-10-09).** Basic gameplay and the title-screen
-  background are reported working well. Minor visual flickering remains;
-  its cause has not been investigated.
-- **Static native OS-9 modules.** The disc frontend validates file extents,
-  header parity and CRC, then emits relocatable C with instruction resume maps.
-  Hotel Mario supplies 174 distinct executable images. The runtime binds a
-  loaded image by its full SHA-256 and revokes that binding on overlapping
-  RAM writes. Uncovered code uses the clean-room interpreter. An indexed,
-  bounded coverage ledger retains executed offsets for offline promotion.
-- **Recorded checks.** All six compiler and eleven runtime component checks
-  passed. The latest indexed build passed 30/30 normal-speed headless cold
-  boots to the exact title; the preceding build also passed 30/30 windowed
-  boots. The latest windowed batches ended early and remain failed.
-- **Original-game persistence observed.** A named save survived a normal
-  window close and appeared in the restore menu after a cold boot. Restoring
-  the correct active stage still needs validation.
-- **Real-time clock (RTC) on Windows.** The runtime can seed the CD-i's DS1216
-  real-time clock from your **Windows host clock** once at startup (opt-in), and
-  the player's on-screen **Time & Date** settings screen is functional.
-- **Working mouse control on Windows.** The host mouse drives the CD-i pointer
-  directly through the runtime's IKAT input model — **including inside Hotel
-  Mario**, not just the shell.
-- **Clean-room device models** for the MCD212 video pipeline (bitmap, CLUT,
-  RGB555, DYUV, RL7/RL3, mosaic, transparency/matte compositing, cursor), the
-  CDIC/CIAP CD + XA audio path, and IKAT input — rewritten from hardware
-  documentation, with an optional local emulator used only as a black-box
-  behavioral comparator during development.
-
-What is **not** done yet:
-
-- **Minor visual flickering**, reported during the owner's manual playtest and
-  tracked as `beads-ssy9.1`.
-- **Full-playthrough certification remains open.** All hotels, bosses,
-  campaign cutscenes, both complete player modes and the ending need legitimate
-  input-driven validation. Earlier stream-restart and death/restart failures
-  were corrected, but three complete attract circuits are not yet certified:
-  older long runs overflowed their coverage capture, and the latest DirectSound
-  run ended before its required capture.
-- **Current windowed reliability, audio and performance acceptance.** The
-  latest windowed cold-boot batches exited before completion. Long gameplay
-  also recorded PCM drops with SDL's dummy consumer. Audio listening quality
-  and sustained real-time performance remain unverified.
-- **Save restoration and release acceptance.** Fresh Hotel Mario v0.0.2
-  Windows ZIP and Linux AppImage packages passed packaging audits and short
-  normal-speed boots to the exact title screen. These preview builds include
-  the indexed coverage ledger; complete campaigns remain unverified.
-- Broader title compatibility beyond the current Hotel Mario bring-up.
-- Unexercised I2C/MMU paths and additional exception cases remain platform
-  backlog, driven by real applications as they are brought up.
-
-The 2026-10-09 checkpoint is committed for default-branch integration.
-LLE remains the default build. The active HLE campaign adds an explicitly
-selected native scanout/frame-publication backend. Its first qualified bounded
-Hotel Mario gameplay workload used 23.0–26.0% less process CPU per field across
-three alternating pairs, with identical complete RAM, CPU/device/audio state
-and all 13,000 completed frames. This is a software-scanout result on the
-recorded Windows host under background load; it does not certify other games,
-all gameplay or a hardware presentation backend. See
-[the HLE burndown](docs/HLE-BURNDOWN.md) for raw evidence and remaining work.
-
-See [ISSUES.md](ISSUES.md) for the tested/untested matrix, exact build identities,
-evidence paths, Beads references and resume notes. `TODO.md`, `PLAN.md`, and
-`BIOS-CLOSEOUT.md` cover the roadmap and BIOS/player-shell milestone evidence.
-
-## What you must supply
-
-cdirecomp ships **no copyrighted material** — no BIOS ROM, no disc images, and
-no game-derived generated code. To run anything you must provide, from your own
-legally dumped media:
-
-- A CD-i player **system ROM** (e.g. a 512 KiB `cdi490a.rom`).
-- A CD-i title as a raw **Mode-2 `.cue` + `.bin`** image.
-
-## Build
-
-Toolchain: **CMake** + a **C11** compiler + the **SDL2** development package.
-Builds with Visual Studio 17 2022, and is also verified with MinGW gcc + Ninja.
-
-```powershell
-# Recompiler (CdiRecomp) — 68000 frontend + CD-i disc/module inventory
-cmake -S recompiler -B build/recompiler -G Ninja -DCMAKE_BUILD_TYPE=Release
-cmake --build build/recompiler -j
-
-# Recompile the CD-RTOS system ROM to C (emit generated BIOS)
-build/recompiler/CdiRecompBios.exe bios/cdi490a.rom --emit
-
-# Recompile Hotel Mario's executable OS-9 modules from your own disc.
-# named-offset32 explicitly opts into this game's Subr export-table layout.
-build/recompiler/CdiRecomp.exe "path/to/Hotel Mario (USA).cue" --emit --out hotelmario/generated --subr-exports named-offset32 --module-seeds hotelmario/module-seeds.txt
-
-# Runtime (CdiRuntime) — hardware models + native/interpreted guest execution
-cmake -S runner -B build/runner-release -G Ninja -DCMAKE_BUILD_TYPE=Release
-cmake --build build/runner-release -j
+```sh
+git submodule update --init --recursive
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel 2
+ctest --test-dir build --output-on-failure
 ```
 
-## Run
+The default build needs no BIOS or disc. It builds both recompilers and synthetic/component tests. Building a player requires explicitly supplied generated BIOS sources.
 
-```powershell
-# Inventory a CD-i disc: tracks, volume descriptor, OS-9 modules
-build/recompiler/CdiRecomp.exe "path/to/Game (Region).cue"
+## Documentation
 
-# Boot the user-supplied system ROM to the player shell
-build/runner-release/CdiRuntime.exe bios/cdi490a.rom
+- [Build and generation](docs/BUILDING.md)
+- [Game project integration](docs/GAME_PROJECT_SETUP.md)
+- [Architecture](docs/ARCHITECTURE.md)
+- [Validation boundaries](docs/VALIDATION.md)
+- [Debugging](DEBUG.md) and [TCP interface](TCP.md)
+- [Runtime instructions](RUNTIME-README.md)
+- [Source provenance](PROVENANCE.md) and [third-party notices](THIRD-PARTY-NOTICES.md)
 
-# Boot with a Mode-2 disc mounted; click "Open" then "Play CD-I" in the shell
-build/runner-release/CdiRuntime.exe bios/cdi490a.rom --disc "path/to/Game.cue"
-```
-
-**Controls:** the **mouse** moves the CD-i pointer (and clicks its buttons);
-arrows/WASD also move it; Enter/Space/Z is button 1; Backspace/X is button 2;
-F11 or Alt+Enter toggles fullscreen; Esc exits. A standard game controller maps
-D-pad/A/B. Dropping a `.cue`/`.bin` onto the window mounts media live.
-
-### Persistent player preferences
-
-A normal run creates `player.cfg` in SDL's per-user preference folder (its path
-is printed at startup). Two opt-in preferences, both **off by default**:
-
-```ini
-[input]
-capture_mouse = true          ; hide + capture the host cursor while focused
-
-[rtc]
-sync_host_on_startup = true   ; seed the CD-i clock from host time once at boot
-```
-
-`capture_mouse` maps relative host-mouse motion and the left/right buttons to
-the CD-i pointer and buttons 1/2; focus loss or Esc releases it immediately.
-`sync_host_on_startup` copies host-local time into the DS1216 only before the
-first guest instruction — it never continuously re-syncs. A normal run also
-maintains `nvram.bin` (the DS1216's battery-backed SRAM) beside `player.cfg`.
-
-## Provenance & third-party code
-
-The 68000 frontend descends from the author's own `segagenesisrecomp`; the CD-i
-device models are clean-room rewrites from hardware specifications. No
-third-party emulator source is used in the recompiler or runtime. An optional
-CeDImu checkout may be used locally as a black-box behavioral oracle only — it is
-git-ignored and never committed, packaged, or required. See `PROVENANCE.md` and
-`THIRD-PARTY-NOTICES.md` (SDL2).
+Engineering work is tracked in the central Beads database. Keep session logs, private communications and transient investigation records outside the source repository.
 
 ## License
 

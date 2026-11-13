@@ -434,6 +434,9 @@ void slave_debug_state(uint8_t registers[15], uint8_t remaining[4],
 
 static void emit_pointer_packet(void) {
     uint32_t input = cdi_input_get();
+    /* A click follows all movement already queued by its SDL event. Sample
+     * and acknowledge before draining this report's bounded motion payload. */
+    cdi_input_acknowledge_mouse_buttons();
     uint32_t directions = input & (CDI_INPUT_LEFT | CDI_INPUT_UP |
                                     CDI_INPUT_RIGHT | CDI_INPUT_DOWN);
     uint32_t buttons_changed = (input ^ ikat.previous_input) &
@@ -476,7 +479,6 @@ static void emit_pointer_packet(void) {
         publish_and_interrupt(CHANNEL_A, packet, sizeof packet);
     }
     ikat.previous_input = input;
-    cdi_input_acknowledge_mouse_buttons();
 }
 
 void slave_increment_time(double nanoseconds) {

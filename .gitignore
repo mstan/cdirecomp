@@ -38,3 +38,16 @@ __pycache__/
 .vscode/
 *.user
 Thumbs.db
+
+# Local state, generated output and analysis artifacts
+/generated/
+/private/
+*.gpr
+*.rep/
+*.AppImage
+*.zip
+*.log
+/player.cfg
+/nvram.bin
+/bios/generated/
+/hotelmario/

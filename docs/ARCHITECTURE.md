@@ -1,108 +1,23 @@
-# ARCHITECTURE.md — how cdirecomp fits together
+# Architecture
 
-Two binaries plus an oracle, the same two-tier shape as every sibling recomp.
+## Compilation and execution
 
-```
-   CD-RTOS ROM ──► CdiRecompBios ──► bios/generated/cdrtos_{full,dispatch}.c
-   (user-provided)  (recompiler)         (recompiled OS-9 kernel as C)
-                                               │
-                                               ▼
-   runner/src/* (hand-written CD-i machine) + generated C ──► CdiRuntime
-                                               │
-                                               ▼
-                          boots the recompiled OS, fails loud at the
-                          first unmodelled device  ◄──diff── CeDImu (oracle)
-```
+`CdiRecompBios` loads a user-supplied CD-RTOS system ROM, discovers entry points and emits native C plus a byte-identity header. `CdiRecomp` inventories a raw Mode-2 disc, validates OS-9 modules and emits position-independent native module bodies and a source manifest.
 
-## Recompiler (`recompiler/`, builds `CdiRecomp` / `CdiRecompBios`)
+The shared disc/module parser and byte-image adapter live in `common/`; production players do not compile compiler drivers or the flat-cartridge test parser.
 
-The 68000 frontend, copied from segagenesisrecomp (PROVENANCE.txt) and since
-extended for CD-i. Pipeline: `rom_parser`/`disc_parser` → `function_finder`
-(reachability from reset + seeds) → `m68k_decoder` → `m68k_validator` →
-`code_generator` (per-instruction C, cycle-probed via clown68000). Output is
-self-compiling C: every function becomes `void func_XXXXXX(void)`, plus a
-dispatch table mapping guest address → function. Unknown opcode → loud failure,
-never a stub. Branch-proven overlapping entries share canonical bodies, while
-the CD-i async resume map routes every emitted instruction PC back to its owner.
-For OS-9, configured `TRAP #0` scanning skips the inline service word and keeps
-the post-RTE continuation in that same caller CFG. `main_cdi_bios.c` drives the
-flat-ROM (BIOS) path;
-`main_cdi.c` the disc/module path.
+The SCC68070 frontend comes from the pinned clean-room `m68k-recomp-core` submodule. The engine supplies CD-i image/configuration adapters and disc/module handling. Generated C includes the runtime ABI in `runner/include/cdi_runtime.h`; synthetic fixtures compile against that same contract.
 
-## Runner (`runner/`, builds `CdiRuntime`)
+The native player executes the real recompiled OS-9 kernel. The kernel owns loading, linking, scheduling and guest state. Loaded module bindings use complete image SHA-256 identities, with invalidation on overlapping RAM writes. Uncovered code uses the clean-room fallback interpreter.
 
-The hand-written CD-i machine the generated C links against. Contract:
-`runner/include/cdi_runtime.h` (the generated↔runner ABI) and
-`runner/include/debug_server.h` (the runtime-internal debug surface).
+## Machine and host layers
 
-- `cdi_bus.c` — the memory model: RAM banks, ROM window, MMIO routing. The ONE
-  place generated code reaches memory (m68k_read/write*). Unmapped → loud abort.
-- `runtime.c` — CPU-state ABI, the SCC68070 exception model (faithful CeDImu
-  port: frame push + RAM vector-table dispatch), dispatch-miss accounting,
-  flat-call trampolines, the per-block hook.
-- `mcd212.c mcd212_video.c cdic.c slave.c periph.c` — hardware models. MCD212
-  owns line/control timing while its clean-room video module decodes and
-  atomically publishes canonical ARGB frames. Each device fails loud on an
-  unmodelled register rather than faking a value.
-- `cdi_frontend.c` — SDL presentation and physical input. It is a read-only
-  frame consumer and publishes only the transport-neutral IKAT input mask.
-- `cdi_media.c` — synchronized CUE/BIN ownership and sector reads. IKAT observes
-  mount/eject generations on emulated time; CIAP will consume the same sectors.
-- `debug_server.c` — always-on ring buffers + threaded TCP server (below).
-- `main.c` — loads the ROM, seeds SCC68070 reset state, drives execution from
-  the reset entry, holds open for inspection with `--hold`.
+The runtime models the SCC68070 address space, interrupts/peripherals, MCD212 video timing and scanout, MCD221 CIAP media/XA audio, IKAT input and DS1216 clock/NVRAM. `cdi_frontend.c` presents completed frames and routes physical input; it does not synthesize guest results.
 
-## Observability (the spine — read DEBUG.md, TCP.md)
+Complete native jobs provide qualified alternatives for scanout, loader verification, drawing preparation, memory operations, selected services, streaming, stopped-board progression and raster presentation. Each retains a separately selectable LLE implementation. Backend identity is a build setting; correctness and performance acceptance are per workload and per game.
 
-The runtime also supports `-DCDI_VIDEO_BACKEND=LLE` (default) or `HLE`.
-The native frame job combines source/matte spans with contribution,
-transparency, composition, exact frame identity, retained display storage and
-content-based frontend copying/upload. Register/control sequencing, guest
-memory and field/event timing stay authoritative. It retains the same decoded
-plane/verdict diagnostics and canonical frame hashes as the reference.
-Unchanged images reuse their exact hash and texture content while field
-generation and presentation/redraw cadence continue. Backend selection changes
-only the implementation/startup objects, rather than the generated CPU code.
-The differential component target links separate reference/native machines;
-the production HLE path does not run the reference beside each job.
+## Repository boundaries
 
-Always-on, queried after the fact; never arm-then-run.
+The engine owns generic compiler/runtime behavior and component checks. A game repository pins the engine and shared launcher, owns title facts and generation outputs, and builds its own named player target through `cmake/CdiGame.cmake`. Neither repository distributes firmware or disc bytes.
 
-- **Execution-trace ring** (262144 entries): every instruction's PC + full
-  register file, captured from a hook the recompiler emits at instruction ENTRY
-  (`debug_trace_block()`, right after the guest-PC store). Entry sampling is
-  deliberate: one in-order sample per instruction, JSR/BSR included (a hook at
-  instruction END dives into the callee before sampling, desyncing the stream
-  from the oracle). This is the trail that turns "aborted at $X" into "here are
-  the instructions that led there" — and the basis of first-divergence diffing.
-- **Frame ring** (36000 entries): per-frame snapshot (grows with the runtime).
-- **Fault trail**: every abort site (`bus_fault`, illegal opcode, movec) dumps
-  the ring tail to stderr before dying — the executed path into the crash.
-- **TCP server** (127.0.0.1:4380; oracle +1): threaded, answers while the run
-  executes. `ping status video_state video_frame get_registers read_mem trace
-  emu_ikat_state dispatch_miss_info quit`.
-  Client: `tools/cdi_debug.py`. RULE 0a gate: `tools/check_dispatch_misses.py`.
-
-## Oracle (`oracle/` + `external/CeDImu`)
-
-Independent C++ CD-i emulator — behavioral ground truth. `oracle/cdi_oracle.cpp`
-links CeDImu's wxWidgets-free core library (`external/CeDImu/src/CDI` builds a
-standalone `CeDImu` static lib; only the GUI needs wx), boots the same ROM
-(`CDI::NewCDI(Boards::AutoDetect, …)` → Mono-IV), single-steps the SCC68070
-(`m_cpu.Run(false)`) capturing per-instruction `{currentPC, registers}`, and
-serves the SAME TCP surface as the native runtime on :4381. So
-`tools/first_divergence.py` pages both rings from seq 0 and reports the first PC
-mismatch — DEBUG.md's first-divergence loop, automated. For literal instruction
-semantics the oracle is Ghidra over the OS-9 module (68000 mode).
-
-**Build quirk:** the oracle is C++23 and must be configured with the **mingw64
-cmake** (`C:/msys64/mingw64/bin/cmake.exe`), not the devkitPro cmake that may be
-first on PATH (it mangles absolute Windows compiler paths). In the sandbox, also
-set `TMP`/`TEMP` to a writable dir (e.g. `build/tmp`) — gcc's default temp is
-`C:\Windows`. Both are one-time environment quirks, not project config.
-
-## Build order (OS-first)
-
-1. `CdiRecompBios bios/<rom> --emit` → `bios/generated/*.c`
-2. build `CdiRuntime` (links the generated OS) → boot, diff vs CeDImu
-3. only once the shell boots: recompile the game (`cdi_hotel`, level modules)
+Production runtime packages use explicit dependency/asset allowlists. Optional oracle development code is isolated and excluded. See [provenance](../PROVENANCE.md), [game setup](GAME_PROJECT_SETUP.md), and [validation](VALIDATION.md).

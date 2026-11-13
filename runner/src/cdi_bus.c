@@ -51,7 +51,7 @@ static void bus_fault(const char *op, uint32_t addr, int bits) {
     if (recomp_bus_error(addr)) return;        /* unreachable: longjmp on success */
 
     fprintf(stderr, "[bus] UNMAPPED %s%d @ $%08X (PC=$%08X) — region not modelled "
-                    "(see TODO.md MC-CDI-004)\n", op, bits, addr, g_cpu.PC);
+                    "(unimplemented MMU access)\n", op, bits, addr, g_cpu.PC);
     /* Fail loud WITH exact CPU state: which register holds the bad address tells
      * a memory-sizing probe (computed/boundary address) apart from a divergence
      * (a null/garbage pointer dereferenced), per DEBUG.md first-divergence. */

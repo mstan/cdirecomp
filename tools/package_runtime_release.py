@@ -12,10 +12,16 @@ import sys
 import zipfile
 
 
-ALLOWED_IMPORTS = {"kernel32.dll", "msvcrt.dll", "ws2_32.dll", "sdl2.dll"}
+ALLOWED_IMPORTS = {
+    "kernel32.dll", "msvcrt.dll", "ws2_32.dll", "user32.dll", "gdi32.dll",
+    "advapi32.dll", "comdlg32.dll", "shell32.dll", "ole32.dll", "oleaut32.dll",
+    "opengl32.dll", "winmm.dll", "imm32.dll", "version.dll", "setupapi.dll",
+    "dwmapi.dll", "shlwapi.dll", "combase.dll", "ucrtbase.dll", "ntdll.dll",
+    "d2d1.dll", "dwrite.dll", "windowscodecs.dll", "winspool.drv", "dxgi.dll",
+}
 FORBIDDEN_MARKERS = (b"cedimu", b"clown68000", b"cdioracle", b"cdi_oracle")
 FORBIDDEN_BUILD_MARKERS = (
-    "cedimu", "clown68000", "clowncommon", "cdi_oracle", "oracle/cdi_oracle",
+    "cedimu", "clown68000", "clowncommon", "cdi_oracle", "oracle/cdi_oracle", "recompiler/src/",
 )
 FORBIDDEN_SUFFIXES = {
     ".rom", ".bin", ".cue", ".iso", ".map", ".obj", ".o", ".pdb",
@@ -35,10 +41,15 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def audit_runtime(runtime: Path) -> None:
-    objdump = shutil.which("objdump")
-    if not objdump:
-        fail("objdump is required to audit the PE architecture and imports")
+def pe_dump_tool() -> str:
+    tool = shutil.which("objdump") or shutil.which("llvm-objdump")
+    if not tool:
+        fail("objdump or llvm-objdump is required to audit PE architecture and imports")
+    return tool
+
+
+def audit_runtime(runtime: Path, dependency_names: set[str]) -> None:
+    objdump = pe_dump_tool()
     result = subprocess.run(
         [objdump, "-f", "-p", str(runtime)],
         check=True,
@@ -47,13 +58,16 @@ def audit_runtime(runtime: Path) -> None:
         text=True,
     )
     lowered = result.stdout.lower()
-    if "pei-x86-64" not in lowered:
+    if "pei-x86-64" not in lowered and not (
+            "file format coff-x86-64" in lowered and
+            re.search(r"magic\s+020b\s+\(pe32\+\)", lowered)):
         fail(f"{runtime.name} is not a Windows x86-64 PE executable")
     imports = {
         match.group(1).lower()
         for match in re.finditer(r"DLL Name:\s*([^\s]+)", result.stdout)
     }
-    unexpected = sorted(imports - ALLOWED_IMPORTS)
+    unexpected = sorted(name for name in imports - ALLOWED_IMPORTS - dependency_names
+                        if not name.startswith(("api-ms-win-", "ext-ms-win-")))
     missing = sorted({"kernel32.dll", "sdl2.dll"} - imports)
     if unexpected or missing:
         fail(
@@ -67,7 +81,7 @@ def audit_runtime(runtime: Path) -> None:
         fail(f"development/oracle marker found in runtime: {leaked}")
 
 
-def audit_build_graph(runtime: Path) -> None:
+def audit_build_graph(runtime: Path, target: str = "CdiRuntime") -> None:
     build_dir = runtime.resolve().parent
     cache = build_dir / "CMakeCache.txt"
     if not cache.is_file():
@@ -82,7 +96,7 @@ def audit_build_graph(runtime: Path) -> None:
     if not ninja:
         fail("ninja is required to audit the native target build graph")
     commands = subprocess.run(
-        [ninja, "-C", str(build_dir), "-t", "commands", "CdiRuntime"],
+        [ninja, "-C", str(build_dir), "-t", "commands", target],
         check=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -115,11 +129,75 @@ def audit_archive(archive: Path, expected: set[str], prefix: str,
             fail("development/oracle marker leaked into archived runtime")
 
 
+def runtime_dependencies(runtime: Path, sdl: Path, directories: list[Path]) -> dict[str, Path]:
+    """Collect the PE import closure; unknown/missing dependencies fail closed."""
+    objdump = pe_dump_tool()
+    result = {"SDL2.dll": sdl}
+    pending = [runtime, sdl]
+    seen = set()
+    search = [runtime.resolve().parent, sdl.resolve().parent, *directories]
+    while pending:
+        path = pending.pop()
+        if path.name.lower() in seen:
+            continue
+        seen.add(path.name.lower())
+        output = subprocess.check_output([objdump, "-p", str(path)], text=True)
+        for name in re.findall(r"DLL Name:\s*([^\s]+)", output):
+            lower = name.lower()
+            if lower in ALLOWED_IMPORTS or lower.startswith(("api-ms-win-", "ext-ms-win-")):
+                continue
+            if lower in {item.lower() for item in result}:
+                continue
+            candidate = next((directory / name for directory in search if (directory / name).is_file()), None)
+            if candidate is None:
+                fail(f"missing imported dependency {name}; supply --dll-dir")
+            if any(marker.decode() in lower for marker in FORBIDDEN_MARKERS):
+                fail(f"development dependency cannot be packaged: {name}")
+            result[candidate.name] = candidate
+            pending.append(candidate)
+    return result
+
+
+def collect_assets(directory: Path, manifest: Path | None) -> dict[str, Path]:
+    if manifest is None:
+        fail("--assets requires an explicit --asset-manifest")
+    expected = set(manifest.read_text(encoding="utf-8").splitlines())
+    result = {}
+    for path in directory.rglob("*"):
+        if path.is_symlink():
+            fail(f"launcher asset symlink is not allowed: {path}")
+        if path.is_file():
+            relative = path.relative_to(directory)
+            if relative.parts[0] not in {"fonts", "img"} or path.suffix.lower() not in {".ttf", ".otf", ".tga", ".png"}:
+                fail(f"unexpected launcher asset: {relative}")
+            result["assets/" + relative.as_posix()] = path
+    if not result:
+        fail("launcher asset directory is empty")
+    actual = {name.removeprefix("assets/") for name in result}
+    if actual != expected:
+        fail(f"launcher assets differ from manifest; missing={sorted(expected-actual)}, extra={sorted(actual-expected)}")
+    return result
+
+
+def collect_licenses(directory: Path) -> dict[str, Path]:
+    result = {}
+    for path in directory.iterdir():
+        if path.is_symlink() or not path.is_file() or path.suffix.lower() not in {".txt", ".md"}:
+            fail(f"unexpected license file: {path}")
+        result["LICENSES/" + path.name] = path
+    return result
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--version", required=True)
-    parser.add_argument("--product", choices=("cdirecomp", "hotelmario"),
-                        default="cdirecomp")
+    parser.add_argument("--product", default="cdirecomp")
+    parser.add_argument("--executable", default="CdiRuntime.exe")
+    parser.add_argument("--target", default="CdiRuntime")
+    parser.add_argument("--assets", type=Path)
+    parser.add_argument("--asset-manifest", type=Path)
+    parser.add_argument("--licenses", type=Path)
+    parser.add_argument("--dll-dir", type=Path, action="append", default=[])
     parser.add_argument("--runtime", type=Path,
                         default=Path("build/runner-release/CdiRuntime.exe"))
     parser.add_argument("--sdl", type=Path,
@@ -136,8 +214,9 @@ def main() -> int:
     version = args.version.removeprefix("v")
     if not re.fullmatch(r"\d+\.\d+\.\d+", version):
         fail("--version must use MAJOR.MINOR.PATCH")
-    executable = "HotelMarioRecomp.exe" if args.product == "hotelmario" else "CdiRuntime.exe"
-    product = "HotelMarioRecomp" if args.product == "hotelmario" else "cdirecomp"
+    executable, product = args.executable, args.product
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+", product) or not re.fullmatch(r"[A-Za-z0-9_.-]+\.exe", executable):
+        fail("product/executable must be plain file names")
     archive = args.out or Path("dist") / f"{product}-{version}-windows-x64.zip"
     sources = {
         executable: args.runtime,
@@ -154,11 +233,15 @@ def main() -> int:
     if args.sdl.name.lower() != "sdl2.dll":
         fail("--sdl must be SDL2.dll")
 
-    audit_build_graph(args.runtime)
-    audit_runtime(args.runtime)
-    if args.product == "hotelmario":
-        from build_provenance import verify
-        verify(args.runtime)
+    sources.update(runtime_dependencies(args.runtime, args.sdl, args.dll_dir))
+    if args.assets:
+        sources.update(collect_assets(args.assets, args.asset_manifest))
+    if args.licenses:
+        sources.update(collect_licenses(args.licenses))
+    audit_build_graph(args.runtime, args.target)
+    audit_runtime(args.runtime, {Path(name).name.lower() for name in sources if name.lower().endswith(".dll")})
+    from build_provenance import verify
+    verify(args.runtime)
     prefix = f"{product}-{version}/"
     expected = {prefix + name for name in sources}
     archive.parent.mkdir(parents=True, exist_ok=True)
