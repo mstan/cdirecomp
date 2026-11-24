@@ -172,7 +172,7 @@ int main(int argc, char *argv[]) {
                                      selected_disc,sizeof selected_disc,&player_config,player_config_path);
         if(result)return result==1 ? 0 : 1;
         rom_path=selected_bios;
-        disc_path=selected_disc;
+        disc_path=selected_disc[0] ? selected_disc : NULL;
     }
 #endif
     cdi_frontend_configure(&player_config);
