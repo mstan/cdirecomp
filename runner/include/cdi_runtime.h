@@ -356,6 +356,8 @@ void    nvram_increment_clock(double ns);
 /*  ABI globals the generator references (mirrors genesis_runtime.h)      */
 /* ====================================================================== */
 extern uint64_t g_frame_count;
+/* Optional per-field observer (unattended capture): frame index, ARGB, size. */
+extern void (*g_mcd212_field_hook)(uint64_t frame, const uint32_t *argb, int width, int height);
 extern uint64_t g_total_cycles;   /* running SCC68070 clock (sum of mcd212_tick inputs) */
 extern uint64_t g_native_insn_count;
 extern uint32_t g_cycle_accumulator;     /* 68070 cycles since frame start */

@@ -160,6 +160,7 @@ target_sources(${CDI_RUNTIME_TARGET} PRIVATE
     src/cdi_host_time.c
     src/cdi_media.c
     src/cdi_audio.c
+    src/cdi_capture.c
     src/cdic.c
     src/slave.c
     src/periph.c

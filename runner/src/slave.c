@@ -42,7 +42,7 @@ enum {
 enum {
     CHANNEL_BUFFER_BYTES = 8,
     IKAT_EVENT_CAPACITY = 256,
-    INPUT_SCHEDULE_CAPACITY = 64
+    INPUT_SCHEDULE_CAPACITY = 1024
 };
 
 typedef struct {

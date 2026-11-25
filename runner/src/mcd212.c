@@ -277,11 +277,20 @@ static void draw_active_line(void) {
     if ((reg(REG_DCR2) & 0x0300u) == 0x0300u) run_dynamic_control_area(1);
 }
 
+void (*g_mcd212_field_hook)(uint64_t frame, const uint32_t *argb, int width, int height);
+
 static void finish_frame(void) {
     vdsc.display_status &= (uint8_t)~STATUS_DISPLAY_ACTIVE;
     vdsc.raster_line = 0;
     vdsc.image_line = 0;
     mcd212_video_end_frame();
+    if (g_mcd212_field_hook) {
+        static uint32_t shot[MCD212_VIDEO_MAX_WIDTH * MCD212_VIDEO_MAX_HEIGHT];
+        uint16_t w = 0, h = 0;
+        uint64_t gen = 0;
+        if (mcd212_video_copy_frame(shot, (uint32_t)(sizeof shot / sizeof shot[0]), &w, &h, &gen))
+            g_mcd212_field_hook(g_frame_count, shot, w, h);
+    }
     g_frame_count++;
     cdi_input_schedule_advance(g_frame_count);
     debug_ring_capture_frame();

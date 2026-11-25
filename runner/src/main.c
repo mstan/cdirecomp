@@ -10,6 +10,7 @@
  */
 #define _CRT_SECURE_NO_WARNINGS
 #include "cdi_runtime.h"
+#include "cdi_capture.h"
 #include "cdi_board_jobs.h"
 #include "debug_server.h"
 #include "cosim_state.h"
@@ -121,6 +122,7 @@ int main(int argc, char *argv[]) {
         else if (!strcmp(argv[i], "--cosim-inject") && i + 1 < argc) cosim_inject_spec = argv[++i];
         else if (!strcmp(argv[i], "--cosim-session") && i + 1 < argc) cosim_session = argv[++i];
         else if (!strcmp(argv[i], "--input-script") && i + 1 < argc) input_script_spec = argv[++i];
+        else if (cdi_capture_parse_arg(argc, argv, &i)) headless = 1;
         else if (argv[i][0] != '-') rom_path = argv[i];
     }
 
@@ -294,7 +296,7 @@ int main(int argc, char *argv[]) {
     g_recomp_initial_ssp = reset_ssp;
     /* Player runs follow emulated time in real time. Fixed-sequence co-sim is
      * observational and must free-run deterministically. */
-    runtime_set_realtime_pacing(g_stop_seq == 0 && g_stop_frame == 0);
+    runtime_set_realtime_pacing(g_stop_seq == 0 && g_stop_frame == 0 && !cdi_capture_requested());
 
 #ifdef CDI_COSIM
     /* MC-CDI-016: reset RAM page-hash bookkeeping to all-dirty now that
@@ -306,6 +308,7 @@ int main(int argc, char *argv[]) {
     if (cosim_inject_spec) cdi_cosim_set_inject(cosim_inject_spec);
 #endif
 
+    cdi_capture_begin();
     debug_server_set_session(cosim_session);
     debug_server_init(port);
     if (input_script_spec && !cdi_input_schedule_configure(input_script_spec)) {
