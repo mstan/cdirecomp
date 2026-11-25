@@ -9,4 +9,6 @@ if(BUILD_TESTING)
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
     add_test(NAME release_asset_manifest COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_release_assets.py")
+    add_test(NAME capture_output COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_capture.py" --compiler "${CMAKE_C_COMPILER}")
 endif()
