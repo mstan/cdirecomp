@@ -13,12 +13,14 @@ static uint16_t be16(const uint8_t *p){return (uint16_t)((p[0]<<8)|p[1]);}
 static uint32_t be32(const uint8_t *p){return ((uint32_t)be16(p)<<16)|be16(p+2);}
 static int identify(uint32_t address,uint32_t *base,uint32_t *target,int *push) {
     if(address&1u)return 0;
-    const uint8_t *p=ram(address,10);*push=1;*base=address;
-    if(!p || be16(p)!=0x4878u) {
-        if(address<4)return 0;*base=address-4;*push=0;p=ram(*base,10);
+    const uint8_t *p=ram(address,6);*base=address;
+    if(!p)return 0;
+    if(be16(p)==0x4ef9u){*push=0;*target=be32(p+2);}
+    else {
+        p=ram(address,10);
+        if(!p || be16(p)!=0x4878u || be16(p+4)!=0x4ef9u)return 0;
+        *push=1;*target=be32(p+6);
     }
-    if(!p || be16(p)!=0x4878u || be16(p+4)!=0x4ef9u)return 0;
-    *target=be32(p+6);
     return *target>=CDI_ROM_BASE && *target-CDI_ROM_BASE<CDI_ROM_SIZE &&
         !(*target&1u) && game_dispatch_has_addr(*target);
 }
@@ -38,9 +40,10 @@ int cdi_vector_gateway_dispatch(uint32_t address) {
         g_cpu.A[7]-=4;m68k_write32(g_cpu.A[7],vector);
         account(25); /* SCC68070 PEA absolute-word: 13 + 12 EA periods. */
     }
-    g_cpu.PC=base+4;debug_trace_block();
+    uint32_t jump=push?base+4:base;
+    g_cpu.PC=jump;debug_trace_block();
     uint32_t checked_base,checked_target;int checked_push;
-    if(!identify(base+4,&checked_base,&checked_target,&checked_push))return 0;
+    if(!identify(jump,&checked_base,&checked_target,&checked_push) || checked_push)return 0;
     account(18); /* SCC68070 JMP absolute-long: 6 + 12 EA periods. */
     recomp_tail_call(checked_target);
     g_call_was_hybrid=0;return 1;

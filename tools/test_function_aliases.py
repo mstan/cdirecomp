@@ -27,7 +27,7 @@ def main() -> int:
         root = Path(td)
         (root / "generated").mkdir()
 
-        rom = bytearray(b"\xFF" * 0x400)
+        rom = bytearray(b"\xFF" * 0x600)
         be32(rom, 0, 0x00FFFE00)
         be32(rom, 4, 0x00000200)
         rom[0x100:0x200] = b" " * 0x100
@@ -117,6 +117,33 @@ def main() -> int:
             "7001"               # moveq #1,d0
             "4e75"               # rts
         )
+        # OS-9's register-based signed-offset dispatch spelling. Existing RTS
+        # roots at each suffix must not hide the leading MOVEQ table targets.
+        rom[0x340:0x344]=bytes.fromhex("72014e75")
+        rom[0x348:0x34C]=bytes.fromhex("72024e75")
+        rom[0x360:0x366]=bytes.fromhex("ffe0ffe8ffff")
+        rom[0x380:0x38C]=bytes.fromhex("43faffde323110004ef11000")
+        # A different load index does not prove the JMP's offset register.
+        rom[0x390:0x394]=bytes.fromhex("72034e75")
+        rom[0x398:0x39C]=bytes.fromhex("72044e75")
+        rom[0x3A0:0x3A6]=bytes.fromhex("fff0fff8ffff")
+        rom[0x3C0:0x3CC]=bytes.fromhex("43faffde323120004ef11000")
+        # Literal non-trampoline callbacks published by OS-9 service $2A.
+        # Other services and a different address register do not prove code.
+        rom[0x400:0x40A]=bytes.fromhex("41fa003e4e40002a4e75")
+        rom[0x420:0x42A]=bytes.fromhex("41fa002e4e4000004e75")
+        rom[0x440:0x444]=bytes.fromhex("72014e75")
+        rom[0x450:0x454]=bytes.fromhex("72024e75")
+        rom[0x460:0x46A]=bytes.fromhex("43fa001e4e40002a4e75")
+        rom[0x480:0x484]=bytes.fromhex("72034e75")
+        # OS-9's paired code/data library vectors make this PEA a native
+        # computed-call return. A plain stack restore must remain dispatchable.
+        rom[0x500:0x512]=bytes.fromhex("487a000c2f2b0020266b04204e75265f4e75")
+        # Wrong data-vector displacement, wrong base and a non-return PEA
+        # must not manufacture native entries from legal-looking data.
+        rom[0x520:0x532]=bytes.fromhex("487a000c2f2b0020266b04244e75265f4e75")
+        rom[0x540:0x552]=bytes.fromhex("487a000c2f2a0020266b04204e75265f4e75")
+        rom[0x560:0x572]=bytes.fromhex("487a000e2f2b0020266b04204e75ffff4e75")
         (root / "alias.bin").write_bytes(rom)
         (root / "code_addrs.txt").write_text(
             "000200\n000202\n000204\n000208\n00020A\n000220\n000222\n"
@@ -126,7 +153,15 @@ def main() -> int:
             "0002D0\n0002D2\n0002D4\n0002D6\n0002D8\n"
             "0002DA\n0002DC\n0002DE\n0002E0\n"
             "000300\n000302\n000306\n"
-            "000320\n000322\n000326\n000328\n00032A\n",
+            "000320\n000322\n000326\n000328\n00032A\n"
+            "000340\n000342\n000348\n00034A\n000380\n000384\n000388\n"
+            "000390\n000392\n000398\n00039A\n0003C0\n0003C4\n0003C8\n"
+            "000400\n000404\n000408\n000420\n000424\n000428\n"
+            "000440\n000442\n000450\n000452\n000460\n000464\n000468\n000480\n000482\n"
+            "000500\n000504\n000508\n00050C\n00050E\n000510\n"
+            "000520\n000524\n000528\n00052C\n00052E\n000530\n"
+            "000540\n000544\n000548\n00054C\n00054E\n000550\n"
+            "000560\n000564\n000568\n00056C\n000570\n",
             encoding="ascii",
         )
         (root / "game.toml").write_text(
@@ -142,7 +177,9 @@ extra = [0x000200, 0x000206, 0x000208, 0x000220, 0x000222,
          0x000240, 0x000242, 0x000246, 0x000260, 0x000270,
          0x000280, 0x000290, 0x0002A0, 0x0002C0, 0x0002D0, 0x0002D6,
          0x0002DA, 0x0002DE,
-         0x000300, 0x000320]
+         0x000300, 0x000320, 0x000342, 0x00034A, 0x000380,
+         0x000392, 0x00039A, 0x0003C0, 0x000400, 0x000420, 0x000460,
+         0x000500, 0x000520, 0x000540, 0x000560]
 
 [ram_layout]
 game_mode = 0
@@ -237,6 +274,17 @@ level_modes = []
 
         assert "{ 0x0002B0u, func_0002B0 }" in dispatch
         assert "{ 0x0002B4u, func_0002B4 }" in dispatch
+        assert "{ 0x000340u, func_000340 }" in dispatch
+        assert "{ 0x000348u, func_000348 }" in dispatch
+        assert "{ 0x000390u, func_000390 }" not in dispatch
+        assert "{ 0x000398u, func_000398 }" not in dispatch
+        assert "{ 0x000440u, func_000440 }" in dispatch
+        assert "{ 0x000450u, func_000450 }" not in dispatch
+        assert "{ 0x000480u, func_000480 }" not in dispatch
+        assert "{ 0x00050Eu, func_00050E }" in dispatch
+        assert "{ 0x00052Eu, func_00052E }" not in dispatch
+        assert "{ 0x00054Eu, func_00054E }" not in dispatch
+        assert "{ 0x000570u, func_000570 }" not in dispatch
         audit = (root / "generated" / "alias_test_dispatch_audit.log").read_text(
             encoding="utf-8"
         )
@@ -259,6 +307,20 @@ level_modes = []
         assert "{ 0x000326u, func_resume_000320 }" in dispatch
         assert "/* $000324 */" not in full
         assert "void func_000326(void)" not in full
+
+        # OS-9 publication/return proofs must stay off for the default ISA ABI.
+        cfg_path = root / "game.toml"
+        configured = cfg_path.read_text(encoding="ascii")
+        cfg_path.write_text(configured.replace("trap0_inline_service_word = true",
+            "trap0_inline_service_word = false"),encoding="ascii")
+        proc_abi_off = subprocess.run([str(exe),"alias.bin","--game","game.toml"],
+            cwd=root,text=True,errors="replace",stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
+        if proc_abi_off.returncode:
+            raise AssertionError(f"frontend fixture (OS-9 ABI off) failed:\n{proc_abi_off.stdout}")
+        dispatch_abi_off = (root/"generated"/"alias_test_dispatch.c").read_text(encoding="utf-8")
+        assert "{ 0x00050Eu, func_00050E }" not in dispatch_abi_off
+        assert "{ 0x000440u, func_000440 }" not in dispatch_abi_off
+        cfg_path.write_text(configured,encoding="ascii")
 
         # The shared frontend defaults this platform-specific facility off.
         # Re-run the same fixture with it disabled and retain the mature

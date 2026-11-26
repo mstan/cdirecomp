@@ -27,5 +27,9 @@ int main(void) {
     CHECK(g_ram0[32]==23 && image[3]==23 && invalidations>=2);cdi_mod_frame();CHECK(calls==1);
     CHECK(!cdi_mod_apply(ctx,patches,2,NULL,0,identity));
     CHECK(g_ram0[32]==23 && image[3]==23);
-    rmod_destroy(ctx);puts("CD-i guarded RAM/image writes, identity, expected bytes and hook rollback passed");return 0;
+    CHECK(cdi_mod_set_builtin_hook(good.id,0,identity));cdi_mod_frame();CHECK(calls==1);
+    CHECK(cdi_mod_set_builtin_hook(good.id,1,identity));cdi_mod_frame();CHECK(calls==2);
+    rmod_hook conflict[2]={{"fixture.frame"},{"disable.fixture.frame"}};
+    CHECK(!cdi_mod_apply(ctx,NULL,0,conflict,2,identity));cdi_mod_frame();CHECK(calls==3);
+    rmod_destroy(ctx);puts("CD-i guarded RAM/image writes, identity, expected bytes and hook install/remove rollback passed");return 0;
 }

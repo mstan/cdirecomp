@@ -637,9 +637,16 @@ void m68k_movec_write(uint16_t cc, uint32_t val) {
  * return push (the enclosing function's return is already on the stack); a
  * call's return address is at [A7]. */
 void hybrid_jmp_interpret(uint32_t target_pc) {
+    /* Generated SCC68070 computed-JMP sites retain this historical ABI name.
+     * A target in the native entry/resume map is a tail transfer, with the
+     * existing guest return untouched; it needs no instruction interpretation. */
+    target_pc&=0xFFFFFFu;
+    if(dispatch_has_addr(target_pc)){recomp_tail_call(target_pc);g_call_was_hybrid=0;return;}
     hybrid_enter(target_pc, m68k_read32(g_cpu.A[7]));
 }
 void hybrid_call_interpret(uint32_t target_pc) {
+    target_pc&=0xFFFFFFu;
+    if(dispatch_has_addr(target_pc)){recomp_call_addr(target_pc);return;}
     hybrid_enter(target_pc, m68k_read32(g_cpu.A[7]));
 }
 

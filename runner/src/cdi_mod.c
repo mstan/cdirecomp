@@ -5,7 +5,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
-typedef struct {char id[96];void (*callback)(void);int enabled,saved;} Hook;
+typedef struct {char id[96];void (*callback)(void);int enabled,saved,touched;} Hook;
 static Hook hooks[32];static unsigned hook_count;static int applying;
 #ifndef CDI_MOD_GAME_ID
 #define CDI_MOD_GAME_ID "cdi.system"
@@ -19,7 +19,7 @@ static uint8_t *region(const char *space,uint64_t address,size_t size) {
     if(!strcmp(space,"bios") && address<=CDI_ROM_SIZE && size<=CDI_ROM_SIZE-address)return g_rom+address;
     return NULL;
 }
-static int begin(void *user) {(void)user;if(applying)return 0;applying=1;for(unsigned i=0;i<hook_count;i++)hooks[i].saved=hooks[i].enabled;return 1;}
+static int begin(void *user) {(void)user;if(applying)return 0;applying=1;for(unsigned i=0;i<hook_count;i++){hooks[i].saved=hooks[i].enabled;hooks[i].touched=0;}return 1;}
 static int read_bytes(void *user,const char *space,uint64_t address,uint8_t *bytes,size_t size) {
     (void)user;uint8_t *p=region(space,address,size);if(p){memcpy(bytes,p,size);return 1;}
     if(!strcmp(space,"image") || !strcmp(space,"cartridge"))return cdi_media_mod_read(address,bytes,size);
@@ -30,7 +30,14 @@ static int write_bytes(void *user,const char *space,uint64_t address,const uint8
     if(!strcmp(space,"image") || !strcmp(space,"cartridge"))return cdi_media_mod_write(address,bytes,size);
     return 0;
 }
-static int hook(void *user,const char *id) {(void)user;for(unsigned i=0;i<hook_count;i++)if(!strcmp(id,hooks[i].id)){hooks[i].enabled=1;return 1;}return 0;}
+static int hook(void *user,const char *id) {
+    (void)user;int enabled=1;
+    if(!strncmp(id,"disable.",8)){enabled=0;id+=8;}
+    for(unsigned i=0;i<hook_count;i++)if(!strcmp(id,hooks[i].id)){
+        if(hooks[i].touched && hooks[i].enabled!=enabled)return 0;
+        hooks[i].enabled=enabled;hooks[i].touched=1;return 1;
+    }return 0;
+}
 static void finish(void *user,int committed) {(void)user;if(!committed)for(unsigned i=0;i<hook_count;i++)hooks[i].enabled=hooks[i].saved;applying=0;}
 int cdi_mod_apply(rmod_context *ctx,const rmod_patch *patches,size_t count,const rmod_hook *plan_hooks,size_t hooks_count,uint8_t identity[32]) {
     char sha[65];if(!cdi_media_original_sha256(sha))return 0;
@@ -40,8 +47,22 @@ int cdi_mod_apply(rmod_context *ctx,const rmod_patch *patches,size_t count,const
     return result;
 }
 int cdi_mod_register_hook(const char *id,void (*callback)(void)) {
-    if(!id || !*id || strlen(id)>=sizeof hooks[0].id || !callback || hook_count==32 || applying)return 0;
+    if(!id || !*id || !strncmp(id,"disable.",8) || strlen(id)>=sizeof hooks[0].id || !callback || hook_count==32 || applying)return 0;
     for(unsigned i=0;i<hook_count;i++)if(!strcmp(id,hooks[i].id))return 0;
     strcpy(hooks[hook_count].id,id);hooks[hook_count++].callback=callback;return 1;
 }
 void cdi_mod_frame(void) {if(!applying)for(unsigned i=0;i<hook_count;i++)if(hooks[i].enabled)hooks[i].callback();}
+int cdi_mod_set_builtin_hook(const char *id,int enabled,uint8_t identity[32]) {
+    char sha[65],plan_hex[65],description[256],action[112];uint8_t plan[32];
+    if(!id || !*id || !strncmp(id,"disable.",8) || strlen(id)>88 || !cdi_media_original_sha256(sha))return 0;
+    int size=snprintf(description,sizeof description,"cdi.builtin-hook/1\n%s\nenabled=%d\n",id,!!enabled);
+    if(size<0 || size>=(int)sizeof description || !rmod_sha256_bytes(description,(size_t)size,plan))return 0;
+    for(unsigned i=0;i<32;i++)sprintf(plan_hex+i*2,"%02x",plan[i]);
+    snprintf(action,sizeof action,"%s%s",enabled?"":"disable.",id);
+    rmod_context *ctx=rmod_create();if(!ctx)return 0;
+    int ok=rmod_bind_plan(ctx,CDI_MOD_GAME_ID,sha,plan_hex);
+    rmod_hook operation={action};
+    if(ok)ok=cdi_mod_apply(ctx,NULL,0,&operation,1,identity);
+    if(!ok)fprintf(stderr,"[mods] built-in hook plan rejected: %s\n",rmod_error(ctx));
+    rmod_destroy(ctx);return ok;
+}

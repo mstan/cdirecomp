@@ -43,6 +43,7 @@ endif()
 # drive function discovery + code generation over the ROM (based at $400000).
 add_executable(CdiRecompBios
     src/main_cdi_bios.c
+    src/driver_callbacks.c
     ../common/disc_parser.c
     ../common/cdi_sha256.c
     ${CDI_FRONTEND_SOURCES}
@@ -72,6 +73,10 @@ if(MSVC)
     target_compile_options(CdiRecompFrontendFixture PRIVATE /W3 /WX-)
 endif()
 
+add_executable(DriverCallbacksTest EXCLUDE_FROM_ALL tests/driver_callbacks_test.c
+    src/driver_callbacks.c ${CDI_FRONTEND_SOURCES})
+target_include_directories(DriverCallbacksTest PRIVATE src ../common ${M68K_RECOMP_CORE_INCLUDE_DIRS})
+
 include(CTest)
 if(BUILD_TESTING)
     set_property(TARGET CdiRecompFrontendFixture PROPERTY EXCLUDE_FROM_ALL FALSE)
@@ -88,6 +93,7 @@ if(BUILD_TESTING)
     add_executable(ModuleEntriesTest tests/module_entries_test.c src/module_entries.c)
     target_include_directories(ModuleEntriesTest PRIVATE src)
     add_test(NAME module_entries COMMAND ModuleEntriesTest)
+    add_test(NAME driver_callbacks COMMAND DriverCallbacksTest)
     add_executable(ModuleCodegenFixture tests/module_codegen_fixture.c ${CDI_FRONTEND_SOURCES})
     target_include_directories(ModuleCodegenFixture PRIVATE src ../common ${M68K_RECOMP_CORE_INCLUDE_DIRS})
     set(PIC_FIXTURE_DIR "${CMAKE_CURRENT_BINARY_DIR}/module-pic-fixture")

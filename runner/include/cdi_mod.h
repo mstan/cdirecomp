@@ -6,3 +6,6 @@ int cdi_mod_apply(rmod_context *,const rmod_patch *,size_t,const rmod_hook *,siz
 /* Trusted host callbacks; a committed frame hook executes on the owner thread. */
 int cdi_mod_register_hook(const char *id,void (*callback)(void));
 void cdi_mod_frame(void);
+/* Install/remove one trusted built-in feature through the same identity-bound
+ * transaction as imported plans. Hook removal uses the "disable." action. */
+int cdi_mod_set_builtin_hook(const char *id,int enabled,uint8_t plan_identity[32]);

@@ -121,7 +121,6 @@ void debug_ring_capture_frame(void) {
     s_frame_widx++;
     debug_server_poll();
     cdi_mod_frame();
-    cdi_diagnostics_frame();
     uint64_t stop = atomic_load_explicit(&s_pause_at_frame, memory_order_acquire);
     if (stop && g_frame_count >= stop) {
         atomic_store_explicit(&s_pause_at_frame, 0, memory_order_release);
