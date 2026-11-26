@@ -11,6 +11,7 @@
 #define _CRT_SECURE_NO_WARNINGS
 #include "cdi_runtime.h"
 #include "cdi_capture.h"
+#include "cdi_diagnostics.h"
 #include "cdi_board_jobs.h"
 #include "debug_server.h"
 #include "cosim_state.h"
@@ -127,8 +128,8 @@ int main(int argc, char *argv[]) {
     }
 
     cdi_player_config_defaults(&player_config);
-    player_preferences_active = !headless && !g_stop_seq && !g_stop_frame &&
-                                !input_script_spec && !cosim_inject_spec;
+    player_preferences_active = getenv("CDI_PLAYER_CONFIG_PATH") != NULL ||
+        (!headless && !g_stop_seq && !g_stop_frame && !input_script_spec && !cosim_inject_spec);
     if (player_preferences_active) {
         int loaded;
         const char *config_override = getenv("CDI_PLAYER_CONFIG_PATH");
@@ -311,6 +312,7 @@ int main(int argc, char *argv[]) {
     cdi_capture_begin();
     debug_server_set_session(cosim_session);
     debug_server_init(port);
+    cdi_diagnostics_begin(player_config.diagnostics_recording,player_config_path);
     if (input_script_spec && !cdi_input_schedule_configure(input_script_spec)) {
         fprintf(stderr, "[cdi] malformed --input-script '%s' (want frame:mask,...; frames strictly increasing)\n",
                 input_script_spec);
@@ -324,6 +326,8 @@ int main(int argc, char *argv[]) {
     int frontend_active = !headless && !g_stop_seq && !g_stop_frame;
     if (frontend_active &&
         !cdi_frontend_init(player_config.capture_mouse)) return 1;
+
+    debug_server_frontend_active(frontend_active);
 
     /* ---- drive execution from the reset entry ----
      * recomp_call_addr looks the entry up in the generated dispatch table and
@@ -431,6 +435,8 @@ int main(int argc, char *argv[]) {
         }
 
         for (;;) {
+            debug_server_poll();
+            if(debug_server_quit_requested()){player_quit=1;break;}
             uint32_t target;
             if (frontend_active && !cdi_frontend_pump()) {
                 player_quit = 1;

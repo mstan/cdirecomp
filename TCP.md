@@ -39,12 +39,15 @@ runtime grows, MC-CDI-015):
 
 ## Command surface
 
-**Live now** (threaded server in `debug_server.c`):
+**Live now** (shared nonblocking transport, polled on the machine owner thread):
 
 ```
 ping                 -> {ok,pong}
 status               -> {ok,insns,blocks,interp,frame,pc,halted,held,input,miss_count,miss_last,irq_pending,main_resets,...}
 pause                -> {ok,pause_requested,seq}  freeze CPU at next already-recorded trace entry
+resume               -> {ok,resume_requested}  resume a dedicated pause; fatal holds reject it
+runtime_quit         -> {ok,quit_requested}  request normal player shutdown
+capture path         -> {ok} JSON path argument; save the actual composed SDL backbuffer as BMP
 video_state          -> {ok,csr1r,csr2r,csr1w,csr2w,dcr1,dcr2,ddr1,ddr2,vsr1,vsr2,dcp1,dcp2,cursor_x,cursor_y,cursor_enabled,cursor_pattern,...}
 video_frame          -> {ok,width,height,generation,argb_fnv1a}
 frame_hashes [from,count] -> {ok,total,records:[{frame,width,height,argb_fnv1a,mcd_count,mcd_fnv1a}...]} completed-frame ring
@@ -93,9 +96,11 @@ offline seed export. `tools/collect_module_seeds.py` writes SHA-bound seeds.
 
 Forward `stores` pagination uses its `next` cursor and reports evictions;
 `before` and `from` are mutually exclusive. `stop_frame` is a TCP arm for a
-future frame, distinct from the startup free-run switch. Pause/stop/fault
-holds currently have no continue command; evidence tools terminate only
-their own process after capture.
+future frame, distinct from the startup free-run switch. A TCP pause or
+`stop_frame` parks resumably. Poll `status` until `paused=1,pending=0` and the
+frame/instruction counts are stable before observing the scene. `resume` is
+applied when status reports `paused=0`. `faulted=1` identifies a fatal hold
+that cannot resume. `CDI_START_PAUSED=1` requests a dedicated startup pause.
 
 ## Oracle (CeDImu) — live
 

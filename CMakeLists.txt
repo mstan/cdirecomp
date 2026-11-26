@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(cdirecomp LANGUAGES C)
+project(cdirecomp LANGUAGES C CXX)
 
 include(CTest)
 option(CDI_BUILD_RUNTIME "Build the player (requires generated BIOS sources)" OFF)

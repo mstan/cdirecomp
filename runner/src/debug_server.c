@@ -26,6 +26,10 @@
 #include "cdi_streaming_jobs.h"
 #include "cdi_board_jobs.h"
 #include "debug_server.h"
+#include "diagnostics_server.h"
+#include "cdi_frontend.h"
+#include "cdi_diagnostics.h"
+#include "cdi_mod.h"
 #include "cosim_state.h"
 #include "cdi_media.h"
 #include "cdi_audio.h"
@@ -87,6 +91,9 @@ static uint32_t s_frame_widx = 0;
 static uint32_t s_mcd_count = 0;
 static uint64_t s_mcd_hash = 0x14650FB0739D0383ULL;
 static atomic_ullong s_pause_at_frame;
+static void debug_pause_hold(void);
+static int s_quit_requested;
+int debug_server_quit_requested(void){return s_quit_requested;}
 
 void debug_trace_mcd_event(uint8_t area, uint16_t line, uint32_t word) {
     const uint64_t prime = 0x00000100000001B3ULL;
@@ -112,10 +119,13 @@ void debug_ring_capture_frame(void) {
     s_mcd_count = 0;
     s_mcd_hash = 0x14650FB0739D0383ULL;
     s_frame_widx++;
+    debug_server_poll();
+    cdi_mod_frame();
+    cdi_diagnostics_frame();
     uint64_t stop = atomic_load_explicit(&s_pause_at_frame, memory_order_acquire);
     if (stop && g_frame_count >= stop) {
         atomic_store_explicit(&s_pause_at_frame, 0, memory_order_release);
-        cdi_fault_hold();
+        debug_pause_hold();
     }
 }
 
@@ -195,6 +205,10 @@ uint64_t g_stop_frame = 0;
  * and `pause` asks the CPU thread to park at its very next traced instruction
  * so the just-observed history cannot be overwritten while it is queried. */
 static atomic_int s_pause_requested;
+static int s_resumable_pause;
+static int s_frontend_active;
+static DiagServer *s_server;
+static void debug_pause_hold(void);
 
 /* Set (never cleared — holds are forever) when cdi_fault_hold parks a thread,
  * so status can report "held":1. Distinct from g_halted, which is the 68k
@@ -286,8 +300,10 @@ void debug_trace_block(void) {
     s_trace_seq++;
     if (atomic_load_explicit(&s_stoppc_armed, memory_order_acquire))
         debug_check_stop_pc();
+    if ((s_trace_seq & 4095u)==0)debug_server_poll();
+    if(s_quit_requested && g_recomp_irq_armed)longjmp(g_recomp_irq_env,1);
     if (atomic_exchange_explicit(&s_pause_requested, 0, memory_order_acq_rel))
-        cdi_fault_hold();
+        debug_pause_hold();
     if (g_stop_seq && s_trace_seq >= g_stop_seq) cdi_fault_hold();
 }
 
@@ -577,19 +593,20 @@ static void resp_registers(char *out, int outlen) {
 static void resp_status(char *out, int outlen) {
     snprintf(out, outlen,
         "{\"ok\":true,\"insns\":%llu,\"blocks\":%llu,\"interp\":%llu,\"frame\":%llu,\"pc\":%u,"
-        "\"halted\":%d,\"held\":%d,\"input\":%u,\"miss_count\":%u,\"miss_last\":%u,\"irq_pending\":%u,"
+        "\"halted\":%d,\"held\":%d,\"paused\":%d,\"faulted\":%d,\"pending\":%d,\"input\":%u,\"miss_count\":%u,\"miss_last\":%u,\"irq_pending\":%u,"
         "\"irq_raises\":%llu,\"irq_first_seq\":%llu,\"main_resets\":%u}",
         (unsigned long long)g_native_insn_count, (unsigned long long)s_trace_seq,
         (unsigned long long)s_fb_total,
         (unsigned long long)g_frame_count, g_cpu.PC,
-        g_halted, s_debug_held, cdi_input_get(), g_miss_count_any, g_miss_last_addr,
+        g_halted, s_debug_held, s_debug_held && s_resumable_pause, s_debug_held && !s_resumable_pause,
+        atomic_load(&s_pause_requested),cdi_input_get(), g_miss_count_any, g_miss_last_addr,
         recomp_pending_irq_mask(),
         (unsigned long long)s_irq_count, (unsigned long long)s_irq_first_seq,
         g_main_reset_count);
 }
 
 static void resp_pause(char *out, int outlen) {
-    atomic_store_explicit(&s_pause_requested, 1, memory_order_release);
+    if(!s_debug_held)atomic_store_explicit(&s_pause_requested, 1, memory_order_release);
     snprintf(out, outlen,
              "{\"ok\":true,\"pause_requested\":true,\"seq\":%llu}",
              (unsigned long long)s_trace_seq);
@@ -1311,6 +1328,12 @@ static int handle_line(const char *line, char *out, int outlen) {
 
     if (!strcmp(cmd, "ping"))               snprintf(out, outlen, "{\"ok\":true,\"pong\":true,\"session\":\"%s\"}", s_cosim_session);
     else if (!strcmp(cmd, "status"))        resp_status(out, outlen);
+    else if (!strcmp(cmd,"resume")) {
+        if(s_debug_held && !s_resumable_pause)snprintf(out,outlen,"{\"ok\":false,\"error\":\"fatal native-coverage/fault hold cannot resume\"}");
+        else {s_resumable_pause=0;snprintf(out,outlen,"{\"ok\":true,\"resume_requested\":true}");}
+    }
+    else if (!strcmp(cmd,"capture")) { char path[1024]={0};json_str(line,"path",path,sizeof path);int ok=cdi_frontend_capture(path);snprintf(out,outlen,"{\"ok\":%s}",ok?"true":"false"); }
+    else if (!strcmp(cmd,"runtime_quit")) {s_quit_requested=1;s_resumable_pause=0;snprintf(out,outlen,"{\"ok\":true,\"quit_requested\":true}");}
     else if (!strcmp(cmd, "pause"))         resp_pause(out, outlen);
     else if (!strcmp(cmd, "stop_frame"))    resp_stop_frame(line, out, outlen);
     else if (!strcmp(cmd, "stop_pc"))       resp_stop_pc(line, out, outlen);
@@ -1392,88 +1415,37 @@ static int handle_line(const char *line, char *out, int outlen) {
 /* ====================================================================== */
 static int s_port = 0;
 
-static void serve_client(sock_t cs) {
-    static char in[2048];
-    static char out[65536];   /* static: full-register trace pages are large */
-    int inlen = 0;
-    for (;;) {
-        char ch;
-        int r = (int)recv(cs, &ch, 1, 0);
-        if (r <= 0) break;
-        if (ch == '\n') {
-            in[inlen] = 0;
-            int keep = handle_line(in, out, (int)sizeof out);
-            int olen = (int)strlen(out);
-            out[olen++] = '\n';
-            send(cs, out, olen, 0);
-            inlen = 0;
-            if (!keep) break;
-        } else if (ch != '\r' && inlen < (int)sizeof in - 1) {
-            in[inlen++] = ch;
-        }
-    }
-    close_sock(cs);
+static void shared_command(void *user,DiagServer *server,const char *line) {
+    (void)user;char out[65536];
+    int keep=handle_line(line,out,sizeof out);
+    diag_server_reply(server,out);
+    if(!keep)diag_server_disconnect(server);
 }
-
-static void server_loop(void) {
-    sock_t ls = socket(AF_INET, SOCK_STREAM, 0);
-    if (ls == BAD_SOCK) { fprintf(stderr, "[dbg] socket() failed\n"); return; }
-    int yes = 1;
-    setsockopt(ls, SOL_SOCKET, SO_REUSEADDR, (const char *)&yes, sizeof yes);
-    struct sockaddr_in a;
-    memset(&a, 0, sizeof a);
-    a.sin_family = AF_INET;
-    a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    a.sin_port = htons((unsigned short)s_port);
-    if (bind(ls, (struct sockaddr *)&a, sizeof a) != 0) {
-        fprintf(stderr, "[dbg] bind(:%d) failed — debug server off\n", s_port);
-        close_sock(ls); return;
-    }
-    listen(ls, 1);
-    fprintf(stderr, "[dbg] TCP debug server live on 127.0.0.1:%d "
-                    "(ping/status/pause/set_input/emu_ikat_state/ikat_events/video_frame/video_scanline/video_state/video_clut/"
-                    "ciap_events/disc_state/mount_disc/eject_disc/get_registers/read_mem/"
-                    "trace/cycle_trace/stores/interp_report/"
-                    "dispatch_miss_info"
-#ifdef CDI_COSIM
-                    "/cosim_full_ram_hash"
-#endif
-                    ")\n", s_port);
-    for (;;) {
-        sock_t cs = accept(ls, NULL, NULL);
-        if (cs == BAD_SOCK) break;
-        serve_client(cs);   /* one client at a time, per TCP.md */
-    }
-    close_sock(ls);
-}
-
-#ifdef _WIN32
-static DWORD WINAPI server_thread(LPVOID arg) { (void)arg; server_loop(); return 0; }
-#else
-static void *server_thread(void *arg) { (void)arg; server_loop(); return NULL; }
-#endif
-
 void debug_server_init(int port) {
-    s_port = port;
-#ifdef _WIN32
-    WSADATA wsa;
-    if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
-        fprintf(stderr, "[dbg] WSAStartup failed — debug server off\n");
-        return;
+    s_port=port;s_server=diag_server_create((uint16_t)port);
+    if(getenv("CDI_START_PAUSED"))atomic_store(&s_pause_requested,1);
+    if(!s_server || !diag_server_raw_handler(s_server,shared_command,NULL)) {
+        fprintf(stderr,"[dbg] shared diagnostics transport failed on :%d\n",port);abort();
     }
-    HANDLE h = CreateThread(NULL, 0, server_thread, NULL, 0, NULL);
-    if (h) CloseHandle(h);
-#else
-    pthread_t t;
-    pthread_create(&t, NULL, server_thread, NULL);
-    pthread_detach(t);
-#endif
-    fprintf(stderr, "[dbg] rings armed: trace=%u blocks, frame=%u frames\n",
-            CDI_TRACE_RING_LEN, CDI_FRAME_RING_LEN);
 }
-
-void debug_server_poll(void) { /* threaded now — nothing to poll */ }
-
+void debug_server_poll(void) {
+    if(s_server && !diag_server_poll(s_server)){fprintf(stderr,"[dbg] transport failure\n");abort();}
+}
+void debug_server_frontend_active(int active) {s_frontend_active=active;}
+static void debug_pause_hold(void) {
+    cdi_streaming_sync();cdi_loader_sync_cpu();cdi_drawing_sync_cpu();cdi_service_sync_cpu();
+    s_debug_held=1;s_resumable_pause=1;
+    while(s_resumable_pause) {
+        debug_server_poll();
+        if(s_frontend_active && !cdi_frontend_pump()){s_quit_requested=1;s_resumable_pause=0;}
+#ifdef _WIN32
+        Sleep(1);
+#else
+        struct timespec ts={0,1000000};nanosleep(&ts,NULL);
+#endif
+    }
+    s_debug_held=0;
+}
 /* When set (--fault-hold), a fatal fault freezes the process here instead of
  * aborting, so the always-on rings stay queryable at the fault point (the whole
  * boot trace is preserved for first-divergence). The server thread keeps
@@ -1495,9 +1467,9 @@ void cdi_fault_hold(void) {
     fflush(stderr);
     for (;;) {
 #ifdef _WIN32
-        Sleep(1000);
+        debug_server_poll();Sleep(1);
 #else
-        struct timespec ts = { 1, 0 }; nanosleep(&ts, NULL);
+        debug_server_poll();struct timespec ts = { 0, 1000000 }; nanosleep(&ts, NULL);
 #endif
     }
 }

@@ -14,6 +14,7 @@
 #include "cdi_memory_jobs.h"
 #include "cdi_service_jobs.h"
 #include "cdi_board_jobs.h"
+#include "cdi_vector_gateway.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -30,7 +31,7 @@ int      game_dispatch_has_addr(uint32_t addr);
  * interpreter to know when it has re-entered recompiled territory.) */
 int dispatch_has_addr(uint32_t addr) {
     addr &= 0xFFFFFFu;
-    return game_dispatch_has_addr(addr) || cdi_native_has_address(addr);
+    return game_dispatch_has_addr(addr) || cdi_native_has_address(addr) || cdi_vector_gateway_has_address(addr);
 }
 
 /* ---- Hybrid interpreter handoff (MC-CDI-011) ----
@@ -49,6 +50,12 @@ static int s_in_hybrid = 0;
 static int s_pending_fallback_reason = FB_NONE;
 
 static int hybrid_enter(uint32_t target, uint32_t ret) {
+#if CDI_NATIVE_ONLY
+    fprintf(stderr,"[native-coverage] unsupported SCC68070 entry $%06X (return $%06X); native game coverage required\n",target,ret);
+    debug_dump_fault_trail("uncovered native entry");
+    if(g_hold_on_fault)cdi_fault_hold();
+    abort();
+#endif
     if (s_in_hybrid) return 0;           /* nested miss: log it rather than recurse blindly */
     s_in_hybrid = 1;
     int saved_reason = g_fallback_reason;
@@ -106,6 +113,12 @@ void recomp_top_resume(uint32_t addr) {
      * PC belongs to RAM or to a genuinely undiscovered ROM CFG. Record only
      * that exact entry, not every instruction the interpreter subsequently
      * executes. */
+#if CDI_NATIVE_ONLY
+    fprintf(stderr,"[native-coverage] unsupported SCC68070 resume $%06X; native game coverage required\n",addr);
+    debug_dump_fault_trail("uncovered native resume");
+    if(g_hold_on_fault)cdi_fault_hold();
+    abort();
+#endif
     debug_record_indirect_target(addr);
     /* Attribute this interpreter run: a bus/exception handler dispatched via the
      * trampoline carries a one-shot reason; otherwise it's a plain depth-0 target. */
@@ -252,7 +265,14 @@ void genesis_log_dispatch_miss(uint32_t addr) {
  * hybrid-interpreter handoff: the target was reached via a recomp JSR/exception
  * that left a return address on the guest stack, so interpret from there. */
 int game_dispatch_override(uint32_t addr) {
+    if(cdi_vector_gateway_dispatch(addr))return 1;
     if (cdi_native_dispatch(addr)) { g_call_was_hybrid=0;return 1; }
+#if CDI_NATIVE_ONLY
+    fprintf(stderr,"[native-coverage] unsupported SCC68070 resume $%06X; native game coverage required\n",addr);
+    debug_dump_fault_trail("uncovered native resume");
+    if(g_hold_on_fault)cdi_fault_hold();
+    abort();
+#endif
     debug_record_indirect_target(addr);   /* trace-guided discovery seed */
     return hybrid_enter(addr, m68k_read32(g_cpu.A[7]));
 }

@@ -148,3 +148,6 @@ extern uint64_t g_stop_seq;
  * publishing this completed field, preserving the frame and all rings for a
  * side-effect-free native/oracle comparison. */
 extern uint64_t g_stop_frame;
+
+void debug_server_frontend_active(int active);
+int debug_server_quit_requested(void);

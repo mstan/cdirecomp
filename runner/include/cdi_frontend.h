@@ -8,3 +8,5 @@ void cdi_frontend_configure(const CdiPlayerConfig *config);
 int  cdi_frontend_init(int capture_mouse);
 int  cdi_frontend_pump(void); /* zero after the player requests shutdown */
 void cdi_frontend_shutdown(void);
+
+int cdi_frontend_capture(const char *path);

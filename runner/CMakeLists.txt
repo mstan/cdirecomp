@@ -1,5 +1,11 @@
 cmake_minimum_required(VERSION 3.20)
-project(CdiRuntime C)
+project(CdiRuntime C CXX)
+foreach(CORE mod diagnostics persistence input)
+    add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../external/shared-cores/recomp-${CORE}-core"
+        "${CMAKE_CURRENT_BINARY_DIR}/shared-${CORE}")
+endforeach()
+link_libraries(recomp_mod_core recomp_diagnostics_core recomp_persistence_core recomp_input_core)
+
 
 set(CMAKE_C_STANDARD 11)
 
@@ -11,7 +17,7 @@ option(CDI_COSIM_BUILD "Build the MC-CDI-016 differential co-simulation instrume
 
 # Same scanout contract, independent implementations. HLE consolidates source
 # decode, matte/contribution/transparency and output into native color spans.
-set(CDI_VIDEO_BACKEND "LLE" CACHE STRING "Scanout implementation: LLE or HLE")
+set(CDI_VIDEO_BACKEND "HLE" CACHE STRING "Scanout implementation: LLE or HLE")
 set_property(CACHE CDI_VIDEO_BACKEND PROPERTY STRINGS LLE HLE)
 if(CDI_VIDEO_BACKEND STREQUAL "HLE")
     set(CDI_VIDEO_HLE 1)
@@ -22,7 +28,7 @@ else()
 endif()
 
 # Complete native loader work has a separate build-time reference selection.
-set(CDI_LOADER_BACKEND "LLE" CACHE STRING "Loader job implementation: LLE or HLE")
+set(CDI_LOADER_BACKEND "HLE" CACHE STRING "Loader job implementation: LLE or HLE")
 set_property(CACHE CDI_LOADER_BACKEND PROPERTY STRINGS LLE HLE)
 if(CDI_LOADER_BACKEND STREQUAL "HLE")
     set(CDI_LOADER_HLE 1)
@@ -33,7 +39,7 @@ else()
 endif()
 
 # Guest drawing preparation has an independent build-time faithful choice.
-set(CDI_DRAWING_BACKEND "LLE" CACHE STRING "Deferred drawing preparation: LLE or HLE")
+set(CDI_DRAWING_BACKEND "HLE" CACHE STRING "Deferred drawing preparation: LLE or HLE")
 set_property(CACHE CDI_DRAWING_BACKEND PROPERTY STRINGS LLE HLE)
 if(CDI_DRAWING_BACKEND STREQUAL "HLE")
     set(CDI_DRAWING_HLE 1)
@@ -44,7 +50,7 @@ else()
 endif()
 
 # Complete native memory operations retain an independent faithful selection.
-set(CDI_MEMORY_BACKEND "LLE" CACHE STRING "Memory operation jobs: LLE or HLE")
+set(CDI_MEMORY_BACKEND "HLE" CACHE STRING "Memory operation jobs: LLE or HLE")
 set_property(CACHE CDI_MEMORY_BACKEND PROPERTY STRINGS LLE HLE)
 if(CDI_MEMORY_BACKEND STREQUAL "HLE")
     set(CDI_MEMORY_HLE 1)
@@ -54,7 +60,7 @@ else()
     message(FATAL_ERROR "CDI_MEMORY_BACKEND must be LLE or HLE")
 endif()
 
-set(CDI_SERVICE_BACKEND "LLE" CACHE STRING "Process lookup/publication jobs: LLE or HLE")
+set(CDI_SERVICE_BACKEND "HLE" CACHE STRING "Process lookup/publication jobs: LLE or HLE")
 set_property(CACHE CDI_SERVICE_BACKEND PROPERTY STRINGS LLE HLE)
 if(CDI_SERVICE_BACKEND STREQUAL "HLE")
     set(CDI_SERVICE_HLE 1)
@@ -64,7 +70,7 @@ else()
     message(FATAL_ERROR "CDI_SERVICE_BACKEND must be LLE or HLE")
 endif()
 
-set(CDI_STREAMING_BACKEND "LLE" CACHE STRING "CIAP streaming progression: LLE or HLE")
+set(CDI_STREAMING_BACKEND "HLE" CACHE STRING "CIAP streaming progression: LLE or HLE")
 set_property(CACHE CDI_STREAMING_BACKEND PROPERTY STRINGS LLE HLE)
 if(CDI_STREAMING_BACKEND STREQUAL "HLE")
     set(CDI_STREAMING_HLE 1)
@@ -75,7 +81,7 @@ else()
 endif()
 set_source_files_properties(src/cdic.c PROPERTIES
     COMPILE_DEFINITIONS "CDI_STREAMING_HLE=$<BOOL:$<TARGET_PROPERTY:CDI_NATIVE_STREAMING>>")
-set(CDI_BOARD_BACKEND "LLE" CACHE STRING "Stopped-CPU whole-board jobs: LLE or HLE")
+set(CDI_BOARD_BACKEND "HLE" CACHE STRING "Stopped-CPU whole-board jobs: LLE or HLE")
 set_property(CACHE CDI_BOARD_BACKEND PROPERTY STRINGS LLE HLE)
 if(CDI_BOARD_BACKEND STREQUAL "HLE")
     set(CDI_BOARD_HLE 1)
@@ -87,7 +93,7 @@ endif()
 set_source_files_properties(src/mcd212.c PROPERTIES
     COMPILE_DEFINITIONS "CDI_BOARD_HLE=$<BOOL:$<TARGET_PROPERTY:CDI_NATIVE_BOARD>>")
 
-set(CDI_GPU_BACKEND "LLE" CACHE STRING "Owned raster presentation: LLE or HLE")
+set(CDI_GPU_BACKEND "HLE" CACHE STRING "Owned raster presentation: LLE or HLE")
 set_property(CACHE CDI_GPU_BACKEND PROPERTY STRINGS LLE HLE)
 if(CDI_GPU_BACKEND STREQUAL "HLE")
     set(CDI_GPU_HLE 1)
@@ -141,6 +147,9 @@ if(NOT TARGET ${CDI_RUNTIME_TARGET})
 endif()
 target_sources(${CDI_RUNTIME_TARGET} PRIVATE
     src/main.c
+    src/cdi_mod.c
+    src/cdi_diagnostics.c
+    src/cdi_vector_gateway.c
     src/cdi_bus.c
     src/cdi_native.c
     src/cdi_loader_jobs.c
@@ -205,7 +214,7 @@ if(MSVC)
     target_compile_options(${CDI_RUNTIME_TARGET} PRIVATE /W3 /WX-)
 endif()
 
-target_compile_definitions(${CDI_RUNTIME_TARGET} PRIVATE $<$<BOOL:${CDI_COSIM_BUILD}>:CDI_COSIM=1>)
+target_compile_definitions(${CDI_RUNTIME_TARGET} PRIVATE CDI_NATIVE_ONLY=1 $<$<BOOL:${CDI_COSIM_BUILD}>:CDI_COSIM=1>)
 # Restrict the selection macro to the implementation and startup identity.
 # Switching backends must not rebuild the generated CPU/game translation units.
 get_target_property(CDI_RUNTIME_SOURCE_DIR ${CDI_RUNTIME_TARGET} SOURCE_DIR)
@@ -248,7 +257,8 @@ if(EXISTS "${CDI_GAME_GENERATED_DIR}/module_manifest.c")
     target_compile_definitions(${CDI_RUNTIME_TARGET} PRIVATE CDI_NATIVE_MODULES=1)
 endif()
 
-target_link_libraries(${CDI_RUNTIME_TARGET} PRIVATE SDL2::SDL2)
+target_link_libraries(${CDI_RUNTIME_TARGET} PRIVATE SDL2::SDL2
+    recomp_mod_core recomp_diagnostics_core recomp_persistence_core recomp_input_core)
 
 set_target_properties(${CDI_RUNTIME_TARGET} PROPERTIES
     CDI_ENGINE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}"
@@ -277,6 +287,17 @@ endif() # CDI_BUILD_RUNTIME
 
 include(CTest)
 if(BUILD_TESTING)
+    add_executable(CdiVectorGatewayTest tests/cdi_vector_gateway_test.c src/cdi_vector_gateway.c)
+    target_include_directories(CdiVectorGatewayTest PRIVATE include)
+    add_test(NAME cdi_vector_gateway COMMAND CdiVectorGatewayTest)
+    add_executable(CdiModTest tests/cdi_mod_test.c src/cdi_mod.c)
+    target_compile_definitions(CdiModTest PRIVATE CDI_MOD_GAME_ID="cdi.fixture")
+    target_include_directories(CdiModTest PRIVATE include)
+    add_test(NAME cdi_guarded_mod_transactions COMMAND CdiModTest)
+    add_executable(CdiMediaModTest tests/cdi_media_mod_test.c src/cdi_media.c
+        ../common/disc_parser.c ../common/cdi_sha256.c)
+    target_include_directories(CdiMediaModTest PRIVATE include ../common)
+    add_test(NAME cdi_media_overlay COMMAND CdiMediaModTest)
     add_executable(CdiLoaderMathTest tests/cdi_loader_math_test.c)
     target_include_directories(CdiLoaderMathTest PRIVATE include)
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../bios/cdi490a.rom")
