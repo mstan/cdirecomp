@@ -591,7 +591,7 @@ static void resp_registers(char *out, int outlen) {
 
 static void resp_status(char *out, int outlen) {
     snprintf(out, outlen,
-        "{\"ok\":true,\"insns\":%llu,\"blocks\":%llu,\"interp\":%llu,\"frame\":%llu,\"pc\":%u,"
+        "{\"ok\":true,\"cpu_profile\":\"native-os9-clean-room-fallback\",\"insns\":%llu,\"blocks\":%llu,\"interp\":%llu,\"frame\":%llu,\"pc\":%u,"
         "\"halted\":%d,\"held\":%d,\"paused\":%d,\"faulted\":%d,\"pending\":%d,\"input\":%u,\"miss_count\":%u,\"miss_last\":%u,\"irq_pending\":%u,"
         "\"irq_raises\":%llu,\"irq_first_seq\":%llu,\"main_resets\":%u}",
         (unsigned long long)g_native_insn_count, (unsigned long long)s_trace_seq,
@@ -1328,7 +1328,7 @@ static int handle_line(const char *line, char *out, int outlen) {
     if (!strcmp(cmd, "ping"))               snprintf(out, outlen, "{\"ok\":true,\"pong\":true,\"session\":\"%s\"}", s_cosim_session);
     else if (!strcmp(cmd, "status"))        resp_status(out, outlen);
     else if (!strcmp(cmd,"resume")) {
-        if(s_debug_held && !s_resumable_pause)snprintf(out,outlen,"{\"ok\":false,\"error\":\"fatal native-coverage/fault hold cannot resume\"}");
+        if(s_debug_held && !s_resumable_pause)snprintf(out,outlen,"{\"ok\":false,\"error\":\"fatal fault hold cannot resume\"}");
         else {s_resumable_pause=0;snprintf(out,outlen,"{\"ok\":true,\"resume_requested\":true}");}
     }
     else if (!strcmp(cmd,"capture")) { char path[1024]={0};json_str(line,"path",path,sizeof path);int ok=cdi_frontend_capture(path);snprintf(out,outlen,"{\"ok\":%s}",ok?"true":"false"); }

@@ -149,7 +149,6 @@ target_sources(${CDI_RUNTIME_TARGET} PRIVATE
     src/main.c
     src/cdi_mod.c
     src/cdi_diagnostics.c
-    src/cdi_vector_gateway.c
     src/cdi_bus.c
     src/cdi_native.c
     src/cdi_loader_jobs.c
@@ -214,7 +213,7 @@ if(MSVC)
     target_compile_options(${CDI_RUNTIME_TARGET} PRIVATE /W3 /WX-)
 endif()
 
-target_compile_definitions(${CDI_RUNTIME_TARGET} PRIVATE CDI_NATIVE_ONLY=1 $<$<BOOL:${CDI_COSIM_BUILD}>:CDI_COSIM=1>)
+target_compile_definitions(${CDI_RUNTIME_TARGET} PRIVATE $<$<BOOL:${CDI_COSIM_BUILD}>:CDI_COSIM=1>)
 # Restrict the selection macro to the implementation and startup identity.
 # Switching backends must not rebuild the generated CPU/game translation units.
 get_target_property(CDI_RUNTIME_SOURCE_DIR ${CDI_RUNTIME_TARGET} SOURCE_DIR)
@@ -287,9 +286,6 @@ endif() # CDI_BUILD_RUNTIME
 
 include(CTest)
 if(BUILD_TESTING)
-    add_executable(CdiVectorGatewayTest tests/cdi_vector_gateway_test.c src/cdi_vector_gateway.c)
-    target_include_directories(CdiVectorGatewayTest PRIVATE include)
-    add_test(NAME cdi_vector_gateway COMMAND CdiVectorGatewayTest)
     add_executable(CdiModTest tests/cdi_mod_test.c src/cdi_mod.c)
     target_compile_definitions(CdiModTest PRIVATE CDI_MOD_GAME_ID="cdi.fixture")
     target_include_directories(CdiModTest PRIVATE include)

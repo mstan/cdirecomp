@@ -8,7 +8,7 @@ The shared disc/module parser and byte-image adapter live in `common/`; producti
 
 The SCC68070 frontend comes from the pinned clean-room `m68k-recomp-core` submodule. The engine supplies CD-i image/configuration adapters and disc/module handling. Generated C includes the runtime ABI in `runner/include/cdi_runtime.h`; synthetic fixtures compile against that same contract.
 
-The native player executes the real recompiled OS-9 kernel. The kernel owns loading, linking, scheduling and guest state. Loaded module bindings use complete image SHA-256 identities, with invalidation on overlapping RAM writes. Uncovered entries stop with their exact address and diagnostic history; production dispatch does not enter the interpreter.
+The native player executes the real recompiled OS-9 kernel. The kernel owns loading, linking, scheduling and guest state. Loaded module bindings use complete image SHA-256 identities, with invalidation on overlapping RAM writes. Uncovered code uses the clean-room fallback interpreter. This original CPU dispatch profile is logged at startup and is independent of the eight HLE service backend selections.
 
 ## Machine and host layers
 

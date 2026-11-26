@@ -25,7 +25,6 @@
 #include "m68k_validator.h"
 #include "annotations.h"
 #include "game_config.h"
-#include "driver_callbacks.h"
 #include "cdi_sha256.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -259,10 +258,6 @@ int main(int argc, char *argv[]) {
         } else {
             seeds[nseeds++] = maddr + m_exec;
         }
-        int callbacks=cdi_driver_callbacks(&rom,mods[i].name,mods[i].type,mods[i].lang,
-            maddr,mods[i].size,seeds+nseeds,CDI_SEED_MAX-nseeds);
-        if(callbacks<0){fprintf(stderr,"[bios] callback seed capacity exhausted\n");free(img);return 1;}
-        if(callbacks){printf("[bios] %s private callback vector: %d guarded entries\n",mods[i].name,callbacks);nseeds+=callbacks;}
     }
     int nmod_seeds = nseeds;
 

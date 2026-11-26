@@ -21,7 +21,7 @@ cmake -S . -B build/player -G Ninja -DCMAKE_BUILD_TYPE=Release -DCDI_BUILD_RUNTI
 cmake --build build/player --parallel 2
 ```
 
-This builds `CdiRuntime` (`.exe` on Windows). `CDI_GAME_GENERATED_DIR` supplies a consumer's native OS-9 modules. It never defaults to a particular game's directory. Players fail loudly on uncovered SCC68070 entries instead of falling back to interpreted execution; generating a player does not by itself qualify a complete game route.
+This builds `CdiRuntime` (`.exe` on Windows). `CDI_GAME_GENERATED_DIR` optionally supplies native OS-9 modules; an empty value builds a system player with interpreter fallback. It never defaults to a particular game's directory. The original CPU dispatch profile combines native OS-9 execution and clean-room fallback for uncovered code; HLE service backend selection is independent of that profile.
 
 ## Generate disc modules
 

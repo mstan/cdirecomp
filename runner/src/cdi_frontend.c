@@ -326,8 +326,7 @@ int cdi_frontend_init(int capture_mouse) {
         cdi_frontend_shutdown();
         return 0;
     }
-    /* Fit adapts the window; the original CD-i picture retains its aspect. */
-    SDL_RenderSetLogicalSize(s.renderer, 768, 576);
+    if(!options.fit_to_screen)SDL_RenderSetLogicalSize(s.renderer, 768, 576);
     SDL_RenderSetIntegerScale(s.renderer, SDL_FALSE);
     s.pixels = (uint32_t *)malloc((size_t)MCD212_VIDEO_MAX_WIDTH *
                                   MCD212_VIDEO_MAX_HEIGHT * sizeof(uint32_t));

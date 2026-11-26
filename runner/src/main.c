@@ -182,6 +182,7 @@ int main(int argc, char *argv[]) {
 
     printf("%s â€” Philips CD-i (SCC68070) static-recomp runtime\n",
            CDI_PRODUCT_NAME);
+    printf("[cpu] original profile: native OS-9 with clean-room fallback for uncovered code\n");
 #if CDI_VIDEO_HLE
     printf("[video] native span HLE scanout\n");
 #else
