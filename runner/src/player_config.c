@@ -34,6 +34,7 @@ static int parse_bool(const char *text, int *value) {
 void cdi_player_config_defaults(CdiPlayerConfig *config) {
     memset(config, 0, sizeof *config);
     config->capture_mouse = 0;
+    config->diagnostics_recording = 1;
     config->enable_mouse = 1;
     config->sync_host_on_startup = 0;
     config->fit_to_screen = 1;
@@ -97,7 +98,9 @@ int cdi_player_config_load(const char *path, CdiPlayerConfig *config) {
         key = trim(key);
         value = trim(value);
 
-        if (!strcmp(section, "input") && !strcmp(key, "capture_mouse")) {
+        if (!strcmp(section,"diagnostics") && !strcmp(key,"recording")) {
+            if(!parse_bool(value,&config->diagnostics_recording))goto malformed;
+        } else if (!strcmp(section, "input") && !strcmp(key, "capture_mouse")) {
             if (!parse_bool(value, &config->capture_mouse)) goto malformed;
         } else if (!strcmp(section, "input") && !strcmp(key, "enable_mouse")) {
             if (!parse_bool(value, &config->enable_mouse)) goto malformed;
@@ -195,6 +198,7 @@ int cdi_player_config_save(const char *path, const CdiPlayerConfig *config) {
     for(int i=0;i<3;i++)fprintf(file,"bind%d = %d\n",i,config->mouse_bind[i]);
     fprintf(file, "\n[launcher]\nskip_on_boot = %s\n\n[assets]\nbios = %s\ndisc = %s\n",
             config->skip_launcher ? "true" : "false", config->bios_path, config->disc_path);
+    fprintf(file,"\n[diagnostics]\nrecording = %s\n",config->diagnostics_recording ? "true":"false");
     if (fclose(file) != 0) return 0;
     return 1;
 }

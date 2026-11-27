@@ -14,6 +14,7 @@ typedef struct CdiPlayerConfig {
     int volume;
     int enable_audio;
     int skip_launcher;
+    int diagnostics_recording;
     int input_source; /* 1 keyboard, 2 gamepad */
     int key_bind[6];
     int pad_bind[6]; /* recomp-ui standard button/axis encoding */

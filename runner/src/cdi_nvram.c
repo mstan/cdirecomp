@@ -11,6 +11,7 @@
  * deterministic on every host and keeps the RTC independent of wall time.
  */
 #include "cdi_runtime.h"
+#include "recomp_persistence/atomic_file.h"
 #include "cdi_board_jobs.h"
 
 #include <errno.h>
@@ -226,33 +227,7 @@ int nvram_load_sram(const char *path) {
 }
 
 int nvram_save_sram(const char *path) {
-    char temporary[1200];
-    FILE *file;
-    int ok;
-    int written = snprintf(temporary, sizeof temporary, "%s.tmp", path);
-    if (written <= 0 || (size_t)written >= sizeof temporary) return 0;
-    file = fopen(temporary, "wb");
-    if (!file) return 0;
-    ok = fwrite(rtc.ram, 1, sizeof rtc.ram, file) == sizeof rtc.ram;
-    if (fflush(file) != 0) ok = 0;
-    if (fclose(file) != 0) ok = 0;
-    if (!ok) {
-        remove(temporary);
-        return 0;
-    }
-#ifdef _WIN32
-    if (!MoveFileExA(temporary, path,
-                     MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
-        remove(temporary);
-        return 0;
-    }
-#else
-    if (rename(temporary, path) != 0) {
-        remove(temporary);
-        return 0;
-    }
-#endif
-    return 1;
+    return recomp_atomic_file_store(path, rtc.ram, sizeof rtc.ram);
 }
 
 int nvram_seed_clock_once(const CdiRtcTime *time_value) {

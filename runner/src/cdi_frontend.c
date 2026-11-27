@@ -4,6 +4,7 @@
 #include "cdi_frontend.h"
 #include "cdi_runtime.h"
 #include "cdi_input.h"
+#include "recomp_input.h"
 #include "cdi_media.h"
 #include "cdi_audio.h"
 #include "mcd212_video.h"
@@ -48,6 +49,9 @@ typedef struct {
 static Frontend s;
 static CdiPlayerConfig options;
 static int options_ready;
+static const char *capture_path;
+static int capture_result;
+static int capture_backbuffer(const char *path);
 void cdi_frontend_configure(const CdiPlayerConfig *config) {
     options = *config;
     options_ready = 1;
@@ -115,16 +119,12 @@ static uint32_t input_mask(void) {
         }
     }
     if (s.controller && options.input_source == 2) {
-        for (int i=0;i<6;i++) {
-            int binding=options.pad_bind[i],pressed=0;
-            if (binding>0 && binding<100 && binding-1<SDL_CONTROLLER_BUTTON_MAX)
-                pressed=SDL_GameControllerGetButton(s.controller,(SDL_GameControllerButton)(binding-1));
-            else if(binding>=100 && binding<1000 && (binding-100)/2<SDL_CONTROLLER_AXIS_MAX) {
-                int axis=SDL_GameControllerGetAxis(s.controller,(SDL_GameControllerAxis)((binding-100)/2));
-                pressed=((binding-100)&1) ? axis>16000 : axis < -16000;
-            }
-            if(pressed)mask |= 1u<<i;
-        }
+        ri_device device={0};
+        for(int button=0;button<SDL_CONTROLLER_BUTTON_MAX && button<32;button++)
+            if(SDL_GameControllerGetButton(s.controller,(SDL_GameControllerButton)button))device.buttons|=1u<<button;
+        for(int axis=0;axis<SDL_CONTROLLER_AXIS_MAX && axis<RI_MAX_AXES;axis++)
+            device.axes[axis]=SDL_GameControllerGetAxis(s.controller,(SDL_GameControllerAxis)axis);
+        for(int i=0;i<6;i++)if(ri_binding_held(&device,(uint32_t)options.pad_bind[i],16000))mask|=1u<<i;
     }
     return mask;
 }
@@ -254,6 +254,7 @@ static int present_frame(void) {
     SDL_RenderCopy(s.renderer, presented, NULL, NULL);
     if(cdi_render_profile_enabled())SDL_RenderFlush(s.renderer);
     cdi_render_profile_end(2);
+    if(capture_path){capture_result=capture_backbuffer(capture_path);capture_path=NULL;}
     SDL_RenderPresent(s.renderer);
     cdi_render_profile_finish();
     s.shown_generation = generation;
@@ -444,4 +445,19 @@ void cdi_frontend_shutdown(void) {
     if (s.window) SDL_DestroyWindow(s.window);
     SDL_Quit();
     s = (Frontend){0};
+}
+
+static int capture_backbuffer(const char *path) {
+    if(!s.renderer || !path || !*path)return 0;
+    int w,h;if(SDL_GetRendererOutputSize(s.renderer,&w,&h)!=0)return 0;
+    SDL_Surface *surface=SDL_CreateRGBSurfaceWithFormat(0,w,h,32,SDL_PIXELFORMAT_ARGB8888);
+    if(!surface)return 0;
+    int ok=SDL_RenderReadPixels(s.renderer,NULL,SDL_PIXELFORMAT_ARGB8888,surface->pixels,surface->pitch)==0 && SDL_SaveBMP(surface,path)==0;
+    SDL_FreeSurface(surface);return ok;
+}
+int cdi_frontend_capture(const char *path) {
+    if(!s.renderer || !path || !*path)return 0;
+    capture_path=path;capture_result=0;s.redraw=1;
+    if(!present_frame()){capture_path=NULL;return 0;}
+    return capture_result;
 }

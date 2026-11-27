@@ -1,6 +1,6 @@
 # Building cdirecomp
 
-Use CMake 3.20+, a C11 compiler, Ninja, Python 3.11+ and SDL2 development files. Initialize submodules recursively before configuring. On Windows, use an actual MinGW or Visual Studio toolchain; on Linux install the SDL2 development package.
+Use CMake 3.24+, C11/C++20 compilers, Ninja, Python 3.11+, zlib and SDL2 development files. Initialize submodules recursively before configuring. On Windows, use an actual MinGW or Visual Studio toolchain; on Linux install the SDL2 development package.
 
 The root CMake project builds the compilers and component tests without private inputs. `BUILD_TESTING=OFF` omits tests. The recompiler also builds independently with `cmake -S recompiler -B build/recompiler`.
 
@@ -21,7 +21,7 @@ cmake -S . -B build/player -G Ninja -DCMAKE_BUILD_TYPE=Release -DCDI_BUILD_RUNTI
 cmake --build build/player --parallel 2
 ```
 
-This builds `runner/CdiRuntime` (`.exe` on Windows). `CDI_GAME_GENERATED_DIR` optionally supplies native OS-9 modules; an empty value builds a system player with interpreter fallback. It never defaults to a particular game's directory.
+This builds `CdiRuntime` (`.exe` on Windows). `CDI_GAME_GENERATED_DIR` optionally supplies native OS-9 modules; an empty value builds a system player with interpreter fallback. It never defaults to a particular game's directory. The original CPU dispatch profile combines native OS-9 execution and clean-room fallback for uncovered code; HLE service backend selection is independent of that profile.
 
 ## Generate disc modules
 
@@ -33,6 +33,6 @@ Export-layout options and observed module seeds are game facts. The named-offset
 
 ## Reference and native implementations
 
-Each `CDI_*_BACKEND` selects `LLE` or `HLE` at build time: VIDEO, LOADER, DRAWING, MEMORY, SERVICE, STREAMING, BOARD and GPU. Engine defaults are LLE. Consumers choose qualified defaults. `CDI_COSIM_BUILD=OFF` excludes co-simulation instrumentation from release builds.
+Each `CDI_*_BACKEND` selects `LLE` or `HLE` at build time: VIDEO, LOADER, DRAWING, MEMORY, SERVICE, STREAMING, BOARD and GPU. Engine and consumer defaults are HLE. Reference alternatives are retained for explicitly requested accuracy work. `CDI_COSIM_BUILD=OFF` excludes co-simulation instrumentation from release builds.
 
 Build artifacts and generated data are disposable. Native saves and settings are not: do not delete an old build directory without checking its contents.
