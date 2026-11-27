@@ -10,7 +10,8 @@ static void word(uint8_t *p,unsigned at,unsigned value) { p[at]=value>>8;p[at+1]
 int main(int argc,char **argv) {
     bool negative=argc==3 && !strcmp(argv[2],"--test-falloff");
     bool dense=argc==3 && !strcmp(argv[2],"--dense-entries");
-    if (argc!=2 && !negative && !dense) return 1;
+    bool stack=argc==3 && !strcmp(argv[2],"--split-stack");
+    if (argc!=2 && !negative && !dense && !stack) return 1;
     uint8_t image[0x200]={0};
     const unsigned words[]={
         0x41fa,0x004c, /* lea $a0(pc),a0 */
@@ -38,6 +39,24 @@ int main(int argc,char **argv) {
     GenesisRom rom={0};rom.rom_data=image;rom.rom_size=sizeof image;rom.initial_pc=0x52;
     uint32_t entries[64]={0x52,0xc0,0xd0,0x1fe};
     int nentries=negative?4:3;
+    if (stack) {
+        /* A split tail path discards then restores a return. The successor
+         * also has an untaken discard path; its local accounting must consume
+         * the predecessor's carry before the executed SUBQ cancels it. */
+        const unsigned root[]={0x6100,0x001e,0x7c2a,0x4e75};
+        const unsigned caller[]={0x6100,0x001e,0x7e63,0x4e75};
+        const unsigned tail[]={0x588f,0x4efa,0x001c};
+        const unsigned adjust[]={0x598f,0x7000,0x6602,0x4e75,0x588f,0x4e75};
+        for (unsigned i=0;i<4;i++) {
+            word(image,0x120+i*2,root[i]);word(image,0x140+i*2,caller[i]);
+        }
+        for (unsigned i=0;i<3;i++) {
+            word(image,0x160+i*2,tail[i]);
+        }
+        for (unsigned i=0;i<6;i++) word(image,0x180+i*2,adjust[i]);
+        entries[nentries++]=0x120;entries[nentries++]=0x140;
+        entries[nentries++]=0x160;entries[nentries++]=0x180;
+    }
     if (dense) {
         /* Continuation observations are valid instruction starts, including
          * straight-line instructions. Preserve resume access without forcing
@@ -52,7 +71,7 @@ int main(int argc,char **argv) {
     }
     if (negative) word(image,0x1fe,0x4e71); /* NOP with no legal successor */
     GameConfig cfg={0};game_config_init_empty(&cfg);
-    cfg.function_aliases=true;cfg.async_resume_entries=true;cfg.trap0_inline_service_word=true;
+    cfg.function_aliases=!stack;cfg.async_resume_entries=true;cfg.trap0_inline_service_word=true;
     cfg.extra_funcs=entries;cfg.extra_func_count=nentries;
     ProtectedRange header={0,0x52};cfg.protected_ranges=&header;cfg.protected_range_count=1;
     FunctionList functions={0};function_finder_run_module(&rom,&functions,&cfg);
