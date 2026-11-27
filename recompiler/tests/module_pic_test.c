@@ -70,9 +70,19 @@ static void state(void) {
 }
 int main(int argc,char **argv) {
     expect_coarse=argc==3 && !strcmp(argv[2],"--expect-coarse");
-    uint8_t image[0x200];if (argc!=2 && !expect_coarse) return 1;
+    int expect_stack=argc==3 && !strcmp(argv[2],"--expect-stack");
+    uint8_t image[0x200];if (argc!=2 && !expect_coarse && !expect_stack) return 1;
     FILE *file=fopen(argv[1],"rb");if (!file) return 1;
     int read=fread(image,1,sizeof image,file)==sizeof image;fclose(file);if (!read) return 1;
+    if (expect_stack) {
+        for (unsigned i=0;i<2;i++) {
+            start(i?0x4000:0x2000,image);
+            CHECK(fixture_dispatch(active_base,0x120));
+            CHECK(g_cpu.D[6]==42 && g_cpu.D[7]==99);
+            CHECK(g_cpu.A[7]==0x7f00 && rte_pending==0);
+        }
+        return failures?1:0;
+    }
     CHECK(fixture_has_offset(0x52) && fixture_has_offset(0xb2) && fixture_has_offset(0x7e));
     CHECK(!fixture_has_offset(0x7c) && !fixture_has_offset(0x53));
     for (unsigned i=0;i<2;i++) {

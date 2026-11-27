@@ -109,6 +109,16 @@ if(BUILD_TESTING)
     target_include_directories(ModulePicDenseTest PRIVATE ../runner/include)
     add_test(NAME native_pic_dense_execution COMMAND ModulePicDenseTest
         "${PIC_DENSE_FIXTURE_DIR}/fixture.bin" --expect-coarse)
+    set(PIC_STACK_FIXTURE_DIR "${CMAKE_CURRENT_BINARY_DIR}/module-pic-stack-fixture")
+    add_custom_command(OUTPUT "${PIC_STACK_FIXTURE_DIR}/fixture_full.c" "${PIC_STACK_FIXTURE_DIR}/fixture_dispatch.c" "${PIC_STACK_FIXTURE_DIR}/fixture.bin"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${PIC_STACK_FIXTURE_DIR}"
+        COMMAND ModuleCodegenFixture "${PIC_STACK_FIXTURE_DIR}" --split-stack
+        DEPENDS ModuleCodegenFixture VERBATIM)
+    add_executable(ModulePicStackTest tests/module_pic_test.c
+        "${PIC_STACK_FIXTURE_DIR}/fixture_full.c" "${PIC_STACK_FIXTURE_DIR}/fixture_dispatch.c")
+    target_include_directories(ModulePicStackTest PRIVATE ../runner/include)
+    add_test(NAME native_pic_split_stack COMMAND ModulePicStackTest
+        "${PIC_STACK_FIXTURE_DIR}/fixture.bin" --expect-stack)
     add_executable(Os9ModuleTest tests/os9_module_test.c ../common/disc_parser.c)
     target_include_directories(Os9ModuleTest PRIVATE ../common)
     add_test(NAME os9_module_validation COMMAND Os9ModuleTest)
